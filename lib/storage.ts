@@ -145,6 +145,7 @@ export function clearZoteroConfig(): void {
   if (!isBrowser()) return
   localStorage.removeItem(ZOTERO_CONFIG_KEY)
 }
+<<<<<<< HEAD
 
 // 随记想法存储
 const THOUGHTS_KEY = 'paper_reader_thoughts'
@@ -183,3 +184,5 @@ export function saveThought(thought: Thought): void {
 export function deleteThought(id: string): void {
   saveThoughts(getThoughts().filter(t => t.id !== id))
 }
+=======
+>>>>>>> d9ef6daff704ee13c0d73f452e191a7c6a5d8166

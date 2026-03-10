@@ -1,0 +1,33 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "es6",
+    "moduleResolution": "node",
+    "noEmitHelpers": true,
+    "sourceMap": false,
+
+    // 性能优化
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": false,
+    "strict": false,
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo",
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": [
+    "src"
+  ],
+  "exclude": [
+    "node_modules",
+    "bin",
+    "release",
+    "build",
+    "temp",
+    "**/*.min.js"
+  ]
+}

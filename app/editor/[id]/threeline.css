@@ -1,0 +1,15 @@
+table{
+    border-collapse: collapse;
+    width: 100%;
+}
+/* 三线表布局 */
+/* table th, table td {
+    border: 1px solid var(--text-primary)!important; 
+} */
+table tbody tr:first-child {
+    border-top: 2px solid var(--text-primary)!important;
+    border-bottom: 2px solid var(--text-primary)!important;
+}
+table tbody tr:last-child {
+    border-bottom: 2px solid var(--text-primary)!important;
+}

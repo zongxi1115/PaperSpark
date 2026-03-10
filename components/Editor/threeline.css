@@ -1,0 +1,16 @@
+table{
+    border-collapse: collapse;
+    width: 100%;
+}
+/* 三线表布局 */
+table th, table td {
+    border: 1px solid var(--border-color);
+    padding: 12px 16px;
+    text-align: left;
+}
+table thead tr {
+    border-bottom: 2px solid var(--border-color);
+}
+table tbody tr:last-child {
+    border-bottom: 2px solid var(--border-color);
+}

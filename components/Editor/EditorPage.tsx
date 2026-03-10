@@ -1,15 +1,33 @@
 'use client'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useCreateBlockNote } from '@blocknote/react'
+import {
+  useCreateBlockNote,
+  FormattingToolbar,
+  FormattingToolbarController,
+  getFormattingToolbarItems,
+  SuggestionMenuController,
+  getDefaultReactSlashMenuItems,
+} from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
+import { filterSuggestionItems } from '@blocknote/core/extensions'
 import type { Block } from '@blocknote/core'
+import {
+  AIExtension,
+  AIMenu,
+  AIMenuController,
+  AIToolbarButton,
+  getAISlashMenuItems,
+  getDefaultAIMenuItems,
+} from '@blocknote/xl-ai'
+import { zh as aiZh } from '@blocknote/xl-ai/locales'
+import { DefaultChatTransport } from 'ai'
 import { Button, Divider, Tooltip, addToast } from '@heroui/react'
 import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
 import { getDocument, saveDocument, setLastDocId, getSettings } from '@/lib/storage'
 import type { AppDocument, AppSettings } from '@/lib/types'
-import { defaultSettings } from '@/lib/types'
+import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 
 interface EditorPageProps {
   docId: string
@@ -34,19 +52,31 @@ function getBlockPlainText(block: Block): string {
 export function EditorPageContent({ docId }: EditorPageProps) {
   const [doc, setDoc] = useState<AppDocument | null>(null)
   const [blocks, setBlocks] = useState<Block[]>([])
-  const [settings, setSettings] = useState<AppSettings>(defaultSettings)
+  // Load settings synchronously so AIExtension can be configured on first render
+  const [settings, setSettings] = useState<AppSettings>(() => getSettings())
   const [correcting, setCorrecting] = useState(false)
   const correctTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastCorrectedRef = useRef<string>('')
+  // Keep a stable ref to settings for the AI transport body
+  const settingsRef = useRef<AppSettings>(settings)
 
   const editor = useCreateBlockNote({
     dictionary: {
       ...zh,
+      ai: aiZh,
       placeholders: {
         ...zh.placeholders,
         emptyDocument: '开始写作，输入 / 快速选择语段类型…',
       },
     },
+    extensions: [
+      AIExtension({
+        transport: new DefaultChatTransport({
+          api: '/api/ai/chat',
+          body: () => ({ modelConfig: settingsRef.current.largeModel }),
+        }),
+      }),
+    ],
   })
 
   // Load document on mount
@@ -55,6 +85,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     const loaded = getDocument(docId)
     const loadedSettings = getSettings()
     setSettings(loadedSettings)
+    settingsRef.current = loadedSettings
 
     if (loaded) {
       setDoc(loaded)
@@ -261,7 +292,42 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               editor={editor}
               onChange={handleChange}
               theme="light"
-            />
+              formattingToolbar={false}
+              slashMenu={false}
+            >
+              {/* AI 命令菜单：选中文字弹出或输入 /ai 触发 */}
+              <AIMenuController aiMenu={() => (
+                <AIMenu
+                  items={(ed, status) => {
+                    if (status !== 'user-input') return getDefaultAIMenuItems(ed, status)
+                    return ed.getSelection()
+                      ? [...getDefaultAIMenuItems(ed, status), translateItem(ed), polishItem(ed)]
+                      : [...getDefaultAIMenuItems(ed, status), continueWritingItem(ed)]
+                  }}
+                />
+              )} />
+
+              {/* 带 AI 按钮的格式化工具栏 */}
+              <FormattingToolbarController
+                formattingToolbar={() => (
+                  <FormattingToolbar>
+                    {getFormattingToolbarItems()}
+                    <AIToolbarButton />
+                  </FormattingToolbar>
+                )}
+              />
+
+              {/* 带 AI 选项的斜杠菜单 */}
+              <SuggestionMenuController
+                triggerCharacter="/"
+                getItems={async (query) =>
+                  filterSuggestionItems(
+                    [...getDefaultReactSlashMenuItems(editor), ...getAISlashMenuItems(editor)],
+                    query
+                  )
+                }
+              />
+            </BlockNoteView>
           </div>
         </div>
       </div>

@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Providers } from '@/components/Providers'
 import { TopNav } from '@/components/Navigation/TopNav'
 import '@blocknote/mantine/style.css'
+import '@blocknote/xl-ai/style.css'
 import './globals.css'
 
 export const metadata: Metadata = {

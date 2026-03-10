@@ -2,12 +2,22 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Button, Divider } from '@heroui/react'
+function ThoughtIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2zm0 18a8 8 0 1 1 8-8 8 8 0 0 1-8 8z" />
+      <path d="M12 6a1 1 0 0 0-1 1v4.59l-2.71 2.7a1 1 0 0 0 1.42 1.42l3-3A1 1 0 0 0 13 12V7a1 1 0 0 0-1-1z" />
+      <circle cx="12" cy="17" r="1" />
+    </svg>
+  )
+}
 
 export function TopNav() {
   const pathname = usePathname()
 
   const isEditor = pathname.startsWith('/editor')
   const isDocuments = pathname === '/documents'
+  const isThoughts = pathname === '/thoughts'
   const isSettings = pathname === '/settings'
 
   return (
@@ -53,6 +63,17 @@ export function TopNav() {
             startContent={<DocIcon />}
           >
             文档列表
+          </Button>
+        </Link>
+
+        <Link href="/thoughts">
+          <Button
+            size="sm"
+            variant={isThoughts ? 'flat' : 'light'}
+            color={isThoughts ? 'secondary' : 'default'}
+            startContent={<ThoughtIcon />}
+          >
+            随记想法
           </Button>
         </Link>
 
@@ -103,3 +124,4 @@ function SettingsIcon() {
     </svg>
   )
 }
+

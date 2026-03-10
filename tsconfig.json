@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "module": "esnext",
-    "moduleResolution": "node",
+    "module": "node16",
+    "moduleResolution": "node16",
     "noEmitHelpers": true,
     "sourceMap": false,
     // 性能优化
@@ -16,7 +16,7 @@
     "baseUrl": "./",
     "paths": {
       "@/*": [
-        "*"
+        "./*"
       ]
     },
     "lib": [

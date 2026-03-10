@@ -52,3 +52,46 @@ function getDefaultSettings(): AppSettings {
 }
 
 export const defaultSettings: AppSettings = getDefaultSettings()
+
+// 知识库条目类型
+export type KnowledgeSourceType = 'zotero' | 'upload' | 'url'
+
+export interface KnowledgeItem {
+  id: string
+  title: string
+  authors: string[]
+  abstract?: string
+  year?: string
+  journal?: string
+  doi?: string
+  url?: string
+  tags?: string[]
+  sourceType: KnowledgeSourceType
+  sourceId?: string // Zotero item key or file path
+  fileName?: string // for uploaded files
+  fileType?: 'pdf' | 'docx' | 'doc'
+  fileSize?: number
+  cachedSummary?: string // AI 生成的摘要缓存
+  // Zotero 附件相关
+  hasAttachment?: boolean
+  attachmentUrl?: string
+  attachmentFileName?: string
+  // 引用格式
+  bib?: string
+  itemType?: string
+  createdAt: string
+  updatedAt: string
+}
+
+// Zotero 配置
+export interface ZoteroConfig {
+  userId: string
+  apiKey: string
+  lastSync?: string
+}
+
+// 知识库状态
+export interface KnowledgeState {
+  items: KnowledgeItem[]
+  zoteroConfig: ZoteroConfig | null
+}

@@ -20,6 +20,7 @@
     "@blocknote/core": "^0.47.1",
     "@blocknote/mantine": "^0.47.1",
     "@blocknote/react": "^0.47.1",
+    "@blocknote/xl-ai": "^0.47.1",
     "@heroui/react": "^2.8.10",
     "ai": "^4.3.16",
     "framer-motion": "^12.35.2",

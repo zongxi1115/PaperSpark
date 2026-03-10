@@ -1,6 +1,7 @@
 'use client'
 import { useState } from 'react'
-import { Button, Tooltip } from '@heroui/react'
+import { Tooltip } from '@heroui/react'
+import { KnowledgePanel } from '@/components/Knowledge/KnowledgePanel'
 
 type SidebarTab = 'search' | 'knowledge' | 'notes' | 'read'
 
@@ -35,68 +36,181 @@ const sidebarItems: SidebarItem[] = [
 
 export function RightSidebar() {
   const [activeTab, setActiveTab] = useState<SidebarTab | null>(null)
+  const [panelWidth, setPanelWidth] = useState(320)
+  const [isResizing, setIsResizing] = useState(false)
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsResizing(true)
+    
+    const startX = e.clientX
+    const startWidth = panelWidth
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const newWidth = startWidth - (e.clientX - startX)
+      if (newWidth >= 280 && newWidth <= 600) {
+        setPanelWidth(newWidth)
+      }
+    }
+
+    const handleMouseUp = () => {
+      setIsResizing(false)
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
 
   return (
-    <aside
-      style={{
-        width: 48,
-        flexShrink: 0,
-        background: 'var(--bg-secondary)',
-        borderLeft: '1px solid var(--border-color)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Icon buttons */}
-      <div style={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center',
-        padding: '12px 0',
-        gap: 4,
-      }}>
-        {sidebarItems.map(item => (
-          <Tooltip key={item.id} content={item.label} placement="left">
-            <Button
-              isIconOnly
-              size="sm"
-              variant={activeTab === item.id ? 'solid' : 'light'}
-              color={activeTab === item.id ? 'primary' : 'default'}
-              onPress={() => setActiveTab(activeTab === item.id ? null : item.id)}
+    <div style={{ display: 'flex', height: '100%' }}>
+      {/* 展开的面板 */}
+      {activeTab && (
+        <div 
+          style={{ 
+            width: panelWidth, 
+            background: 'var(--bg-primary)', 
+            borderLeft: '1px solid var(--border-color)',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
+          {/* 面板标题 */}
+          <div style={{ 
+            padding: '12px 16px', 
+            borderBottom: '1px solid var(--border-color)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}>
+            <span style={{ fontSize: 14, fontWeight: 600 }}>
+              {sidebarItems.find(i => i.id === activeTab)?.label}
+            </span>
+          </div>
+
+          {/* 面板内容 */}
+          <div style={{ flex: 1, overflow: 'hidden' }}>
+            {activeTab === 'knowledge' && <KnowledgePanel />}
+            {activeTab === 'search' && <PlaceholderPanel title="资料漫游检索" desc="功能开发中..." />}
+            {activeTab === 'notes' && <PlaceholderPanel title="随记想法" desc="功能开发中..." />}
+            {activeTab === 'read' && <PlaceholderPanel title="知识库精读" desc="功能开发中..." />}
+          </div>
+
+          {/* 可拖拽调整宽度 */}
+          <div
+            onMouseDown={handleMouseDown}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 4,
+              cursor: 'col-resize',
+              background: isResizing ? 'var(--accent-color)' : 'transparent',
+              transition: 'background 0.15s',
+            }}
+          />
+        </div>
+      )}
+
+      {/* 图标侧边栏 */}
+      <aside
+        style={{
+          width: 48,
+          flexShrink: 0,
+          background: 'var(--bg-secondary)',
+          borderLeft: '1px solid var(--border-color)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Icon buttons */}
+        <div style={{ 
+          display: 'flex', 
+          flexDirection: 'column', 
+          alignItems: 'center',
+          padding: '12px 0',
+          gap: 4,
+        }}>
+          {sidebarItems.map(item => (
+            <Tooltip key={item.id} content={item.label} placement="left">
+              <button
+                onClick={() => setActiveTab(activeTab === item.id ? null : item.id)}
+                style={{
+                  width: 36,
+                  height: 36,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  background: activeTab === item.id ? 'var(--accent-color)' : 'transparent',
+                  color: activeTab === item.id ? 'white' : 'var(--text-secondary)',
+                  border: 'none',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  transition: 'all 0.15s',
+                }}
+              >
+                {item.icon}
+              </button>
+            </Tooltip>
+          ))}
+        </div>
+
+        {/* Spacer */}
+        <div style={{ flex: 1 }} />
+
+        {/* Bottom section */}
+        <div style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          padding: '12px 0',
+          gap: 4,
+          borderTop: '1px solid var(--border-color)',
+        }}>
+          <Tooltip content="帮助" placement="left">
+            <button
               style={{
+                width: 36,
+                height: 36,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'transparent',
+                color: 'var(--text-muted)',
+                border: 'none',
                 borderRadius: 8,
+                cursor: 'pointer',
+                transition: 'all 0.15s',
               }}
             >
-              {item.icon}
-            </Button>
+              <HelpIcon />
+            </button>
           </Tooltip>
-        ))}
-      </div>
+        </div>
+      </aside>
+    </div>
+  )
+}
 
-      {/* Spacer */}
-      <div style={{ flex: 1 }} />
-
-      {/* Bottom section - can add more items later */}
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        padding: '12px 0',
-        gap: 4,
-        borderTop: '1px solid var(--border-color)',
-      }}>
-        <Tooltip content="帮助" placement="left">
-          <Button
-            isIconOnly
-            size="sm"
-            variant="light"
-          >
-            <HelpIcon />
-          </Button>
-        </Tooltip>
-      </div>
-    </aside>
+function PlaceholderPanel({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div style={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      alignItems: 'center', 
+      justifyContent: 'center',
+      height: '100%',
+      color: 'var(--text-muted)',
+      padding: 20,
+      textAlign: 'center',
+    }}>
+      <p style={{ fontSize: 14, fontWeight: 500, marginBottom: 8 }}>{title}</p>
+      <p style={{ fontSize: 12 }}>{desc}</p>
+    </div>
   )
 }
 

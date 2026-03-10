@@ -1,11 +1,10 @@
 {
   "compilerOptions": {
     "target": "ESNext",
-    "module": "node16",
-    "moduleResolution": "node16",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
     "noEmitHelpers": true,
     "sourceMap": false,
-    // 性能优化
     "skipLibCheck": true,
     "allowJs": true,
     "checkJs": false,
@@ -37,6 +36,9 @@
   },
   "include": [
     "src",
+    "app",
+    "lib",
+    "components",
     ".next/types/**/*.ts"
   ],
   "exclude": [

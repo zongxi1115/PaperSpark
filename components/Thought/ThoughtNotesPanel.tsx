@@ -5,7 +5,7 @@ import { useCreateBlockNote } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import type { Block } from '@blocknote/core'
-import { getThoughts, saveThought, deleteThought, generateId, getSettings } from '@/lib/storage'
+import { getThoughts, saveThought, deleteThought, generateId, getSettings, getSelectedSmallModel } from '@/lib/storage'
 import type { Thought, ModelConfig } from '@/lib/types'
 import type { ThoughtAIAction } from '@/lib/ai'
 
@@ -26,7 +26,7 @@ export function ThoughtNotesPanel() {
   useEffect(() => {
     setThoughts(getThoughts())
     const settings = getSettings()
-    setModelConfig(settings.smallModel)
+    setModelConfig(getSelectedSmallModel(settings))
   }, [])
 
   // 新增

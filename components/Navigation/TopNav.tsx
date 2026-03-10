@@ -49,7 +49,7 @@ export function TopNav() {
           <line x1="16" y1="13" x2="8" y2="13" />
           <line x1="16" y1="17" x2="8" y2="17" />
         </svg>
-        <span style={{ fontWeight: 600, fontSize: 15 }}>论文写作助手</span>
+        <span style={{ fontWeight: 600, fontSize: 15 }}>PaperSpark</span>
       </div>
 
       <Divider orientation="vertical" style={{ height: 20 }} />

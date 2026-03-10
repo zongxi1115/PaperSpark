@@ -10,8 +10,7 @@ interface ThoughtCardProps {
 }
 
 export function ThoughtCard({ thought, onClick, onDelete }: ThoughtCardProps) {
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation()
+  const handleDelete = () => {
     onDelete()
   }
 
@@ -45,12 +44,6 @@ export function ThoughtCard({ thought, onClick, onDelete }: ThoughtCardProps) {
         transition: 'all 0.2s ease',
         cursor: 'pointer',
       }}
-      styles={{
-        hover: {
-          transform: 'translateY(-2px)',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.12)',
-        },
-      }}
     >
       <CardBody style={{ padding: 16 }}>
         {/* 标题 */}
@@ -80,6 +73,7 @@ export function ThoughtCard({ thought, onClick, onDelete }: ThoughtCardProps) {
               variant="light"
               color="danger"
               onPress={handleDelete}
+              onClick={e => e.stopPropagation()}
               style={{ minWidth: 28, height: 28 }}
             >
               <DeleteIcon />

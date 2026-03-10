@@ -23,6 +23,8 @@ import {
   saveZoteroConfig,
   generateId,
   getSettings,
+  getSelectedSmallModel,
+  getSelectedLargeModel,
 } from '@/lib/storage'
 import type { KnowledgeItem, ZoteroConfig } from '@/lib/types'
 
@@ -130,6 +132,7 @@ export function KnowledgePanel() {
       
       const data = await res.json()
       const settings = getSettings()
+      const largeModelConfig = getSelectedLargeModel(settings)
       
       // 提取元数据
       const metaRes = await fetch('/api/knowledge/summary', {
@@ -139,7 +142,7 @@ export function KnowledgePanel() {
           content: data.content,
           fileName: data.fileName,
           fileType: data.fileType,
-          modelConfig: settings.largeModel,
+          modelConfig: largeModelConfig,
           itemType: 'metadata',
         }),
       })
@@ -197,6 +200,7 @@ export function KnowledgePanel() {
       
       const data = await res.json()
       const settings = getSettings()
+      const largeModelConfig = getSelectedLargeModel(settings)
       
       const metaRes = await fetch('/api/knowledge/summary', {
         method: 'POST',
@@ -205,7 +209,7 @@ export function KnowledgePanel() {
           content: data.content,
           fileName: data.fileName,
           fileType: data.fileType,
-          modelConfig: settings.largeModel,
+          modelConfig: largeModelConfig,
           itemType: 'metadata',
         }),
       })
@@ -270,12 +274,13 @@ export function KnowledgePanel() {
     setTranslating(true)
     try {
       const settings = getSettings()
+      const smallModelConfig = getSelectedSmallModel(settings)
       const res = await fetch('/api/ai/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: selectedItem.abstract,
-          modelConfig: settings.smallModel,
+          modelConfig: smallModelConfig,
           sourceLang: '英文',
           targetLang: '中文',
           style: '学术',

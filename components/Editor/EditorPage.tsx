@@ -25,7 +25,7 @@ import { DefaultChatTransport } from 'ai'
 import { Button, Divider, Tooltip, addToast } from '@heroui/react'
 import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
-import { getDocument, saveDocument, setLastDocId, getSettings } from '@/lib/storage'
+import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel } from '@/lib/storage'
 import type { AppDocument, AppSettings } from '@/lib/types'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 
@@ -73,7 +73,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       AIExtension({
         transport: new DefaultChatTransport({
           api: '/api/ai/chat',
-          body: () => ({ modelConfig: settingsRef.current.largeModel }),
+          body: () => ({ modelConfig: getSelectedLargeModel(settingsRef.current) }),
         }),
       }),
     ],
@@ -114,7 +114,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     saveDocument(updated)
 
     // Auto-correct: debounce 2.5s, only if enabled and API key set
-    if (settings.autoCorrect && settings.smallModel.apiKey) {
+    const smallModelConfig = getSelectedSmallModel(settings)
+    if (settings.autoCorrect && smallModelConfig.apiKey) {
       if (correctTimeoutRef.current) clearTimeout(correctTimeoutRef.current)
 
       correctTimeoutRef.current = setTimeout(async () => {
@@ -135,7 +136,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           const res = await fetch('/api/ai/correct', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text, modelConfig: settings.smallModel }),
+            body: JSON.stringify({ text, modelConfig: smallModelConfig }),
           })
           if (res.ok) {
             const { corrected } = await res.json() as { corrected: string }
@@ -166,7 +167,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   }, [doc, editor])
 
   const handleManualCorrect = useCallback(async () => {
-    if (!settings.smallModel.apiKey) {
+    const smallModelConfig = getSelectedSmallModel(settings)
+    if (!smallModelConfig.apiKey) {
       addToast({ title: '请先在设置页配置小参数模型的 API Key', color: 'warning' })
       return
     }
@@ -186,7 +188,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       const res = await fetch('/api/ai/correct', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: allText, modelConfig: settings.smallModel }),
+        body: JSON.stringify({ text: allText, modelConfig: smallModelConfig }),
       })
       if (res.ok) {
         const { corrected, error } = await res.json() as { corrected?: string; error?: string }

@@ -23,8 +23,6 @@ export function AgentSettingsPanel() {
       title: '',
       prompt: '',
       isPreset: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
     }
     setEditingAgent(newAgent)
     setEditingTitle('')
@@ -64,7 +62,6 @@ export function AgentSettingsPanel() {
       ...editingAgent,
       title: editingTitle.trim(),
       prompt: editingPrompt,
-      updatedAt: new Date().toISOString(),
     }
     saveAgent(updated)
     setAgents(getAgents())

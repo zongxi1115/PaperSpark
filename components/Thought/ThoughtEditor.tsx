@@ -5,7 +5,7 @@ import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import type { Block } from '@blocknote/core'
 import { Button, Divider, Textarea, Tooltip, addToast, Spinner } from '@heroui/react'
-import { saveThought, getSettings } from '@/lib/storage'
+import { saveThought, getSettings, getSelectedSmallModel } from '@/lib/storage'
 import type { Thought, ModelConfig } from '@/lib/types'
 import type { ThoughtAIAction } from '@/lib/ai'
 
@@ -66,7 +66,7 @@ export function ThoughtEditor({
   // 初始化
   useEffect(() => {
     const settings = getSettings()
-    setModelConfig(settings.smallModel)
+    setModelConfig(getSelectedSmallModel(settings))
 
     if (thought.content && (thought.content as Block[]).length > 0) {
       editor.replaceBlocks(editor.document, thought.content as Block[])

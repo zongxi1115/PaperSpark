@@ -6,7 +6,7 @@ import '@blocknote/xl-ai/style.css'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: '论文写作助手',
+  title: 'PaperSpark',
   description: '专注的学术论文写作工具',
 }
 

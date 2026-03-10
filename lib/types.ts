@@ -106,3 +106,14 @@ export interface Thought {
   updatedAt: string
   aiProcessedAt?: string // AI 处理时间
 }
+
+// 智能体类型
+export interface Agent {
+  id: string
+  title: string // 智能体名称
+  prompt: string // 系统 prompt
+  isPreset: boolean // 是否为预设
+  isDefault?: boolean // 是否为默认选中
+  createdAt: string
+  updatedAt: string
+}

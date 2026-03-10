@@ -1,6 +1,7 @@
 {
   "name": "paper_reader",
   "private": true,
+  "type":"module",
   "version": "0.0.0",
   "scripts": {
     "dev": "next dev",

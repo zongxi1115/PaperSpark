@@ -20,33 +20,33 @@ interface ThoughtEditorProps {
 
 // AI 操作类型定义
 const AI_ACTIONS: { key: ThoughtAIAction; label: string; icon: React.ReactNode; desc: string }[] = [
-  { 
-    key: 'organize', 
-    label: 'AI 整理', 
-    icon: <OrganizeIcon />, 
-    desc: '整理成有条理的表达' 
+  {
+    key: 'organize',
+    label: 'AI 整理',
+    icon: <OrganizeIcon />,
+    desc: '整理成有条理的表达'
   },
-  { 
-    key: 'refine', 
-    label: 'AI 提炼', 
-    icon: <RefineIcon />, 
-    desc: '提炼核心观点' 
+  {
+    key: 'refine',
+    label: 'AI 提炼',
+    icon: <RefineIcon />,
+    desc: '提炼核心观点'
   },
-  { 
-    key: 'expand', 
-    label: '思维扩展', 
-    icon: <ExpandIcon />, 
-    desc: '扩展思维方向' 
+  {
+    key: 'expand',
+    label: '思维扩展',
+    icon: <ExpandIcon />,
+    desc: '扩展思维方向'
   },
 ]
 
-export function ThoughtEditor({ 
-  thought, 
-  title, 
-  summary, 
-  onTitleChange, 
-  onSummaryChange, 
-  onSave 
+export function ThoughtEditor({
+  thought,
+  title,
+  summary,
+  onTitleChange,
+  onSummaryChange,
+  onSave
 }: ThoughtEditorProps) {
   const [blocks, setBlocks] = useState<Block[]>([])
   const [loading, setLoading] = useState<ThoughtAIAction | null>(null)
@@ -72,7 +72,7 @@ export function ThoughtEditor({
       editor.replaceBlocks(editor.document, thought.content as Block[])
       setBlocks(editor.document as Block[])
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [thought.id])
 
   // 获取纯文本内容
@@ -124,20 +124,20 @@ export function ThoughtEditor({
       const res = await fetch('/api/ai/thought', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          content: text, 
-          action: 'summarize', 
-          modelConfig 
+        body: JSON.stringify({
+          content: text,
+          action: 'summarize',
+          modelConfig
         }),
       })
-      
+
       if (res.ok) {
-        const { title: newTitle, summary: newSummary, error } = await res.json() as { 
+        const { title: newTitle, summary: newSummary, error } = await res.json() as {
           title?: string
           summary?: string
-          error?: string 
+          error?: string
         }
-        
+
         if (error) {
           addToast({ title: error, color: 'danger' })
         } else {
@@ -173,10 +173,10 @@ export function ThoughtEditor({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: text, action, modelConfig }),
       })
-      
+
       if (res.ok) {
         const { result, error } = await res.json() as { result?: string; error?: string }
-        
+
         if (error) {
           addToast({ title: error, color: 'danger' })
         } else if (result) {
@@ -202,10 +202,10 @@ export function ThoughtEditor({
   return (
     <div>
       {/* AI 工具栏 */}
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: 8, 
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
         marginBottom: 16,
         padding: '8px 12px',
         background: 'var(--bg-secondary)',
@@ -245,11 +245,11 @@ export function ThoughtEditor({
 
       {/* 概述编辑区 */}
       <div style={{ marginBottom: 16 }}>
-        <label style={{ 
-          display: 'block', 
-          fontSize: 12, 
-          color: 'var(--text-muted)', 
-          marginBottom: 4 
+        <label style={{
+          display: 'block',
+          fontSize: 12,
+          color: 'var(--text-muted)',
+          marginBottom: 4
         }}>
           概述（可手动编辑）
         </label>
@@ -264,14 +264,15 @@ export function ThoughtEditor({
       </div>
 
       {/* BlockNote 编辑器 */}
-      <div style={{ 
-        border: '1px solid var(--border-color)', 
-        borderRadius: 8, 
+      <div style={{
+        border: '1px solid var(--border-color)',
+        borderRadius: 8,
         padding: 16,
         minHeight: 300,
         background: 'var(--bg-primary)',
-      }}>
+      }} >
         <BlockNoteView
+          className='px-4 py-4'
           editor={editor}
           onChange={handleChange}
           theme="light"

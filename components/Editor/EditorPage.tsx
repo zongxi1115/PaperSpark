@@ -191,13 +191,21 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100%', overflow: 'hidden' }}>
-      {/* Left TOC Sidebar */}
+    <div style={{ 
+      position: 'fixed', 
+      top: 52, 
+      left: 0, 
+      right: 0, 
+      bottom: 0, 
+      display: 'flex', 
+      overflow: 'hidden' 
+    }}>
+      {/* Left TOC Sidebar - Fixed */}
       <TocSidebar blocks={blocks} docTitle={doc.title} />
 
-      {/* Main editor area */}
+      {/* Main editor area - only this part scrolls */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        {/* Toolbar */}
+        {/* Toolbar - Fixed */}
         <div style={{
           padding: '8px 20px',
           background: 'var(--bg-primary)',
@@ -246,7 +254,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           </span>
         </div>
 
-        {/* Editor */}
+        {/* Editor - Only scrollable area */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '40px 60px', background: 'var(--bg-primary)' }}>
           <div style={{ maxWidth: 800, margin: '0 auto' }}>
             <BlockNoteView
@@ -258,7 +266,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
         </div>
       </div>
 
-      {/* Right Icon Sidebar */}
+      {/* Right Icon Sidebar - Fixed */}
       <RightSidebar />
     </div>
   )

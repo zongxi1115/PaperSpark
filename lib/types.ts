@@ -20,7 +20,7 @@ export interface ModelConfig {
  * autoComplete: 自动补全小片段，输入时自动补全当前段落的小片段内容，提升输入效率
  * threeLineTable: 三线表，用于创建符合学术规范的三线表
  */
-export const selectFeatures = ['autoCorrect', 'autoComplete','threeLineTable'] as const
+export const selectFeatures = ['autoCorrect', 'autoComplete', 'threeLineTable'] as const
 export type FeatureSelectItem = {
   label: string
   description: string
@@ -35,19 +35,19 @@ export type AppSettings = {
 }
 
 function getDefaultSettings(): AppSettings {
+
   return {
     smallModel: {
-      baseUrl: 'https://api.siliconflow.cn/v1',
-      apiKey: 'sk-qajdiybfsoesvysjvvyqpuhdniivaoyhlxqrdwiigtysjqoi',
-      modelName: 'deepseek-ai/DeepSeek-R1-0528-Qwen3-8B',
+      baseUrl: process.env.NEXT_PUBLIC_SMALL_MODEL_BASE_URL || 'https://openrouter.ai/api/v1',
+      apiKey: process.env.NEXT_PUBLIC_SMALL_MODEL_API_KEY || '',
+      modelName: process.env.NEXT_PUBLIC_SMALL_MODEL_NAME || 'stepfun/step-3.5-flash:free',
     },
     largeModel: {
-      baseUrl: 'https://api.openai.com/v1',
-      apiKey: '',
-      modelName: 'gpt-4o',
+      baseUrl: process.env.NEXT_PUBLIC_LARGE_MODEL_BASE_URL || 'https://api.openai.com/v1',
+      apiKey: process.env.NEXT_PUBLIC_LARGE_MODEL_API_KEY || '',
+      modelName: process.env.NEXT_PUBLIC_LARGE_MODEL_NAME || 'gpt-4o',
     },
-    autoCorrect: true,
-    autoComplete: false,
+    ...selectFeatures.reduce((acc, key) => ({ ...acc, [key]: false }), {} as Record<typeof selectFeatures[number], boolean>),
   }
 }
 

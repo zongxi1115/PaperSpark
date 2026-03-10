@@ -12,10 +12,14 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
-      <body style={{ margin: 0, height: '100vh', display: 'flex', flexDirection: 'column' }}>
+      <body style={{ margin: 0, height: '100vh', overflow: 'hidden' }}>
         <Providers>
-          <TopNav />
-          <div style={{ flex: 1, overflow: 'hidden' }}>
+          {/* Fixed TopNav */}
+          <div style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50 }}>
+            <TopNav />
+          </div>
+          {/* Content area with top padding for fixed nav */}
+          <div style={{ height: '100vh', paddingTop: 52, overflowY: 'auto' }}>
             {children}
           </div>
         </Providers>

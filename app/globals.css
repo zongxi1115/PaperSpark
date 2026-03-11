@@ -56,3 +56,12 @@ body {
 /* BlockNote overrides */
 .bn-editor { padding: 0 !important; }
 .bn-container { min-height: 300px; }
+
+/* Mathlive 字体配置 - 使用本地字体 */
+:root {
+  --mathfield-fonts-directory: /fonts/;
+}
+
+math-field {
+  font-size: 18px;
+}

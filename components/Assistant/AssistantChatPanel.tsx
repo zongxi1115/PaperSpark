@@ -30,7 +30,6 @@ export function AssistantChatPanel() {
   const [showAgentPicker, setShowAgentPicker] = useState(false)
   const [agentFilter, setAgentFilter] = useState('')
   const [showHistory, setShowHistory] = useState(false)
-  const [agentPickerPosition, setAgentPickerPosition] = useState({ top: 0, left: 0, width: 280 })
   const [notes, setNotes] = useState<AssistantNote[]>([])
   const [noteContent, setNoteContent] = useState('')
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
@@ -58,37 +57,27 @@ export function AssistantChatPanel() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [currentConversation?.messages])
 
-  // 计算选择器位置
-  const calculatePickerPosition = useCallback(() => {
-    const container = inputContainerRef.current
-    if (container) {
-      const rect = container.getBoundingClientRect()
-      return {
-        top: rect.top - 8,
-        left: rect.left,
-        width: rect.width,
-      }
-    }
-    return { top: 0, left: 0, width: 280 }
-  }, [])
-
   // 处理输入变化
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value
-    // 检测是否刚输入了 "/"
-    if (value === '/' && !showAgentPicker && !selectedAgent) {
-      const pos = calculatePickerPosition()
-      setAgentPickerPosition(pos)
+    const nextValue = e.target.value
+    if (nextValue === '/' && !showAgentPicker && inputValue.length === 0) {
       setShowAgentPicker(true)
       setAgentFilter('')
-      setInputValue('') // 清空输入，不保留 "/"
-    } else {
-      setInputValue(value)
+      setInputValue('')
+      return
     }
+    setInputValue(nextValue)
   }
 
   // 处理输入框按键
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === '/' && !showAgentPicker && inputValue.length === 0) {
+      e.preventDefault()
+      setShowAgentPicker(true)
+      setAgentFilter('')
+      return
+    }
+
     if (e.key === 'Escape' && showAgentPicker) {
       setShowAgentPicker(false)
     } else if (e.key === 'Enter' && !e.shiftKey && !showAgentPicker) {
@@ -102,12 +91,33 @@ export function AssistantChatPanel() {
     setSelectedAgent(agent)
     setShowAgentPicker(false)
     setAgentFilter('')
+
+    if (currentConversation) {
+      const updated: AssistantConversation = {
+        ...currentConversation,
+        agentId: agent.id,
+        updatedAt: new Date().toISOString(),
+      }
+      setCurrentConversation(updated)
+      saveConversation(updated)
+      setConversations(getConversations())
+    }
     inputRef.current?.focus()
   }
 
   // 移除智能体
   const handleRemoveAgent = () => {
     setSelectedAgent(null)
+    if (currentConversation) {
+      const updated: AssistantConversation = {
+        ...currentConversation,
+        agentId: undefined,
+        updatedAt: new Date().toISOString(),
+      }
+      setCurrentConversation(updated)
+      saveConversation(updated)
+      setConversations(getConversations())
+    }
     inputRef.current?.focus()
   }
 
@@ -727,105 +737,112 @@ export function AssistantChatPanel() {
             position: 'relative',
           }}
         >
-          {/* 智能体选择器弹窗 */}
-          {showAgentPicker && (
-            <div style={{
-              position: 'fixed',
-              top: agentPickerPosition.top - 210,
-              left: agentPickerPosition.left,
-              width: Math.min(agentPickerPosition.width, 320),
-              background: 'var(--bg-primary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 8,
-              boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-              zIndex: 1000,
-              maxHeight: 200,
-              overflow: 'hidden',
-              display: 'flex',
-              flexDirection: 'column',
-            }}>
-              <div style={{
-                padding: '8px 10px',
-                borderBottom: '1px solid var(--border-color)',
-              }}>
-                <input
-                  type="text"
-                  value={agentFilter}
-                  onChange={(e) => setAgentFilter(e.target.value)}
-                  placeholder="搜索智能体..."
-                  autoFocus
-                  style={{
-                    width: '100%',
-                    background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border-color)',
-                    borderRadius: 6,
-                    padding: '6px 10px',
-                    fontSize: 12,
-                    color: 'var(--text-primary)',
-                    outline: 'none',
-                  }}
-                />
-              </div>
-              <div style={{
-                overflowY: 'auto',
-                maxHeight: 150,
-              }}>
-                {filteredAgents.map(agent => (
-                  <div
-                    key={agent.id}
-                    onClick={() => handleSelectAgent(agent)}
-                    style={{
-                      padding: '8px 12px',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      transition: 'background 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'var(--bg-secondary)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent'
-                    }}
-                  >
-                    <span style={{ 
-                      fontSize: 12,
-                      fontWeight: 500,
-                    }}>
-                      {agent.title}
-                    </span>
-                    {agent.isPreset && (
-                      <span style={{
-                        fontSize: 9,
-                        padding: '1px 4px',
-                        background: 'var(--text-muted)',
-                        color: 'white',
-                        borderRadius: 3,
-                      }}>
-                        预设
-                      </span>
-                    )}
-                  </div>
-                ))}
-                {filteredAgents.length === 0 && (
-                  <div style={{ 
-                    padding: 16, 
-                    textAlign: 'center', 
-                    color: 'var(--text-muted)',
-                    fontSize: 12,
-                  }}>
-                    未找到匹配的智能体
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* 输入框容器 */}
           <div style={{
             position: 'relative',
           }}>
+            {/* 智能体选择器弹窗 */}
+            {showAgentPicker && (
+              <div style={{
+                position: 'absolute',
+                left: 0,
+                right: 0,
+                bottom: 'calc(100% + 8px)',
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 8,
+                boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
+                zIndex: 1000,
+                maxHeight: 220,
+                overflow: 'hidden',
+                display: 'flex',
+                flexDirection: 'column',
+              }}>
+                <div style={{
+                  padding: '8px 10px',
+                  borderBottom: '1px solid var(--border-color)',
+                }}>
+                  <input
+                    type="text"
+                    value={agentFilter}
+                    onChange={(e) => setAgentFilter(e.target.value)}
+                    placeholder="搜索智能体..."
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.preventDefault()
+                        setShowAgentPicker(false)
+                        inputRef.current?.focus()
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      background: 'var(--bg-secondary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 6,
+                      padding: '6px 10px',
+                      fontSize: 12,
+                      color: 'var(--text-primary)',
+                      outline: 'none',
+                    }}
+                  />
+                </div>
+                <div style={{
+                  overflowY: 'auto',
+                  maxHeight: 170,
+                }}>
+                  {filteredAgents.map(agent => (
+                    <div
+                      key={agent.id}
+                      onClick={() => handleSelectAgent(agent)}
+                      style={{
+                        padding: '8px 12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'var(--bg-secondary)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'transparent'
+                      }}
+                    >
+                      <span style={{ 
+                        fontSize: 12,
+                        fontWeight: 500,
+                      }}>
+                        {agent.title}
+                      </span>
+                      {agent.isPreset && (
+                        <span style={{
+                          fontSize: 9,
+                          padding: '1px 4px',
+                          background: 'var(--text-muted)',
+                          color: 'white',
+                          borderRadius: 3,
+                        }}>
+                          预设
+                        </span>
+                      )}
+                    </div>
+                  ))}
+                  {filteredAgents.length === 0 && (
+                    <div style={{ 
+                      padding: 16, 
+                      textAlign: 'center', 
+                      color: 'var(--text-muted)',
+                      fontSize: 12,
+                    }}>
+                      未找到匹配的智能体
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div style={{
               background: 'var(--bg-secondary)',
               border: '1px solid var(--border-color)',

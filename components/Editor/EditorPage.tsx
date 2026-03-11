@@ -11,6 +11,7 @@ import {
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import { filterSuggestionItems } from '@blocknote/core/extensions'
+import { BlockNoteSchema, defaultInlineContentSpecs } from '@blocknote/core'
 import type { Block } from '@blocknote/core'
 import {
   AIExtension,
@@ -28,6 +29,15 @@ import { RightSidebar } from '@/components/Sidebar/RightSidebar'
 import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel } from '@/lib/storage'
 import type { AppDocument, AppSettings } from '@/lib/types'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
+import { FormulaInlineContentSpec } from './InlineFormula'
+
+// 自定义行内公式 Schema
+const schema = BlockNoteSchema.create({
+  inlineContentSpecs: {
+    ...defaultInlineContentSpecs,
+    formula: FormulaInlineContentSpec,
+  },
+})
 
 interface EditorPageProps {
   docId: string
@@ -147,6 +157,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const ghostTextRef = useRef<string | null>(null) // 用于 Tab 键处理
 
   const editor = useCreateBlockNote({
+    schema,
     dictionary: {
       ...zh,
       ai: aiZh,
@@ -516,7 +527,24 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                 triggerCharacter="/"
                 getItems={async (query) =>
                   filterSuggestionItems(
-                    [...getDefaultReactSlashMenuItems(editor), ...getAISlashMenuItems(editor)],
+                    [
+                      ...getDefaultReactSlashMenuItems(editor),
+                      ...getAISlashMenuItems(editor),
+                      {
+                        title: '行内公式',
+                        groupName: '其他',
+                        icon: <FormulaIcon />,
+                        keywords: ['formula', 'math', '公式', '数学'],
+                        onItemClick: () => {
+                          editor.insertInlineContent([
+                            {
+                              type: 'formula',
+                              props: { latex: '' },
+                            },
+                          ])
+                        },
+                      },
+                    ],
                     query
                   )
                 }
@@ -547,6 +575,17 @@ function SpellIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+    </svg>
+  )
+}
+
+function FormulaIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M4 4h6v6H4z" />
+      <path d="M14 4h6v6h-6z" />
+      <path d="M4 14h6v6H4z" />
+      <circle cx="17" cy="17" r="3" />
     </svg>
   )
 }

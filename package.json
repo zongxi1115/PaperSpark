@@ -26,6 +26,7 @@
     "@iconify/react": "^6.0.2",
     "ai": "^6.0.116",
     "framer-motion": "^12.35.2",
+    "mathlive": "^0.108.3",
     "next": "^15.3.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

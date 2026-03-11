@@ -41,19 +41,6 @@ const schema = BlockNoteSchema.create({
   },
 })
 
-// 引用数据类型
-interface CitationData {
-  citationId: string
-  index: number
-  title: string
-  authors: string[]
-  year: string
-  journal: string
-  doi: string
-  url: string
-  bib: string
-}
-
 interface EditorPageProps {
   docId: string
 }
@@ -173,6 +160,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const ghostTextRef = useRef<string | null>(null) // 用于 Tab 键处理
   const citationsRef = useRef<Map<string, CitationData>>(new Map()) // 用于事件处理中获取最新引用
 
+  const MAX_PASTE_UPLOAD_BYTES = 50 * 1024 * 1024
+
   const editor = useCreateBlockNote({
     schema,
     dictionary: {
@@ -191,6 +180,26 @@ export function EditorPageContent({ docId }: EditorPageProps) {
         }),
       }),
     ],
+    uploadFile: async (file) => {
+      try {
+        if (file.size > MAX_PASTE_UPLOAD_BYTES) {
+          addToast({ title: `文件过大（>${Math.round(MAX_PASTE_UPLOAD_BYTES / 1024 / 1024)}MB），无法粘贴上传`, color: 'danger' })
+          throw new Error('file too large')
+        }
+
+        const { storeFile } = await import('@/lib/localFiles')
+        const stored = await storeFile(file)
+        return stored.url
+      } catch (e) {
+        console.error('uploadFile failed:', e)
+        addToast({ title: '文件粘贴上传失败', color: 'danger' })
+        throw e
+      }
+    },
+    resolveFileUrl: async (url) => {
+      const { resolveLocalFileUrl } = await import('@/lib/localFiles')
+      return await resolveLocalFileUrl(url)
+    },
   })
 
   // 同步 ghostTextRef

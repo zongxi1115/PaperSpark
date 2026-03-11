@@ -4,8 +4,9 @@ import { Tooltip } from '@heroui/react'
 import { KnowledgePanel } from '@/components/Knowledge/KnowledgePanel'
 import { ThoughtNotesPanel } from '@/components/Thought/ThoughtNotesPanel'
 import { AgentSettingsPanel } from '@/components/Agent/AgentSettingsPanel'
+import { AssistantChatPanel } from '@/components/Assistant/AssistantChatPanel'
 
-type SidebarTab = 'search' | 'knowledge' | 'notes' | 'agents' | 'read'
+type SidebarTab = 'assistant' | 'search' | 'knowledge' | 'notes' | 'agents' | 'read'
 
 interface SidebarItem {
   id: SidebarTab
@@ -14,6 +15,11 @@ interface SidebarItem {
 }
 
 const sidebarItems: SidebarItem[] = [
+  {
+    id: 'assistant',
+    label: '助手交流',
+    icon: <AssistantIcon />,
+  },
   {
     id: 'search',
     label: '资料漫游检索',
@@ -106,6 +112,7 @@ export function RightSidebar() {
 
           {/* 面板内容 */}
           <div style={{ flex: 1, overflow: 'hidden' }}>
+            {activeTab === 'assistant' && <AssistantChatPanel />}
             {activeTab === 'knowledge' && <KnowledgePanel />}
             {activeTab === 'search' && <PlaceholderPanel title="资料漫游检索" desc="功能开发中..." />}
             {activeTab === 'notes' && <ThoughtNotesPanel />}
@@ -285,6 +292,16 @@ function AgentIcon() {
       <path d="M8 8h.01" />
       <path d="M12 12h.01" />
       <rect x="6" y="8" width="12" height="12" rx="2" />
+    </svg>
+  )
+}
+
+function AssistantIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+      <line x1="8" y1="9" x2="16" y2="9" />
+      <line x1="8" y1="13" x2="14" y2="13" />
     </svg>
   )
 }

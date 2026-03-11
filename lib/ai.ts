@@ -322,3 +322,47 @@ export async function expandThought(
     error: result.error,
   }
 }
+
+/**
+ * 小片段补全
+ * @param context 上下文文本，最多 1500 字
+ * @param caretPosition 光标位置，用 | 符号标记
+ * @param modelConfig 模型配置
+ */
+export async function autoCompleteFragment(
+  context: string,
+  modelConfig: ModelConfig
+): Promise<{ success: boolean; completion?: string; error?: string }> {
+  if (!context || context.trim().length < 10) {
+    return { success: false, error: '上下文内容太短' }
+  }
+
+  if (!context.includes('|')) {
+    return { success: false, error: '上下文中缺少光标位置标记 |' }
+  }
+
+  const systemPrompt = `你是一个智能写作助手，专门帮助用户补全短句或续写内容。
+
+用户会提供一段文本，其中包含一个特殊符号 |，这表示当前光标（插入点）的位置。
+
+你的任务：
+1. 分析 | 位置的上下文（前后文）
+2. 在 | 位置补全内容，使其与前文自然衔接
+3. 补全内容可以是：
+   - 补全一个未完成的短句（如果 | 在句子中间）
+   - 续写 1-2 句话（如果 | 在段落末尾）
+
+补全规则：
+- 补全内容要与上下文风格、语气保持一致
+- 内容要简洁、自然，不要啰嗦
+- 如果是学术写作，保持专业性
+- 如果是普通文本，保持流畅性
+- 只返回补全的内容，不要包含 | 符号，也不要重复上下文`
+
+  const result = await generateAIText(context, systemPrompt, modelConfig)
+  return {
+    success: result.success,
+    completion: result.text,
+    error: result.error,
+  }
+}

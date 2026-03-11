@@ -33,6 +33,9 @@ interface EditorPageProps {
   docId: string
 }
 
+const CONTEXT_WINDOW = 1500 // 上下文窗口大小
+const AUTO_COMPLETE_DELAY = 5000 // 5秒无输入后触发补全
+
 function extractTitle(content: Block[]): string {
   if (content.length > 0) {
     const first = content[0] as { type: string; content?: { type: string; text: string }[] }
@@ -49,16 +52,99 @@ function getBlockPlainText(block: Block): string {
   return b.content?.filter(c => c.type === 'text').map(c => c.text).join('') ?? ''
 }
 
+/**
+ * 获取光标位置周围的上下文文本
+ * 返回 { context: 带有 | 标记光标位置的文本, cursorGlobalPos: 全局光标位置 }
+ */
+function getContextAroundCursor(editor: ReturnType<typeof useCreateBlockNote>, windowSize: number = CONTEXT_WINDOW): { context: string; cursorGlobalPos: number } | null {
+  const selection = window.getSelection()
+  if (!selection || selection.rangeCount === 0) return null
+
+  const range = selection.getRangeAt(0)
+  
+  // 获取编辑器内所有文本块的纯文本
+  const allBlocks = editor.document as Block[]
+  const textBlocks = allBlocks.filter(b => b.type === 'paragraph' || b.type === 'heading')
+  
+  if (textBlocks.length === 0) return null
+  
+  // 构建完整文本和位置映射
+  let fullText = ''
+  const blockTextMap: { block: Block; start: number; end: number; text: string }[] = []
+  
+  for (const block of textBlocks) {
+    const text = getBlockPlainText(block)
+    const start = fullText.length
+    fullText += text + '\n'
+    blockTextMap.push({ block, start, end: fullText.length, text })
+  }
+  
+  // 尝试找到光标在哪个 block 中
+  let cursorGlobalPos = -1
+  const editorElement = document.querySelector('.bn-editor')
+  
+  if (editorElement && range.startContainer) {
+    // 向上查找最近的 block 元素
+    let node: Node | null = range.startContainer
+    while (node && node !== editorElement) {
+      if (node instanceof Element && node.hasAttribute('data-node-type')) {
+        const blockId = node.getAttribute('data-id')
+        if (blockId) {
+          const blockIdx = textBlocks.findIndex(b => b.id === blockId)
+          if (blockIdx >= 0) {
+            const blockInfo = blockTextMap[blockIdx]
+            // 计算光标在 block 内的位置
+            const rangeInBlock = document.createRange()
+            rangeInBlock.selectNodeContents(node)
+            rangeInBlock.setEnd(range.startContainer, range.startOffset)
+            const textBeforeCursor = rangeInBlock.toString()
+            // 简化处理：估算位置
+            const textInBlock = blockInfo.text
+            let localPos = Math.min(textBeforeCursor.length, textInBlock.length)
+            cursorGlobalPos = blockInfo.start + localPos
+            break
+          }
+        }
+      }
+      node = node.parentNode
+    }
+  }
+  
+  // 如果找不到，放在最后一个块的末尾
+  if (cursorGlobalPos < 0 && blockTextMap.length > 0) {
+    const lastBlock = blockTextMap[blockTextMap.length - 1]
+    cursorGlobalPos = lastBlock.end - 1 // 减去最后的换行符
+  }
+  
+  if (cursorGlobalPos < 0) return null
+  
+  // 提取窗口大小的上下文
+  const halfWindow = Math.floor(windowSize / 2)
+  const start = Math.max(0, cursorGlobalPos - halfWindow)
+  const end = Math.min(fullText.length, cursorGlobalPos + halfWindow)
+  
+  const contextText = fullText.slice(start, end)
+  const cursorOffset = cursorGlobalPos - start
+  
+  // 插入 | 标记
+  const contextWithCursor = contextText.slice(0, cursorOffset) + '|' + contextText.slice(cursorOffset)
+  
+  return { context: contextWithCursor, cursorGlobalPos }
+}
+
 export function EditorPageContent({ docId }: EditorPageProps) {
   const [doc, setDoc] = useState<AppDocument | null>(null)
   const [blocks, setBlocks] = useState<Block[]>([])
-  // Load settings synchronously so AIExtension can be configured on first render
   const [settings, setSettings] = useState<AppSettings>(() => getSettings())
   const [correcting, setCorrecting] = useState(false)
+  const [ghostText, setGhostText] = useState<string | null>(null) // ghost text 内容
+  const [ghostPosition, setGhostPosition] = useState<{ top: number; left: number } | null>(null)
+  
   const correctTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const completeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastCorrectedRef = useRef<string>('')
-  // Keep a stable ref to settings for the AI transport body
   const settingsRef = useRef<AppSettings>(settings)
+  const ghostTextRef = useRef<string | null>(null) // 用于 Tab 键处理
 
   const editor = useCreateBlockNote({
     dictionary: {
@@ -79,9 +165,44 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     ],
   })
 
+  // 同步 ghostTextRef
+  useEffect(() => {
+    ghostTextRef.current = ghostText
+  }, [ghostText])
+
+  // Tab 键监听：接受补全（使用 capture 阶段，先于编辑器处理）
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Tab' && ghostTextRef.current) {
+        e.preventDefault()
+        e.stopPropagation()
+        // 在光标位置插入补全内容
+        const selection = window.getSelection()
+        if (selection && selection.rangeCount > 0) {
+          const range = selection.getRangeAt(0)
+          const textNode = document.createTextNode(ghostTextRef.current)
+          range.insertNode(textNode)
+          // 移动光标到插入文本之后
+          range.setStartAfter(textNode)
+          range.collapse(true)
+          selection.removeAllRanges()
+          selection.addRange(range)
+        }
+        setGhostText(null)
+        setGhostPosition(null)
+      } else if (e.key !== 'Tab' && ghostTextRef.current) {
+        // 任意其他键清除 ghost text
+        setGhostText(null)
+        setGhostPosition(null)
+      }
+    }
+    
+    document.addEventListener('keydown', handleKeyDown, { capture: true })
+    return () => document.removeEventListener('keydown', handleKeyDown, { capture: true })
+  }, [])
+
   // Load document on mount
   useEffect(() => {
-    
     const loaded = getDocument(docId)
     const loadedSettings = getSettings()
     setSettings(loadedSettings)
@@ -98,6 +219,37 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId])
 
+  // 请求补全
+  const requestAutoComplete = useCallback(async () => {
+    const smallModelConfig = getSelectedSmallModel(settings)
+    if (!smallModelConfig.apiKey) return
+
+    const result = getContextAroundCursor(editor)
+    if (!result) return
+
+    try {
+      const res = await fetch('/api/ai/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ context: result.context, modelConfig: smallModelConfig }),
+      })
+      
+      if (res.ok) {
+        const { completion } = await res.json() as { completion?: string }
+        if (completion && completion.trim()) {
+          // 获取光标位置用于定位 ghost text
+          const selection = window.getSelection()
+          if (selection && selection.rangeCount > 0) {
+            const range = selection.getRangeAt(0)
+            const rect = range.getBoundingClientRect()
+            setGhostText(completion.trim())
+            setGhostPosition({ top: rect.bottom, left: rect.right })
+          }
+        }
+      }
+    } catch { /* silent */ }
+  }, [editor, settings])
+
   const handleChange = useCallback(() => {
     const current = editor.document as Block[]
     setBlocks(current)
@@ -113,17 +265,19 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     setDoc(updated)
     saveDocument(updated)
 
-    // Auto-correct: debounce 2.5s, only if enabled and API key set
+    // 清除之前的 ghost text
+    setGhostText(null)
+    setGhostPosition(null)
+
+    // Auto-correct: debounce 2.5s
     const smallModelConfig = getSelectedSmallModel(settings)
     if (settings.autoCorrect && smallModelConfig.apiKey) {
       if (correctTimeoutRef.current) clearTimeout(correctTimeoutRef.current)
 
       correctTimeoutRef.current = setTimeout(async () => {
-        // Find a changed text block to correct (paragraph only for safety)
         const textBlocks = current.filter(b => b.type === 'paragraph')
         if (textBlocks.length === 0) return
 
-        // Correct the last paragraph that has content
         const target = [...textBlocks].reverse().find(b => getBlockPlainText(b).trim().length > 3)
         if (!target) return
 
@@ -152,7 +306,13 @@ export function EditorPageContent({ docId }: EditorPageProps) {
         }
       }, 2500)
     }
-  }, [doc, editor, settings])
+
+    // Auto-complete: debounce 5s
+    if (settings.autoComplete && smallModelConfig.apiKey) {
+      if (completeTimeoutRef.current) clearTimeout(completeTimeoutRef.current)
+      completeTimeoutRef.current = setTimeout(requestAutoComplete, AUTO_COMPLETE_DELAY)
+    }
+  }, [doc, editor, settings, requestAutoComplete])
 
   const handleExport = useCallback(async () => {
     if (!doc) return
@@ -196,7 +356,6 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           addToast({ title: error, color: 'danger' })
         } else if (corrected) {
           addToast({ title: 'AI 纠错完成', color: 'success' })
-          // Apply line-by-line corrections
           const lines = corrected.split('\n').filter(l => l.trim().length > 0)
           const textBlocks = editor.document.filter(b => b.type === 'paragraph' || b.type === 'heading') as Block[]
           textBlocks.forEach((block, i) => {
@@ -237,7 +396,40 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       <TocSidebar blocks={blocks} docTitle={doc.title} />
 
       {/* Main editor area - only this part scrolls */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+        {/* Ghost Text 浮层 - 补全提示 */}
+        {ghostText && ghostPosition && (
+          <div
+            style={{
+              position: 'fixed',
+              top: ghostPosition.top,
+              left: ghostPosition.left,
+              color: 'rgba(120, 120, 120, 0.6)',
+              backgroundColor: 'rgba(240, 240, 240, 0.8)',
+              padding: '2px 4px',
+              borderRadius: '3px',
+              fontSize: '15px',
+              fontFamily: 'inherit',
+              pointerEvents: 'none',
+              zIndex: 1000,
+              whiteSpace: 'pre-wrap',
+              maxWidth: '400px',
+              lineHeight: 1.6,
+            }}
+          >
+            {ghostText}
+            <span style={{ 
+              fontSize: '11px', 
+              color: 'rgba(100, 100, 100, 0.7)',
+              marginLeft: '6px',
+              border: '1px solid rgba(150, 150, 150, 0.5)',
+              padding: '1px 4px',
+              borderRadius: '3px',
+            }}>
+              Tab 接受
+            </span>
+          </div>
+        )}
         {/* Toolbar - Fixed */}
         <div style={{
           padding: '8px 20px',

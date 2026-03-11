@@ -1,4 +1,4 @@
-import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent } from './types'
+import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote } from './types'
 import { defaultSettings } from './types'
 
 const DOCUMENTS_KEY = 'paper_reader_documents'
@@ -298,4 +298,98 @@ export function deleteAgent(id: string): void {
   // 不允许删除预设智能体
   if (agent?.isPreset) return
   saveAgents(agents.filter(a => a.id !== id))
+}
+
+// 助手对话历史存储
+const CONVERSATIONS_KEY = 'paper_reader_assistant_conversations'
+
+export function getConversations(): AssistantConversation[] {
+  if (!isBrowser()) return []
+  try {
+    const raw = localStorage.getItem(CONVERSATIONS_KEY)
+    if (!raw) return []
+    return JSON.parse(raw) as AssistantConversation[]
+  } catch {
+    return []
+  }
+}
+
+export function saveConversations(conversations: AssistantConversation[]): void {
+  if (!isBrowser()) return
+  localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations))
+}
+
+export function getConversation(id: string): AssistantConversation | null {
+  return getConversations().find(c => c.id === id) ?? null
+}
+
+export function saveConversation(conversation: AssistantConversation): void {
+  const conversations = getConversations()
+  const idx = conversations.findIndex(c => c.id === conversation.id)
+  if (idx >= 0) {
+    conversations[idx] = conversation
+  } else {
+    conversations.unshift(conversation)
+  }
+  saveConversations(conversations)
+}
+
+export function deleteConversation(id: string): void {
+  saveConversations(getConversations().filter(c => c.id !== id))
+}
+
+export function updateConversationTitle(id: string, title: string): void {
+  const conversations = getConversations()
+  const idx = conversations.findIndex(c => c.id === id)
+  if (idx >= 0) {
+    conversations[idx].title = title
+    conversations[idx].updatedAt = new Date().toISOString()
+    saveConversations(conversations)
+  }
+}
+
+// 助手临时便签存储
+const NOTES_KEY = 'paper_reader_assistant_notes'
+
+export function getAssistantNotes(): AssistantNote[] {
+  if (!isBrowser()) return []
+  try {
+    const raw = localStorage.getItem(NOTES_KEY)
+    if (!raw) return []
+    return JSON.parse(raw) as AssistantNote[]
+  } catch {
+    return []
+  }
+}
+
+export function saveAssistantNotes(notes: AssistantNote[]): void {
+  if (!isBrowser()) return
+  localStorage.setItem(NOTES_KEY, JSON.stringify(notes))
+}
+
+export function addAssistantNote(note: Omit<AssistantNote, 'id' | 'createdAt' | 'updatedAt'>): AssistantNote {
+  const notes = getAssistantNotes()
+  const newNote: AssistantNote = {
+    ...note,
+    id: generateId(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  }
+  notes.unshift(newNote)
+  saveAssistantNotes(notes)
+  return newNote
+}
+
+export function updateAssistantNote(id: string, content: string): void {
+  const notes = getAssistantNotes()
+  const idx = notes.findIndex(n => n.id === id)
+  if (idx >= 0) {
+    notes[idx].content = content
+    notes[idx].updatedAt = new Date().toISOString()
+    saveAssistantNotes(notes)
+  }
+}
+
+export function deleteAssistantNote(id: string): void {
+  saveAssistantNotes(getAssistantNotes().filter(n => n.id !== id))
 }

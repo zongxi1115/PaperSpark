@@ -177,3 +177,32 @@ export interface Agent {
   isPreset: boolean // 是否为预设
   isDefault?: boolean // 是否为默认选中
 }
+
+// 助手对话消息类型
+export interface AssistantMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
+}
+
+// 助手对话会话类型
+export interface AssistantConversation {
+  id: string
+  title: string // 对话标题（自动生成或用户编辑）
+  messages: AssistantMessage[]
+  agentId?: string // 使用的智能体 ID
+  modelName?: string // 使用的模型名称
+  createdAt: string
+  updatedAt: string
+}
+
+// 助手临时便签类型
+export interface AssistantNote {
+  id: string
+  content: string // 便签内容
+  messageId?: string // 关联的消息 ID（可选）
+  conversationId?: string // 关联的对话 ID（可选）
+  createdAt: string
+  updatedAt: string
+}

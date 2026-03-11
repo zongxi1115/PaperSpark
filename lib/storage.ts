@@ -172,6 +172,10 @@ export function deleteKnowledgeItem(id: string): void {
   saveKnowledgeItems(getKnowledgeItems().filter(i => i.id !== id))
 }
 
+export function getKnowledgeItem(id: string): KnowledgeItem | null {
+  return getKnowledgeItems().find(i => i.id === id) ?? null
+}
+
 export function getZoteroConfig(): ZoteroConfig | null {
   if (!isBrowser()) return null
   try {

@@ -333,11 +333,25 @@ export function KnowledgePanel() {
     addToast({ title: '配置已保存', color: 'success' })
   }, [zoteroUserId, zoteroApiKey, onZoteroClose])
 
-  // 插入到文档（占位）
+  // 插入引用到文档
   const handleInsert = useCallback((item: KnowledgeItem, e?: React.MouseEvent) => {
     e?.stopPropagation()
-    addToast({ title: `准备插入: ${item.title}`, color: 'default' })
-    // TODO: 实现插入逻辑
+    e?.preventDefault()
+    
+    // 发送引用插入事件
+    const event = new CustomEvent('citation-insert', {
+      detail: {
+        citationId: item.id,
+        title: item.title,
+        authors: item.authors,
+        year: item.year || '',
+        journal: item.journal || '',
+        doi: item.doi || '',
+        url: item.url || '',
+        bib: item.bib || '',
+      },
+    })
+    window.dispatchEvent(event)
   }, [])
 
   return (

@@ -26,18 +26,33 @@ import { DefaultChatTransport } from 'ai'
 import { Button, Divider, Tooltip, addToast } from '@heroui/react'
 import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
-import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel } from '@/lib/storage'
+import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem } from '@/lib/storage'
 import type { AppDocument, AppSettings } from '@/lib/types'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
+import { CitationInlineContentSpec, CitationData } from './CitationBlock'
 
-// 自定义行内公式 Schema
+// 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
     formula: FormulaInlineContentSpec,
+    citation: CitationInlineContentSpec,
   },
 })
+
+// 引用数据类型
+interface CitationData {
+  citationId: string
+  index: number
+  title: string
+  authors: string[]
+  year: string
+  journal: string
+  doi: string
+  url: string
+  bib: string
+}
 
 interface EditorPageProps {
   docId: string
@@ -149,12 +164,14 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const [correcting, setCorrecting] = useState(false)
   const [ghostText, setGhostText] = useState<string | null>(null) // ghost text 内容
   const [ghostPosition, setGhostPosition] = useState<{ top: number; left: number } | null>(null)
+  const [citations, setCitations] = useState<Map<string, CitationData>>(new Map()) // 引用列表
   
   const correctTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const completeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastCorrectedRef = useRef<string>('')
   const settingsRef = useRef<AppSettings>(settings)
   const ghostTextRef = useRef<string | null>(null) // 用于 Tab 键处理
+  const citationsRef = useRef<Map<string, CitationData>>(new Map()) // 用于事件处理中获取最新引用
 
   const editor = useCreateBlockNote({
     schema,
@@ -180,6 +197,48 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   useEffect(() => {
     ghostTextRef.current = ghostText
   }, [ghostText])
+
+  // 同步 citationsRef
+  useEffect(() => {
+    citationsRef.current = citations
+  }, [citations])
+
+  // 监听引用插入事件
+  useEffect(() => {
+    const handleCitationInsert = (e: CustomEvent<CitationData>) => {
+      const data = e.detail
+      const citationId = data.citationId
+      
+      // 获取当前引用列表
+      const currentCitations = new Map(citationsRef.current)
+      
+      // 如果引用已存在，使用已有索引
+      let index: number
+      if (currentCitations.has(citationId)) {
+        index = currentCitations.get(citationId)!.index
+      } else {
+        // 新引用，分配新索引
+        index = currentCitations.size + 1
+        currentCitations.set(citationId, { ...data, index })
+        setCitations(currentCitations)
+      }
+      
+      // 在光标位置插入行内引用
+      editor.insertInlineContent([
+        {
+          type: 'citation',
+          props: {
+            citationId,
+            citationIndex: index,
+          },
+        },
+      ])
+      addToast({ title: `已插入引用 [${index}]`, color: 'success' })
+    }
+
+    window.addEventListener('citation-insert', handleCitationInsert as EventListener)
+    return () => window.removeEventListener('citation-insert', handleCitationInsert as EventListener)
+  }, [editor])
 
   // Tab 键监听：接受补全（使用 capture 阶段，先于编辑器处理）
   useEffect(() => {
@@ -225,6 +284,41 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       if (loaded.content && (loaded.content as Block[]).length > 0) {
         editor.replaceBlocks(editor.document, loaded.content as Block[])
         setBlocks(editor.document as Block[])
+        
+        // 提取已有的引用（从行内内容中）
+        const extractedCitations = new Map<string, CitationData>()
+        const content = loaded.content as Block[]
+        
+        // 遍历所有块的内容，查找引用
+        content.forEach(block => {
+          const blockContent = (block as any).content
+          if (Array.isArray(blockContent)) {
+            blockContent.forEach((inlineContent: any) => {
+              if (inlineContent.type === 'citation') {
+                const citationId = inlineContent.props?.citationId
+                const index = inlineContent.props?.citationIndex || 1
+                if (citationId && !extractedCitations.has(citationId)) {
+                  // 从知识库获取引用信息
+                  const item = getKnowledgeItem(citationId)
+                  if (item) {
+                    extractedCitations.set(citationId, {
+                      citationId,
+                      index,
+                      title: item.title,
+                      authors: item.authors,
+                      year: item.year || '',
+                      journal: item.journal || '',
+                      doi: item.doi || '',
+                      url: item.url || '',
+                      bib: item.bib || '',
+                    })
+                  }
+                }
+              }
+            })
+          }
+        })
+        setCitations(extractedCitations)
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -550,6 +644,88 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                 }
               />
             </BlockNoteView>
+            
+            {/* References 区域 */}
+            {citations.size > 0 && (
+              <div style={{
+                marginTop: '60px',
+                paddingTop: '24px',
+                borderTop: '2px solid var(--border-color)',
+              }}>
+                <h2 style={{
+                  fontSize: '18px',
+                  fontWeight: 600,
+                  marginBottom: '16px',
+                  color: 'var(--text-primary)',
+                }}>
+                  References
+                </h2>
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                }}>
+                  {Array.from(citations.values())
+                    .sort((a, b) => a.index - b.index)
+                    .map((citation) => (
+                      <div 
+                        key={citation.citationId}
+                        id={`reference-${citation.citationId}`}
+                        style={{
+                          fontSize: '13px',
+                          lineHeight: 1.6,
+                          color: 'var(--text-secondary)',
+                          paddingLeft: '24px',
+                          textIndent: '-24px',
+                        }}
+                      >
+                        <span style={{ color: 'var(--accent-color)', fontWeight: 500 }}>
+                          [{citation.index}]
+                        </span>
+                        {' '}
+                        {citation.bib ? (
+                          <span dangerouslySetInnerHTML={{ 
+                            __html: citation.bib
+                              .replace(/<[^>]*>/g, ' ') // 移除 HTML 标签
+                              .replace(/\s+/g, ' ')      // 合并多余空格
+                              .trim()
+                          }} />
+                        ) : (
+                          <>
+                            {citation.authors.length > 0 && (
+                              <span>{citation.authors.join(', ')}. </span>
+                            )}
+                            <span style={{ fontWeight: 500 }}>{citation.title}</span>
+                            {citation.journal && <span>, {citation.journal}</span>}
+                            {citation.year && <span>, {citation.year}</span>}
+                            {citation.doi && (
+                              <span>. DOI: <a 
+                                href={`https://doi.org/${citation.doi}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: 'var(--accent-color)' }}
+                              >
+                                {citation.doi}
+                              </a></span>
+                            )}
+                            {citation.url && !citation.doi && (
+                              <span>. <a 
+                                href={citation.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                style={{ color: 'var(--accent-color)' }}
+                              >
+                                {citation.url}
+                              </a></span>
+                            )}
+                            <span>.</span>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

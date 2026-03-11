@@ -66,7 +66,9 @@ export function KnowledgePanel() {
 
     setSyncing(true)
     try {
-      const res = await fetch(`/api/zotero/items?userId=${zoteroUserId}&apiKey=${zoteroApiKey}&limit=50`)
+      const settings = getSettings()
+      const citationStyle = settings.citationStyle || 'apa'
+      const res = await fetch(`/api/zotero/items?userId=${zoteroUserId}&apiKey=${zoteroApiKey}&limit=50&style=${citationStyle}`)
       if (!res.ok) throw new Error('Failed to fetch items')
       
       const data = await res.json()
@@ -595,10 +597,28 @@ export function KnowledgePanel() {
 
                 <Divider />
 
-                {/* 引用格式（网页类型显示 bib） */}
-                {selectedItem.bib && selectedItem.itemType === 'webpage' && (
+                {/* 引用格式 */}
+                {selectedItem.bib && (
                   <div>
-                    <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>引用</p>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', margin: 0 }}>引用</p>
+                      <Button 
+                        size="sm" 
+                        variant="flat" 
+                        color="primary"
+                        onPress={() => {
+                          // 将 HTML 引用转为纯文本
+                          const tempDiv = document.createElement('div')
+                          tempDiv.innerHTML = selectedItem.bib || ''
+                          const plainText = tempDiv.textContent || tempDiv.innerText || ''
+                          navigator.clipboard.writeText(plainText)
+                          addToast({ title: '引用已复制', color: 'success' })
+                        }}
+                        style={{ fontSize: 11, padding: '2px 8px', minWidth: 'auto', height: 24 }}
+                      >
+                        复制引用
+                      </Button>
+                    </div>
                     <div 
                       style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-secondary)', padding: 8, background: 'var(--bg-secondary)', borderRadius: 4 }}
                       dangerouslySetInnerHTML={{ __html: selectedItem.bib }}

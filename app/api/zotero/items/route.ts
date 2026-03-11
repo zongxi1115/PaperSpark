@@ -10,6 +10,7 @@ export async function GET(request: NextRequest) {
     const limit = searchParams.get('limit') || '50'
     const start = searchParams.get('start') || '0'
     const collectionKey = searchParams.get('collectionKey')
+    const style = searchParams.get('style') || 'apa' // 引用格式，默认 APA
 
     if (!userId || !apiKey) {
       return NextResponse.json({ error: 'Missing userId or apiKey' }, { status: 400 })
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
       v: '3',
       format: 'json',
       include: 'data,bib',
+      style,
       limit,
       start,
       sort: 'dateModified',

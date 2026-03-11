@@ -324,6 +324,90 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId])
 
+  // 重新扫描文档中的引用，按出现顺序重新编号
+  const reindexCitations = useCallback(() => {
+    const content = editor.document as Block[]
+    const citationOrder: string[] = [] // 按出现顺序存储 citationId
+    
+    // 遍历所有块，按出现顺序收集引用
+    content.forEach(block => {
+      const blockContent = (block as any).content
+      if (Array.isArray(blockContent)) {
+        blockContent.forEach((inlineContent: any) => {
+          if (inlineContent.type === 'citation') {
+            const citationId = inlineContent.props?.citationId
+            if (citationId && !citationOrder.includes(citationId)) {
+              citationOrder.push(citationId)
+            }
+          }
+        })
+      }
+    })
+    
+    // 构建新的引用映射
+    const newCitations = new Map<string, CitationData>()
+    citationOrder.forEach((citationId, index) => {
+      const existing = citationsRef.current.get(citationId)
+      if (existing) {
+        newCitations.set(citationId, { ...existing, index: index + 1 })
+      } else {
+        // 从知识库获取引用信息
+        const item = getKnowledgeItem(citationId)
+        if (item) {
+          newCitations.set(citationId, {
+            citationId,
+            index: index + 1,
+            title: item.title,
+            authors: item.authors,
+            year: item.year || '',
+            journal: item.journal || '',
+            doi: item.doi || '',
+            url: item.url || '',
+            bib: item.bib || '',
+          })
+        }
+      }
+    })
+    
+    // 检查是否有变化
+    const oldIds = Array.from(citationsRef.current.entries()).map(([id, data]) => `${id}:${data.index}`)
+    const newIds = Array.from(newCitations.entries()).map(([id, data]) => `${id}:${data.index}`)
+    const hasChanged = oldIds.length !== newIds.length || oldIds.some((id, i) => id !== newIds[i])
+    
+    if (hasChanged) {
+      setCitations(newCitations)
+      
+      // 更新文档中所有引用的索引
+      content.forEach(block => {
+        const blockContent = (block as any).content
+        if (Array.isArray(blockContent)) {
+          let needsUpdate = false
+          const newContent = blockContent.map((inlineContent: any) => {
+            if (inlineContent.type === 'citation') {
+              const citationId = inlineContent.props?.citationId
+              const newIndex = citationOrder.indexOf(citationId) + 1
+              if (inlineContent.props?.citationIndex !== newIndex) {
+                needsUpdate = true
+                return {
+                  ...inlineContent,
+                  props: {
+                    ...inlineContent.props,
+                    citationIndex: newIndex,
+                  },
+                }
+              }
+            }
+            return inlineContent
+          })
+          
+          if (needsUpdate) {
+            editor.updateBlock(block, { content: newContent } as any)
+          }
+        }
+      })
+    }
+  }, [editor])
+
   // 请求补全
   const requestAutoComplete = useCallback(async () => {
     const smallModelConfig = getSelectedSmallModel(settings)
@@ -373,6 +457,11 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     // 清除之前的 ghost text
     setGhostText(null)
     setGhostPosition(null)
+    
+    // 重新索引引用（延迟执行，避免频繁更新）
+    setTimeout(() => {
+      reindexCitations()
+    }, 100)
 
     // Auto-correct: debounce 2.5s
     const smallModelConfig = getSelectedSmallModel(settings)
@@ -677,9 +766,33 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                           color: 'var(--text-secondary)',
                           paddingLeft: '24px',
                           textIndent: '-24px',
+                          padding: '4px 4px 4px 24px',
+                          marginLeft: '-4px',
+                          borderRadius: '4px',
+                          transition: 'background-color 0.2s',
                         }}
                       >
-                        <span style={{ color: 'var(--accent-color)', fontWeight: 500 }}>
+                        <span 
+                          onClick={() => {
+                            // 点击索引号跳转到正文中对应的引用
+                            const citationElements = document.querySelectorAll(`[data-citation-id="${citation.citationId}"]`)
+                            if (citationElements.length > 0) {
+                              const firstCitation = citationElements[0] as HTMLElement
+                              firstCitation.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                              // 高亮效果
+                              firstCitation.style.backgroundColor = 'rgba(59, 130, 246, 0.3)'
+                              setTimeout(() => {
+                                firstCitation.style.backgroundColor = ''
+                              }, 2000)
+                            }
+                          }}
+                          style={{ 
+                            color: 'var(--accent-color)', 
+                            fontWeight: 500,
+                            cursor: 'pointer',
+                          }}
+                          title="点击跳转到正文"
+                        >
                           [{citation.index}]
                         </span>
                         {' '}

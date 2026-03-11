@@ -144,6 +144,10 @@ export interface KnowledgeItem {
   // 引用格式
   bib?: string
   itemType?: string
+  // 沉浸式阅读相关
+  hasImmersiveCache?: boolean // 是否有沉浸式翻译缓存
+  immersiveCacheAt?: string // 缓存时间
+  extractedMetadata?: PDFMetadata // 提取的元数据缓存
   createdAt: string
   updatedAt: string
 }
@@ -208,4 +212,102 @@ export interface AssistantNote {
   conversationId?: string // 关联的对话 ID（可选）
   createdAt: string
   updatedAt: string
+}
+
+// ============ 沉浸式阅读相关类型 ============
+
+// 文本块类型
+export type TextBlockType = 'paragraph' | 'title' | 'subtitle' | 'formula' | 'caption' | 'reference' | 'table' | 'list' | 'header' | 'footer'
+
+// 文本块边界框
+export interface BoundingBox {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+// 文本块样式
+export interface TextStyle {
+  fontSize: number
+  fontFamily: string
+  isBold: boolean
+  isItalic: boolean
+}
+
+// 单个文本项（PDF 原始提取的最小单位）
+export interface TextItem {
+  id: string
+  text: string
+  bbox: BoundingBox
+  style: TextStyle
+  pageNum: number
+}
+
+// 文本块（合并后的语义单元）
+export interface TextBlock {
+  id: string
+  type: TextBlockType
+  text: string // 原文
+  translated?: string // 翻译
+  bbox: BoundingBox
+  style: TextStyle
+  pageNum: number
+  itemIds: string[] // 包含的原始 TextItem id
+}
+
+// PDF 页面缓存
+export interface PDFPageCache {
+  id: string // `${documentId}_page_${pageNum}`
+  documentId: string
+  pageNum: number
+  width: number
+  height: number
+  blocks: TextBlock[]
+  createdAt: string
+  updatedAt: string
+}
+
+// PDF 文档元数据
+export interface PDFMetadata {
+  title: string
+  authors: string[]
+  abstract: string
+  year: string
+  journal: string
+  keywords: string[]
+  references: string[]
+}
+
+// PDF 文档缓存
+export interface PDFDocumentCache {
+  id: string // 对应知识库条目的 id
+  knowledgeItemId: string
+  fileName: string
+  pageCount: number
+  metadata: PDFMetadata
+  parsedAt: string
+  updatedAt: string
+}
+
+// 翻译缓存
+export interface TranslationCache {
+  id: string // `${documentId}_translation`
+  documentId: string
+  modelUsed: string
+  translatedAt: string
+  blocks: {
+    blockId: string
+    original: string
+    translated: string
+  }[]
+}
+
+// 智能分块结果
+export interface SmartChunk {
+  id: string
+  type: TextBlockType
+  blockIds: string[] // 包含的原始 block id
+  text: string // 合并后的文本
+  translated?: string
 }

@@ -26,11 +26,11 @@ import { DefaultChatTransport } from 'ai'
 import { Button, Divider, Tooltip, addToast } from '@heroui/react'
 import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
-import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem } from '@/lib/storage'
+import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems } from '@/lib/storage'
 import type { AppDocument, AppSettings } from '@/lib/types'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
-import { CitationInlineContentSpec, CitationData } from './CitationBlock'
+import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -201,6 +201,38 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       return await resolveLocalFileUrl(url)
     },
   })
+
+  const buildCitationSuggestionItems = useCallback(() => {
+    const items = getKnowledgeItems()
+    return items.map((item) => {
+      const abstract = item.abstract || item.cachedSummary || ''
+      const authors = item.authors?.length ? item.authors.slice(0, 2).join(', ') + (item.authors.length > 2 ? ' 等' : '') : ''
+      const year = item.year ? String(item.year) : ''
+      const meta = [authors, year].filter(Boolean).join(' · ')
+      const subtextBase = abstract.trim() || meta || item.journal || item.doi || ''
+      const subtext = subtextBase.length > 120 ? subtextBase.slice(0, 120) + '…' : subtextBase
+
+      return {
+        title: item.title || '（无标题）',
+        subtext,
+        group: '引用文献',
+        aliases: [item.title, item.doi, item.journal, ...item.authors].filter(Boolean) as string[],
+        icon: <CitationIcon />,
+        onItemClick: () => {
+          dispatchCitationInsert({
+            id: item.id,
+            title: item.title,
+            authors: item.authors,
+            year: item.year,
+            journal: item.journal,
+            doi: item.doi,
+            url: item.url,
+            bib: item.bib,
+          })
+        },
+      }
+    })
+  }, [])
 
   // 同步 ghostTextRef
   useEffect(() => {
@@ -741,6 +773,13 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                   )
                 }
               />
+
+              {/* 引用文献菜单：输入 [ 触发 */}
+              <SuggestionMenuController
+                triggerCharacter="["
+                minQueryLength={0}
+                getItems={async (query) => filterSuggestionItems(buildCitationSuggestionItems(), query)}
+              />
             </BlockNoteView>
             
             {/* References 区域 */}
@@ -884,6 +923,16 @@ function FormulaIcon() {
       <path d="M14 4h6v6h-6z" />
       <path d="M4 14h6v6H4z" />
       <circle cx="17" cy="17" r="3" />
+    </svg>
+  )
+}
+
+function CitationIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M4 4.5A2.5 2.5 0 0 1 6.5 7H20" />
+      <path d="M6.5 7h13.5v13H6.5a2.5 2.5 0 0 0 0-5H20V4H6.5a2.5 2.5 0 0 0 0 5Z" />
     </svg>
   )
 }

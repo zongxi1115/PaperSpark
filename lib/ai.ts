@@ -366,3 +366,205 @@ export async function autoCompleteFragment(
     error: result.error,
   }
 }
+
+/**
+ * 智能分块 - 将文本块按语义单元重新分组
+ */
+export async function smartChunkText(
+  blocks: { id: string; text: string; type: string }[],
+  modelConfig: ModelConfig
+): Promise<{ 
+  success: boolean
+  chunks?: { id: string; type: string; blockIds: string[]; text: string }[]
+  error?: string 
+}> {
+  if (!blocks || blocks.length === 0) {
+    return { success: true, chunks: [] }
+  }
+
+  const systemPrompt = `你是一个学术文献文本分块专家。请将以下文本块按语义单元进行重新分组。
+
+规则：
+1. 标题块应单独成组
+2. 同一段落的句子应合并为一个组
+3. 公式块单独成组
+4. 参考文献条目各自独立成组
+5. 图表标题与相关说明文字可合并
+6. 如果文本已经是完整的语义单元，保持原样
+
+输入格式：JSON 数组
+输出格式：JSON 数组，每个元素包含：
+- id: 新块的唯一标识符（用 "chunk_" + 数字）
+- type: 块类型（paragraph/title/formula/reference/caption/list/table）
+- blockIds: 包含的原始块 id 数组
+- text: 合并后的完整文本
+
+只返回 JSON 数组，不要添加任何解释或 markdown 代码块标记。`
+
+  const blocksJson = JSON.stringify(blocks.slice(0, 100)) // 限制数量避免 token 过多
+  const result = await generateAIText(blocksJson, systemPrompt, modelConfig)
+
+  if (!result.success || !result.text) {
+    return { success: false, error: result.error }
+  }
+
+  try {
+    let jsonStr = result.text.trim()
+    if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+    }
+    const chunks = JSON.parse(jsonStr)
+    return { success: true, chunks }
+  } catch {
+    // 如果解析失败，返回原始块
+    return {
+      success: true,
+      chunks: blocks.map((b, i) => ({
+        id: `chunk_${i}`,
+        type: b.type,
+        blockIds: [b.id],
+        text: b.text,
+      })),
+    }
+  }
+}
+
+/**
+ * 批量翻译文本块
+ */
+export async function batchTranslate(
+  chunks: { id: string; text: string }[],
+  modelConfig: ModelConfig,
+  onProgress?: (current: number, total: number) => void
+): Promise<{ 
+  success: boolean
+  translations?: { id: string; translated: string }[]
+  error?: string 
+}> {
+  if (!chunks || chunks.length === 0) {
+    return { success: true, translations: [] }
+  }
+
+  const translations: { id: string; translated: string }[] = []
+  const batchSize = 5 // 每批处理 5 个块
+  const totalBatches = Math.ceil(chunks.length / batchSize)
+
+  for (let i = 0; i < chunks.length; i += batchSize) {
+    const batch = chunks.slice(i, i + batchSize)
+    const batchNum = Math.floor(i / batchSize) + 1
+
+    const systemPrompt = `你是一个专业的学术翻译助手。请将以下 JSON 数组中的每个文本块翻译成中文。
+
+要求：
+1. 准确传达原文含义，不遗漏内容
+2. 使用规范的学术术语和表达方式
+3. 保持专业、严谨的语言风格
+4. 输入格式：JSON 数组 [{id, text}]
+5. 输出格式：JSON 数组 [{id, translated}]，translated 字段包含翻译后的中文
+6. 只返回 JSON 数组，不要添加任何解释或 markdown 标记`
+
+    const batchJson = JSON.stringify(batch)
+    const result = await generateAIText(batchJson, systemPrompt, modelConfig)
+
+    if (result.success && result.text) {
+      try {
+        let jsonStr = result.text.trim()
+        if (jsonStr.startsWith('```')) {
+          jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+        }
+        const batchTranslations = JSON.parse(jsonStr)
+        translations.push(...batchTranslations)
+      } catch {
+        // 解析失败，逐个翻译
+        for (const chunk of batch) {
+          const singleResult = await translateText(chunk.text, modelConfig)
+          translations.push({
+            id: chunk.id,
+            translated: singleResult.translated || chunk.text,
+          })
+        }
+      }
+    } else {
+      // 翻译失败，保留原文
+      for (const chunk of batch) {
+        translations.push({ id: chunk.id, translated: chunk.text })
+      }
+    }
+
+    if (onProgress) {
+      onProgress(batchNum, totalBatches)
+    }
+
+    // 添加短暂延迟避免 API 限流
+    if (i + batchSize < chunks.length) {
+      await new Promise(resolve => setTimeout(resolve, 500))
+    }
+  }
+
+  return { success: true, translations }
+}
+
+/**
+ * 提取论文元数据（扩展版）
+ */
+export async function extractPaperMetadata(
+  content: string,
+  modelConfig: ModelConfig
+): Promise<{ 
+  success: boolean
+  metadata?: { 
+    title: string
+    abstract: string
+    keywords: string[]
+    references: string[]
+  }
+  error?: string 
+}> {
+  if (!content || content.trim().length < 100) {
+    return { 
+      success: false, 
+      error: '内容太短，无法提取元数据' 
+    }
+  }
+
+  const systemPrompt = `你是一个学术文献元数据提取专家。请从给定的文献内容中提取以下信息，并以 JSON 格式返回：
+{
+  "title": "文献标题",
+  "abstract": "摘要内容（如果原文有摘要则提取，否则根据内容生成 100 字以内的摘要）",
+  "keywords": ["关键词1", "关键词2", "关键词3"],
+  "references": ["参考文献1", "参考文献2"]
+}
+
+要求：
+1. 只返回 JSON 对象，不要添加任何解释或 markdown 代码块标记
+2. 关键词提取 3-6 个
+3. 参考文献提取前 5-10 条（如果有的话）
+4. 如果某项信息无法确定，使用空字符串或空数组`
+
+  const prompt = `请从以下文献内容中提取元数据：\n\n${content.slice(0, 10000)}`
+
+  const result = await generateAIText(prompt, systemPrompt, modelConfig)
+
+  if (!result.success || !result.text) {
+    return { success: false, error: result.error }
+  }
+
+  try {
+    let jsonStr = result.text.trim()
+    if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+    }
+    const metadata = JSON.parse(jsonStr)
+    return {
+      success: true,
+      metadata: {
+        title: metadata.title || '',
+        abstract: metadata.abstract || '',
+        keywords: metadata.keywords || [],
+        references: metadata.references || [],
+      },
+    }
+  } catch {
+    return { success: false, error: '解析元数据失败' }
+  }
+}

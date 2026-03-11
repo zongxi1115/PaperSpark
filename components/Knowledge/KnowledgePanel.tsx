@@ -1,5 +1,6 @@
 'use client'
 import { useState, useCallback, useRef, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Button,
   Input,
@@ -13,6 +14,11 @@ import {
   Tooltip,
   Divider,
   addToast,
+  Dropdown,
+  DropdownTrigger,
+  DropdownMenu,
+  DropdownItem,
+  DropdownSection,
 } from '@heroui/react'
 import {
   getKnowledgeItems,
@@ -29,6 +35,7 @@ import {
 import type { KnowledgeItem, ZoteroConfig } from '@/lib/types'
 
 export function KnowledgePanel() {
+  const router = useRouter()
   const [items, setItems] = useState<KnowledgeItem[]>([])
   const [selectedItem, setSelectedItem] = useState<KnowledgeItem | null>(null)
   const [loading, setLoading] = useState(false)
@@ -425,17 +432,13 @@ export function KnowledgePanel() {
             }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLElement).style.background = 'var(--bg-tertiary)'
-              const insertBtn = e.currentTarget.querySelector('.insert-btn') as HTMLElement
-              const deleteBtn = e.currentTarget.querySelector('.delete-btn') as HTMLElement
-              if (insertBtn) insertBtn.style.opacity = '1'
-              if (deleteBtn) deleteBtn.style.opacity = '1'
+              const actionBtn = e.currentTarget.querySelector('.action-btn') as HTMLElement
+              if (actionBtn) actionBtn.style.opacity = '1'
             }}
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLElement).style.background = 'none'
-              const insertBtn = e.currentTarget.querySelector('.insert-btn') as HTMLElement
-              const deleteBtn = e.currentTarget.querySelector('.delete-btn') as HTMLElement
-              if (insertBtn) insertBtn.style.opacity = '0'
-              if (deleteBtn) deleteBtn.style.opacity = '0'
+              const actionBtn = e.currentTarget.querySelector('.action-btn') as HTMLElement
+              if (actionBtn) actionBtn.style.opacity = '0'
             }}
           >
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
@@ -479,29 +482,62 @@ export function KnowledgePanel() {
                 </div>
               </div>
               
-              {/* 插入按钮 */}
-              <button
-                className="insert-btn"
-                onClick={(e) => handleInsert(item, e)}
-                style={{
-                  width: 24,
-                  height: 24,
-                  borderRadius: '50%',
-                  background: 'var(--accent-color)',
-                  color: 'white',
-                  border: 'none',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  opacity: 0,
-                  transition: 'opacity 0.15s',
-                  flexShrink: 0,
-                }}
-                title="插入到文档"
-              >
-                <PlusIconSmall />
-              </button>
+              {/* PDF 操作下拉菜单 */}
+              <Dropdown>
+                <DropdownTrigger>
+                  <button
+                    className="action-btn"
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                      width: 24,
+                      height: 24,
+                      borderRadius: 4,
+                      background: 'var(--bg-secondary)',
+                      color: 'var(--text-muted)',
+                      border: '1px solid var(--border-color)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      opacity: 0,
+                      transition: 'opacity 0.15s',
+                      flexShrink: 0,
+                    }}
+                    title="更多操作"
+                  >
+                    <MoreIcon />
+                  </button>
+                </DropdownTrigger>
+                <DropdownMenu aria-label="PDF操作">
+                  {/* 有 PDF 附件时显示下载和精读 */}
+                  {(item.hasAttachment || item.sourceType === 'upload') && (
+                    <>
+                      <DropdownItem
+                        key="download"
+                        startContent={<DownloadIcon />}
+                        href={item.attachmentUrl || '#'}
+                        target="_blank"
+                      >
+                        下载 PDF
+                      </DropdownItem>
+                      <DropdownItem
+                        key="immersive"
+                        startContent={<BookOpenIcon />}
+                        onPress={() => router.push(`/immersive/${item.id}`)}
+                      >
+                        沉浸式阅读
+                      </DropdownItem>
+                    </>
+                  )}
+                  <DropdownItem
+                    key="insert"
+                    startContent={<PlusIconSmall />}
+                    onPress={() => handleInsert(item)}
+                  >
+                    插入引用
+                  </DropdownItem>
+                </DropdownMenu>
+              </Dropdown>
             </div>
             
             {/* 删除按钮 */}
@@ -731,6 +767,19 @@ export function KnowledgePanel() {
             <Button variant="light" color="danger" onPress={() => selectedItem && handleDelete(selectedItem.id)}>
               删除
             </Button>
+            {/* 沉浸式阅读按钮 - 只有有 PDF 时才显示 */}
+            {selectedItem && (selectedItem.hasAttachment || selectedItem.sourceType === 'upload') && (
+              <Button 
+                color="secondary" 
+                variant="flat"
+                onPress={() => {
+                  onDetailClose()
+                  router.push(`/immersive/${selectedItem.id}`)
+                }}
+              >
+                <BookOpenIcon /> 沉浸式阅读
+              </Button>
+            )}
             <Button color="primary" variant="flat" onPress={() => selectedItem && handleInsert(selectedItem)}>
               插入到文档
             </Button>
@@ -898,6 +947,35 @@ function RefreshIcon({ spinning }: { spinning?: boolean }) {
       <path d="M23 4v6h-6" />
       <path d="M1 20v-6h6" />
       <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+    </svg>
+  )
+}
+
+function BookOpenIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </svg>
+  )
+}
+
+function MoreIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="12" cy="5" r="1" />
+      <circle cx="12" cy="19" r="1" />
+    </svg>
+  )
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <polyline points="7,10 12,15 17,10" />
+      <line x1="12" y1="15" x2="12" y2="3" />
     </svg>
   )
 }

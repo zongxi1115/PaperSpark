@@ -3,19 +3,67 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { PDFDocumentCache, PDFPageCache, TranslationCache, TextBlock } from './types'
 
+// PDF 文件缓存（存储原始 PDF blob）
+interface PDFFileCache {
+  id: string // 对应 knowledgeItemId
+  blob: Blob
+  fileName: string
+  size: number
+  cachedAt: string
+}
+
 // 数据库表结构定义
 const db = new Dexie('PaperReaderPDF') as Dexie & {
+  files: EntityTable<PDFFileCache, 'id'>
   documents: EntityTable<PDFDocumentCache, 'id'>
   pages: EntityTable<PDFPageCache, 'id'>
   translations: EntityTable<TranslationCache, 'id'>
 }
 
 // 初始化数据库
-db.version(1).stores({
+db.version(2).stores({
+  files: 'id, cachedAt',
   documents: 'id, knowledgeItemId, parsedAt',
   pages: 'id, documentId, pageNum',
   translations: 'id, documentId, translatedAt',
 })
+
+// ============ PDF 文件缓存操作 ============
+
+/**
+ * 保存 PDF 文件到缓存
+ */
+export async function savePDFFile(id: string, blob: Blob, fileName: string): Promise<void> {
+  await db.files.put({
+    id,
+    blob,
+    fileName,
+    size: blob.size,
+    cachedAt: new Date().toISOString(),
+  })
+}
+
+/**
+ * 获取缓存的 PDF 文件
+ */
+export async function getPDFFile(id: string): Promise<PDFFileCache | undefined> {
+  return await db.files.get(id)
+}
+
+/**
+ * 检查是否有 PDF 文件缓存
+ */
+export async function hasPDFFileCache(id: string): Promise<boolean> {
+  const file = await db.files.get(id)
+  return !!file
+}
+
+/**
+ * 删除 PDF 文件缓存
+ */
+export async function deletePDFFile(id: string): Promise<void> {
+  await db.files.delete(id)
+}
 
 // ============ 文档缓存操作 ============
 
@@ -135,6 +183,7 @@ export async function hasImmersiveCache(knowledgeItemId: string): Promise<boolea
  * 清除所有缓存
  */
 export async function clearAllCache(): Promise<void> {
+  await db.files.clear()
   await db.documents.clear()
   await db.pages.clear()
   await db.translations.clear()
@@ -144,11 +193,16 @@ export async function clearAllCache(): Promise<void> {
  * 获取缓存统计信息
  */
 export async function getCacheStats(): Promise<{
+  fileCount: number
+  fileSize: number
   documentCount: number
   pageCount: number
   translationCount: number
 }> {
+  const files = await db.files.toArray()
   return {
+    fileCount: files.length,
+    fileSize: files.reduce((sum, f) => sum + f.size, 0),
     documentCount: await db.documents.count(),
     pageCount: await db.pages.count(),
     translationCount: await db.translations.count(),

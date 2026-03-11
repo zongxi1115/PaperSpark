@@ -1,10 +1,12 @@
 'use client'
 import { useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import { Tooltip } from '@heroui/react'
 import { KnowledgePanel } from '@/components/Knowledge/KnowledgePanel'
 import { ThoughtNotesPanel } from '@/components/Thought/ThoughtNotesPanel'
 import { AgentSettingsPanel } from '@/components/Agent/AgentSettingsPanel'
 import { AssistantChatPanel } from '@/components/Assistant/AssistantChatPanel'
+import { LiteratureSearchPanel } from '@/components/Search/LiteratureSearchPanel'
 
 type SidebarTab = 'assistant' | 'search' | 'knowledge' | 'notes' | 'agents' | 'read'
 
@@ -84,64 +86,71 @@ export function RightSidebar() {
   return (
     <div style={{ display: 'flex', height: '100%' }}>
       {/* 展开的面板 */}
-      {activeTab && (
-        <div 
-          style={{ 
-            position: 'relative',
-            width: panelWidth, 
-            background: 'var(--bg-primary)', 
-            borderLeft: '1px solid var(--border-color)',
-            display: 'flex',
-            flexDirection: 'column',
-            overflow: 'hidden',
-            flexShrink: 0,
-          }}
-        >
-          {/* 面板标题 */}
-          <div style={{ 
-            padding: '12px 16px', 
-            borderBottom: '1px solid var(--border-color)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-          }}>
-            <span style={{ fontSize: 14, fontWeight: 600 }}>
-              {sidebarItems.find(i => i.id === activeTab)?.label}
-            </span>
-          </div>
-
-          {/* 面板内容 */}
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            {activeTab === 'assistant' && <AssistantChatPanel />}
-            {activeTab === 'knowledge' && <KnowledgePanel />}
-            {activeTab === 'search' && <PlaceholderPanel title="资料漫游检索" desc="功能开发中..." />}
-            {activeTab === 'notes' && <ThoughtNotesPanel />}
-            {activeTab === 'agents' && <AgentSettingsPanel />}
-            {activeTab === 'read' && <PlaceholderPanel title="知识库精读" desc="功能开发中..." />}
-          </div>
-
-          {/* 可拖拽调整宽度 */}
-          <div
-            onMouseDown={handleMouseDown}
-            onMouseEnter={() => setIsHoveringHandle(true)}
-            onMouseLeave={() => setIsHoveringHandle(false)}
+      <AnimatePresence initial={false}>
+        {activeTab && (
+          <motion.div
+            key={activeTab}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 10 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             style={{
-              position: 'absolute',
-              left: 0,
-              top: 0,
-              bottom: 0,
-              width: 6,
-              cursor: 'col-resize',
-              zIndex: 10,
-              background: (isResizing || isHoveringHandle)
-                ? 'var(--accent-color)'
-                : 'transparent',
-              opacity: isResizing ? 1 : isHoveringHandle ? 0.5 : 0,
-              transition: 'background 0.15s, opacity 0.15s',
+              position: 'relative',
+              width: panelWidth,
+              background: 'var(--bg-primary)',
+              borderLeft: '1px solid var(--border-color)',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              flexShrink: 0,
             }}
-          />
-        </div>
-      )}
+          >
+            {/* 面板标题 */}
+            <div style={{ 
+              padding: '12px 16px', 
+              borderBottom: '1px solid var(--border-color)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600 }}>
+                {sidebarItems.find(i => i.id === activeTab)?.label}
+              </span>
+            </div>
+
+            {/* 面板内容 */}
+            <div style={{ flex: 1, overflow: 'hidden' }}>
+              {activeTab === 'assistant' && <AssistantChatPanel />}
+              {activeTab === 'knowledge' && <KnowledgePanel />}
+              {activeTab === 'search' && <LiteratureSearchPanel />}
+              {activeTab === 'notes' && <ThoughtNotesPanel />}
+              {activeTab === 'agents' && <AgentSettingsPanel />}
+              {activeTab === 'read' && <PlaceholderPanel title="知识库精读" desc="功能开发中..." />}
+            </div>
+
+            {/* 可拖拽调整宽度 */}
+            <div
+              onMouseDown={handleMouseDown}
+              onMouseEnter={() => setIsHoveringHandle(true)}
+              onMouseLeave={() => setIsHoveringHandle(false)}
+              style={{
+                position: 'absolute',
+                left: 0,
+                top: 0,
+                bottom: 0,
+                width: 6,
+                cursor: 'col-resize',
+                zIndex: 10,
+                background: (isResizing || isHoveringHandle)
+                  ? 'var(--accent-color)'
+                  : 'transparent',
+                opacity: isResizing ? 1 : isHoveringHandle ? 0.5 : 0,
+                transition: 'background 0.15s, opacity 0.15s',
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 图标侧边栏 */}
       <aside

@@ -1,154 +1,214 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Button, Progress, Chip, Tooltip } from '@heroui/react'
+import { Button, Chip, Tooltip, Skeleton, Progress } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { getKnowledgeItem, getSettings, getSelectedSmallModel } from '@/lib/storage'
 import { 
+  getPDFFile, 
+  savePDFFile, 
   getPDFDocumentByKnowledgeId, 
-  getPDFPagesByDocumentId, 
-  getTranslation,
   savePDFDocument,
+  getPDFPagesByDocumentId,
   savePDFPages,
+  getTranslation,
   saveTranslation,
-  hasImmersiveCache 
 } from '@/lib/pdfCache'
-import { parsePDFFromBase64, parsePDFFromURL } from '@/lib/pdfParser'
-import type { TextBlock, PDFPageCache, ModelConfig } from '@/lib/types'
-
-type ProcessStatus = 'idle' | 'parsing' | 'chunking' | 'translating' | 'done' | 'error'
 
 export default function ImmersiveReaderPage() {
   const params = useParams()
   const router = useRouter()
   const knowledgeId = params.id as string
 
-  const [status, setStatus] = useState<ProcessStatus>('idle')
-  const [progress, setProgress] = useState(0)
-  const [progressText, setProgressText] = useState('')
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  const [pages, setPages] = useState<PDFPageCache[]>([])
-  const [currentPage, setCurrentPage] = useState(1)
-  const [showChinese, setShowChinese] = useState(true)
-  const [scale, setScale] = useState(1.5)
+  const [pdfUrl, setPdfUrl] = useState<string | null>(null)
   const [documentTitle, setDocumentTitle] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalPages, setTotalPages] = useState(0)
+  
+  // 后台处理状态
+  const [processing, setProcessing] = useState(false)
+  const [processProgress, setProcessProgress] = useState(0)
+  const [processStatus, setProcessStatus] = useState('')
+  const [hasTranslation, setHasTranslation] = useState(false)
+  
+  // 元数据
+  const [metadata, setMetadata] = useState<{
+    title: string
+    authors: string[]
+    abstract: string
+    year: string
+    journal: string
+  } | null>(null)
+  const [metadataLoading, setMetadataLoading] = useState(true)
 
-  // 检查缓存并加载数据
-  const loadDocument = useCallback(async () => {
-    setStatus('parsing')
-    setProgressText('正在检查缓存...')
+  const iframeRef = useRef<HTMLIFrameElement>(null)
+  const processedRef = useRef(false)
+
+  // 加载 PDF 文件
+  const loadPDF = useCallback(async () => {
+    setLoading(true)
+    setError(null)
 
     try {
-      // 获取知识库条目
       const item = getKnowledgeItem(knowledgeId)
       if (!item) {
         setError('未找到文档')
-        setStatus('error')
+        setLoading(false)
         return
       }
       setDocumentTitle(item.title)
 
-      // 检查是否已有完整缓存
-      const hasCache = await hasImmersiveCache(knowledgeId)
-      
-      if (hasCache) {
-        setProgressText('正在加载缓存...')
-        const doc = await getPDFDocumentByKnowledgeId(knowledgeId)
-        if (doc) {
-          const cachedPages = await getPDFPagesByDocumentId(doc.id)
-          setPages(cachedPages)
-          setStatus('done')
-          return
-        }
+      // 检查是否有缓存的 PDF 文件
+      const cachedFile = await getPDFFile(knowledgeId)
+      if (cachedFile) {
+        const url = URL.createObjectURL(cachedFile.blob)
+        setPdfUrl(url)
+        setLoading(false)
+        return
       }
 
-      // 没有缓存，需要解析 PDF
-      setProgressText('正在解析 PDF...')
-      setProgress(10)
-
-      // 获取 PDF 数据
-      let pdfBase64: string | null = null
-      let pdfUrl: string | null = null
+      // 获取 PDF
+      let blob: Blob | null = null
 
       if (item.sourceType === 'upload' && item.sourceId) {
         // 从 IndexedDB 获取上传的文件
         const { getStoredFile } = await import('@/lib/localFiles')
         const fileRecord = await getStoredFile(item.sourceId)
         if (fileRecord?.blob) {
-          // 转换为 base64
-          const arrayBuffer = await fileRecord.blob.arrayBuffer()
-          const uint8Array = new Uint8Array(arrayBuffer)
-          let binary = ''
-          for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i])
-          }
-          pdfBase64 = btoa(binary)
+          blob = fileRecord.blob
         }
       } else if (item.attachmentUrl) {
-        pdfUrl = item.attachmentUrl
+        // 通过代理获取远程 PDF
+        const res = await fetch(`/api/pdf/proxy?url=${encodeURIComponent(item.attachmentUrl)}`)
+        if (!res.ok) {
+          throw new Error('获取 PDF 失败')
+        }
+        const data = await res.json()
+        // base64 转 blob
+        const binaryString = atob(data.base64)
+        const bytes = new Uint8Array(binaryString.length)
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i)
+        }
+        blob = new Blob([bytes], { type: 'application/pdf' })
       }
 
-      if (!pdfBase64 && !pdfUrl) {
+      if (!blob) {
         setError('无法获取 PDF 文件')
-        setStatus('error')
+        setLoading(false)
         return
       }
 
-      // 在客户端解析 PDF
-      setProgressText('正在提取文本...')
-      setProgress(20)
+      // 缓存 PDF 文件
+      await savePDFFile(knowledgeId, blob, item.fileName || 'document.pdf')
 
-      let parseResult
-      if (pdfBase64) {
-        parseResult = await parsePDFFromBase64(pdfBase64, knowledgeId, (current, total) => {
-          const pct = 20 + (current / total) * 30
-          setProgress(pct)
-          setProgressText(`正在解析第 ${current}/${total} 页...`)
+      const url = URL.createObjectURL(blob)
+      setPdfUrl(url)
+      setLoading(false)
+
+    } catch (err) {
+      console.error('Load PDF error:', err)
+      setError(err instanceof Error ? err.message : '加载失败')
+      setLoading(false)
+    }
+  }, [knowledgeId])
+
+  // 后台处理：文本提取、智能分块、翻译
+  const processPDF = useCallback(async () => {
+    if (processedRef.current) return
+    processedRef.current = true
+
+    // 检查是否已有翻译缓存
+    const existingDoc = await getPDFDocumentByKnowledgeId(knowledgeId)
+    if (existingDoc) {
+      const translation = await getTranslation(knowledgeId)
+      if (translation) {
+        setHasTranslation(true)
+        const pages = await getPDFPagesByDocumentId(knowledgeId)
+        if (pages.length > 0) {
+          setTotalPages(pages.length)
+        }
+        // 从缓存恢复元数据
+        setMetadata({
+          title: existingDoc.metadata.title,
+          authors: existingDoc.metadata.authors,
+          abstract: existingDoc.metadata.abstract,
+          year: existingDoc.metadata.year,
+          journal: existingDoc.metadata.journal,
         })
-      } else if (pdfUrl) {
-        parseResult = await parsePDFFromURL(pdfUrl, knowledgeId, (current, total) => {
-          const pct = 20 + (current / total) * 30
-          setProgress(pct)
-          setProgressText(`正在解析第 ${current}/${total} 页...`)
-        })
+        setMetadataLoading(false)
+        return
+      }
+    }
+
+    setProcessing(true)
+    setProcessStatus('正在提取文本...')
+    setProcessProgress(10)
+
+    try {
+      const item = getKnowledgeItem(knowledgeId)
+      if (!item) return
+
+      const cachedFile = await getPDFFile(knowledgeId)
+      if (!cachedFile) {
+        setMetadataLoading(false)
+        return
       }
 
-      if (!parseResult) {
-        throw new Error('PDF 解析失败')
-      }
+      const arrayBuffer = await cachedFile.blob.arrayBuffer()
 
-      setProgress(50)
+      // 使用 PDF.js 提取文本
+      const { parsePDF } = await import('@/lib/pdfParser')
+      const result = await parsePDF(arrayBuffer, knowledgeId, (current, total) => {
+        setProcessProgress(10 + (current / total) * 40)
+        setProcessStatus(`正在提取文本 ${current}/${total}...`)
+      })
 
-      // 保存文档缓存到 IndexedDB
+      setTotalPages(result.pages.length)
+      setProcessProgress(55)
+      setProcessStatus('正在保存文档...')
+
+      // 保存文档缓存
       await savePDFDocument({
         id: knowledgeId,
         knowledgeItemId: knowledgeId,
-        fileName: item.fileName || 'unknown.pdf',
-        pageCount: parseResult.pages.length,
+        fileName: cachedFile.fileName,
+        pageCount: result.pages.length,
         metadata: {
-          title: parseResult.metadata.title || item.title,
-          authors: parseResult.metadata.authors || item.authors,
-          abstract: parseResult.metadata.abstract || item.abstract || '',
-          year: parseResult.metadata.year || item.year || '',
-          journal: parseResult.metadata.journal || '',
-          keywords: parseResult.metadata.keywords || [],
-          references: parseResult.metadata.references || [],
+          title: result.metadata.title || item.title,
+          authors: result.metadata.authors?.length ? result.metadata.authors : item.authors,
+          abstract: result.metadata.abstract || item.abstract || '',
+          year: result.metadata.year || item.year || '',
+          journal: result.metadata.journal || item.journal || '',
+          keywords: result.metadata.keywords || [],
+          references: result.metadata.references || [],
         },
         parsedAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       })
 
-      // 保存页面缓存
-      await savePDFPages(parseResult.pages)
+      // 更新元数据显示
+      setMetadata({
+        title: result.metadata.title || item.title,
+        authors: result.metadata.authors?.length ? result.metadata.authors : item.authors,
+        abstract: result.metadata.abstract || item.abstract || '',
+        year: result.metadata.year || item.year || '',
+        journal: result.metadata.journal || item.journal || '',
+      })
+      setMetadataLoading(false)
 
-      setProgress(60)
-      setProgressText('正在智能分块...')
+      // 保存页面缓存
+      await savePDFPages(result.pages)
+
+      setProcessProgress(60)
+      setProcessStatus('正在智能分块...')
 
       // 准备分块数据
       const allBlocks: { id: string; text: string; type: string }[] = []
-      parseResult.pages.forEach(page => {
+      result.pages.forEach(page => {
         page.blocks.forEach(block => {
           if (block.text.trim() && block.type !== 'header' && block.type !== 'footer') {
             allBlocks.push({
@@ -165,22 +225,25 @@ export default function ImmersiveReaderPage() {
       const modelConfig = getSelectedSmallModel(settings)
 
       // 智能分块
-      const chunkRes = await fetch('/api/pdf/chunk', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ blocks: allBlocks.slice(0, 200), modelConfig }),
-      })
-
-      setProgress(70)
-      setProgressText('正在翻译...')
-
-      let chunks: { id: string; text: string }[] = []
-      if (chunkRes.ok) {
-        const chunkData = await chunkRes.json()
-        chunks = chunkData.chunks || allBlocks
-      } else {
-        chunks = allBlocks
+      let chunks: { id: string; text: string }[] = allBlocks
+      try {
+        const chunkRes = await fetch('/api/pdf/chunk', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ blocks: allBlocks.slice(0, 300), modelConfig }),
+        })
+        if (chunkRes.ok) {
+          const chunkData = await chunkRes.json()
+          if (chunkData.chunks?.length) {
+            chunks = chunkData.chunks
+          }
+        }
+      } catch {
+        // 分块失败，使用原始块
       }
+
+      setProcessProgress(70)
+      setProcessStatus('正在翻译...')
 
       // 批量翻译
       const translateRes = await fetch('/api/pdf/translate', {
@@ -189,89 +252,66 @@ export default function ImmersiveReaderPage() {
         body: JSON.stringify({ documentId: knowledgeId, chunks, modelConfig }),
       })
 
-      if (!translateRes.ok) {
-        const errData = await translateRes.json()
-        throw new Error(errData.error || '翻译失败')
+      if (translateRes.ok) {
+        setHasTranslation(true)
+        setProcessProgress(100)
+        setProcessStatus('翻译完成')
+      } else {
+        setProcessStatus('翻译失败，可稍后重试')
       }
 
-      // 重新加载页面数据
-      const finalPages = await getPDFPagesByDocumentId(knowledgeId)
-      setPages(finalPages)
-      setStatus('done')
-      setProgress(100)
-      setProgressText('完成')
-
     } catch (err) {
-      console.error('Load document error:', err)
-      setError(err instanceof Error ? err.message : '加载失败')
-      setStatus('error')
+      console.error('Process PDF error:', err)
+      setProcessStatus('处理失败')
+      setMetadataLoading(false)
+    } finally {
+      setProcessing(false)
     }
   }, [knowledgeId])
 
   useEffect(() => {
-    loadDocument()
-  }, [loadDocument])
+    loadPDF()
+  }, [loadPDF])
 
-  // 渲染文本块
-  const renderBlocks = (page: PDFPageCache) => {
-    return page.blocks.map((block) => {
-      // 跳过页眉页脚
-      if (block.type === 'header' || block.type === 'footer') {
-        return null
+  // PDF 加载完成后开始后台处理
+  useEffect(() => {
+    if (pdfUrl && !loading) {
+      // 延迟 1 秒开始后台处理，让用户先看到 PDF
+      const timer = setTimeout(() => {
+        processPDF()
+      }, 1000)
+      return () => clearTimeout(timer)
+    }
+  }, [pdfUrl, loading, processPDF])
+
+  // 清理 URL
+  useEffect(() => {
+    return () => {
+      if (pdfUrl) {
+        URL.revokeObjectURL(pdfUrl)
       }
-
-      const displayText = showChinese && block.translated ? block.translated : block.text
-      const isTranslated = showChinese && block.translated
-
-      return (
-        <div
-          key={block.id}
-          className="text-block absolute select-text"
-          style={{
-            left: block.bbox.x * scale,
-            top: block.bbox.y * scale,
-            width: block.bbox.width * scale,
-            minHeight: block.bbox.height * scale,
-            fontSize: block.style.fontSize * scale * 0.8,
-            fontFamily: isTranslated ? 'system-ui, sans-serif' : block.style.fontFamily,
-            fontWeight: block.style.isBold ? 'bold' : 'normal',
-            fontStyle: block.style.isItalic ? 'italic' : 'normal',
-            color: isTranslated ? '#1a1a1a' : '#333',
-            lineHeight: 1.4,
-            textAlign: 'left',
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {displayText}
-        </div>
-      )
-    })
-  }
+    }
+  }, [pdfUrl])
 
   // 加载状态
-  if (status === 'idle' || status === 'parsing' || status === 'chunking' || status === 'translating') {
+  if (loading) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-52px)] bg-gray-50">
         <div className="w-96 p-8 bg-white rounded-xl shadow-lg">
           <div className="text-center mb-6">
             <Icon icon="mdi:file-document-outline" className="text-6xl text-primary mb-4" />
-            <h2 className="text-xl font-semibold">{documentTitle || '正在加载...'}</h2>
+            <h2 className="text-xl font-semibold">正在加载 PDF...</h2>
           </div>
-          <Progress 
-            value={progress} 
-            className="mb-4" 
-            color="primary"
-            size="sm"
-          />
-          <p className="text-center text-gray-500">{progressText}</p>
+          <div className="flex justify-center">
+            <Icon icon="mdi:loading" className="text-3xl text-primary animate-spin" />
+          </div>
         </div>
       </div>
     )
   }
 
   // 错误状态
-  if (status === 'error') {
+  if (error) {
     return (
       <div className="flex flex-col items-center justify-center h-[calc(100vh-52px)] bg-gray-50">
         <div className="w-96 p-8 bg-white rounded-xl shadow-lg text-center">
@@ -279,7 +319,7 @@ export default function ImmersiveReaderPage() {
           <h2 className="text-xl font-semibold mb-2">加载失败</h2>
           <p className="text-gray-500 mb-6">{error}</p>
           <div className="flex gap-4 justify-center">
-            <Button color="primary" onPress={loadDocument}>
+            <Button color="primary" onPress={loadPDF}>
               重试
             </Button>
             <Button variant="light" onPress={() => router.back()}>
@@ -291,118 +331,135 @@ export default function ImmersiveReaderPage() {
     )
   }
 
-  // 正常渲染
-  const currentPgData = pages.find(p => p.pageNum === currentPage)
-
   return (
     <div className="flex h-[calc(100vh-52px)] bg-gray-100">
       {/* 左侧工具栏 */}
       <div className="w-14 bg-white border-r border-gray-200 flex flex-col items-center py-4 gap-2">
         <Tooltip content="返回" placement="right">
-          <Button
-            isIconOnly
-            variant="light"
-            onPress={() => router.back()}
-          >
+          <Button isIconOnly variant="light" onPress={() => router.back()}>
             <Icon icon="mdi:arrow-left" className="text-xl" />
           </Button>
         </Tooltip>
 
         <div className="w-8 h-px bg-gray-200 my-2" />
 
-        <Tooltip content={showChinese ? "显示原文" : "显示译文"} placement="right">
-          <Button
-            isIconOnly
-            color={showChinese ? "primary" : "default"}
-            variant={showChinese ? "solid" : "light"}
-            onPress={() => setShowChinese(!showChinese)}
-          >
-            <Icon icon="mdi:translate" className="text-xl" />
-          </Button>
-        </Tooltip>
-
-        <Tooltip content="放大" placement="right">
+        <Tooltip content="上一页" placement="right">
           <Button
             isIconOnly
             variant="light"
-            onPress={() => setScale(s => Math.min(s + 0.25, 3))}
-            isDisabled={scale >= 3}
+            onPress={() => setCurrentPage(p => Math.max(1, p - 1))}
+            isDisabled={currentPage <= 1}
           >
-            <Icon icon="mdi:magnify-plus" className="text-xl" />
+            <Icon icon="mdi:chevron-up" className="text-xl" />
           </Button>
         </Tooltip>
 
-        <Tooltip content="缩小" placement="right">
+        <Tooltip content="下一页" placement="right">
           <Button
             isIconOnly
             variant="light"
-            onPress={() => setScale(s => Math.max(s - 0.25, 0.5))}
-            isDisabled={scale <= 0.5}
+            onPress={() => setCurrentPage(p => p + 1)}
+            isDisabled={!totalPages || currentPage >= totalPages}
           >
-            <Icon icon="mdi:magnify-minus" className="text-xl" />
+            <Icon icon="mdi:chevron-down" className="text-xl" />
           </Button>
         </Tooltip>
 
-        <div className="mt-auto flex flex-col gap-2">
-          <Chip size="sm" variant="flat">
-            {scale.toFixed(2)}x
-          </Chip>
+        <div className="w-8 h-px bg-gray-200 my-2" />
+
+        {/* 处理状态指示 */}
+        {processing && (
+          <Tooltip content={processStatus} placement="right">
+            <div className="flex flex-col items-center">
+              <Icon icon="mdi:sync" className="text-xl text-primary animate-spin" />
+              <span className="text-xs text-gray-500 mt-1">{Math.round(processProgress)}%</span>
+            </div>
+          </Tooltip>
+        )}
+
+        {hasTranslation && !processing && (
+          <Tooltip content="翻译已完成" placement="right">
+            <Icon icon="mdi:check-circle" className="text-xl text-success" />
+          </Tooltip>
+        )}
+
+        <div className="mt-auto flex flex-col items-center gap-2">
+          {totalPages > 0 && (
+            <span className="text-xs text-gray-400">{currentPage}/{totalPages}</span>
+          )}
         </div>
       </div>
 
       {/* 主内容区域 */}
-      <div className="flex-1 overflow-auto p-6">
-        <div className="max-w-4xl mx-auto">
-          {/* 页面控制 */}
-          <div className="flex items-center justify-between mb-4 bg-white rounded-lg p-3 shadow-sm">
-            <div className="flex items-center gap-2">
-              <Button
-                isIconOnly
-                size="sm"
-                variant="light"
-                onPress={() => setCurrentPage(p => Math.max(1, p - 1))}
-                isDisabled={currentPage <= 1}
-              >
-                <Icon icon="mdi:chevron-left" />
-              </Button>
-              <span className="text-sm">
-                第 {currentPage} / {pages.length} 页
-              </span>
-              <Button
-                isIconOnly
-                size="sm"
-                variant="light"
-                onPress={() => setCurrentPage(p => Math.min(pages.length, p + 1))}
-                isDisabled={currentPage >= pages.length}
-              >
-                <Icon icon="mdi:chevron-right" />
-              </Button>
-            </div>
-            <div className="flex items-center gap-2">
-              {showChinese && (
-                <Chip size="sm" color="primary" variant="flat">
-                  译文模式
-                </Chip>
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* 顶部信息栏 */}
+        <div className="bg-white border-b border-gray-200 px-6 py-3">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              {/* 标题 */}
+              {metadataLoading ? (
+                <Skeleton className="h-6 w-3/4 rounded-lg" />
+              ) : (
+                <h1 className="text-lg font-semibold truncate">
+                  {metadata?.title || documentTitle}
+                </h1>
               )}
-              {!showChinese && (
-                <Chip size="sm" variant="flat">
-                  原文模式
-                </Chip>
-              )}
-            </div>
-          </div>
+              
+              {/* 作者 */}
+              <div className="mt-1">
+                {metadataLoading ? (
+                  <Skeleton className="h-4 w-1/2 rounded-lg" />
+                ) : (
+                  <p className="text-sm text-gray-500">
+                    {metadata?.authors?.length ? metadata.authors.join(', ') : ''}
+                    {metadata?.year && ` (${metadata.year})`}
+                    {metadata?.journal && ` - ${metadata.journal}`}
+                  </p>
+                )}
+              </div>
 
-          {/* PDF 页面渲染 */}
-          {currentPgData && (
-            <div
-              className="bg-white shadow-lg mx-auto relative"
-              style={{
-                width: currentPgData.width * scale,
-                height: currentPgData.height * scale,
-              }}
-            >
-              {renderBlocks(currentPgData)}
+              {/* 摘要 */}
+              {(metadataLoading || metadata?.abstract) && (
+                <div className="mt-2">
+                  {metadataLoading ? (
+                    <div className="space-y-1">
+                      <Skeleton className="h-3 w-full rounded" />
+                      <Skeleton className="h-3 w-full rounded" />
+                      <Skeleton className="h-3 w-3/4 rounded" />
+                    </div>
+                  ) : (
+                    <p className="text-xs text-gray-600 line-clamp-3">
+                      {metadata?.abstract}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
+
+            {/* 处理进度 */}
+            {processing && (
+              <div className="w-48 flex-shrink-0">
+                <Progress 
+                  value={processProgress} 
+                  size="sm" 
+                  color="primary"
+                  className="mb-1"
+                />
+                <p className="text-xs text-gray-500 text-center">{processStatus}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* PDF 查看器 */}
+        <div className="flex-1 overflow-auto p-4">
+          {pdfUrl && (
+            <iframe
+              ref={iframeRef}
+              src={pdfUrl}
+              className="w-full h-full min-h-[800px] border-0 rounded-lg shadow-lg"
+              title="PDF Viewer"
+            />
           )}
         </div>
       </div>

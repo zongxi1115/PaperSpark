@@ -31,6 +31,7 @@ import type { AppDocument, AppSettings } from '@/lib/types'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
+import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -152,6 +153,10 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const [ghostText, setGhostText] = useState<string | null>(null) // ghost text 内容
   const [ghostPosition, setGhostPosition] = useState<{ top: number; left: number } | null>(null)
   const [citations, setCitations] = useState<Map<string, CitationData>>(new Map()) // 引用列表
+
+  // 当前主题配置，动态更新
+  const activeThemeConfig = getThemeById(settings.editorThemeId ?? 'default')
+  const activeTheme = buildBlockNoteTheme(activeThemeConfig)
   
   const correctTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const completeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -161,6 +166,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const citationsRef = useRef<Map<string, CitationData>>(new Map()) // 用于事件处理中获取最新引用
 
   const MAX_PASTE_UPLOAD_BYTES = 50 * 1024 * 1024
+
+  const syncSettingsFromStorage = useCallback(() => {
+    const latestSettings = getSettings()
+    settingsRef.current = latestSettings
+    setSettings(latestSettings)
+  }, [])
 
   const editor = useCreateBlockNote({
     schema,
@@ -318,6 +329,9 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     const loadedSettings = getSettings()
     setSettings(loadedSettings)
     settingsRef.current = loadedSettings
+    // 注入当前主题字体
+    const themeConfig = getThemeById(loadedSettings.editorThemeId ?? 'default')
+    if (themeConfig.googleFontUrl) injectGoogleFont(themeConfig.googleFontUrl)
 
     if (loaded) {
       setDoc(loaded)
@@ -364,6 +378,29 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId])
+
+  useEffect(() => {
+    if (activeThemeConfig.googleFontUrl) {
+      injectGoogleFont(activeThemeConfig.googleFontUrl)
+    }
+  }, [activeThemeConfig.googleFontUrl])
+
+  useEffect(() => {
+    const handleFocus = () => syncSettingsFromStorage()
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncSettingsFromStorage()
+      }
+    }
+
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [syncSettingsFromStorage])
 
   // 重新扫描文档中的引用，按出现顺序重新编号
   const reindexCitations = useCallback(() => {
@@ -716,11 +753,20 @@ export function EditorPageContent({ docId }: EditorPageProps) {
 
         {/* Editor - Only scrollable area */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '40px 60px', background: 'var(--bg-primary)' }}>
-          <div style={{ maxWidth: 800, margin: '0 auto' }}>
+          <div
+            className="editor-themed-surface"
+            style={{
+              maxWidth: 800,
+              margin: '0 auto',
+              fontFamily: activeThemeConfig.fontFamily,
+              ['--editor-font-family' as string]: activeThemeConfig.fontFamily,
+            }}
+          >
             <BlockNoteView
+              key={settings.editorThemeId ?? 'default'}
               editor={editor}
               onChange={handleChange}
-              theme="light"
+              theme={activeTheme}
               formattingToolbar={false}
               slashMenu={false}
             >

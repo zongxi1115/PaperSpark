@@ -57,6 +57,15 @@ body {
 .bn-editor { padding: 0 !important; }
 .bn-container { min-height: 300px; }
 
+.editor-themed-surface,
+.editor-themed-surface .bn-container,
+.editor-themed-surface .bn-editor,
+.editor-themed-surface .bn-block,
+.editor-themed-surface .bn-inline-content,
+.editor-themed-surface .bn-block-content {
+  font-family: var(--editor-font-family), 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important;
+}
+
 /* Mathlive 字体配置 - 使用本地字体 */
 :root {
   --mathfield-fonts-directory: /fonts/;

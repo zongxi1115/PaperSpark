@@ -8,10 +8,13 @@ interface TocEntry {
   id: string
   text: string
   level: number
+  number: string
 }
 
 function extractToc(blocks: Block[]): TocEntry[] {
   const entries: TocEntry[] = []
+  const counters = [0, 0, 0] // 对应 level 1, 2, 3
+  
   for (const block of blocks) {
     if (block.type === 'heading') {
       const b = block as { type: 'heading'; id: string; props: { level: number }; content: { type: string; text: string }[] }
@@ -19,8 +22,27 @@ function extractToc(blocks: Block[]): TocEntry[] {
         ?.filter(c => c.type === 'text')
         .map(c => c.text)
         .join('') ?? ''
+      
       if (text.trim()) {
-        entries.push({ id: b.id, text: text.trim(), level: b.props.level ?? 1 })
+        const level = b.props.level ?? 1
+        // 重置当前层级以下的计数器
+        for (let i = level; i < 3; i++) {
+          counters[i] = 0
+        }
+        // 增加当前层级计数
+        counters[level - 1]++
+        
+        // 生成编号
+        let number: string
+        if (level === 1) {
+          number = `${counters[0]}`
+        } else if (level === 2) {
+          number = `${counters[0]}.${counters[1]}`
+        } else {
+          number = `${counters[0]}.${counters[1]}.${counters[2]}`
+        }
+        
+        entries.push({ id: b.id, text: text.trim(), level, number })
       }
     }
   }
@@ -107,59 +129,73 @@ export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
 
       {!isCollapsed && (
         <>
-          {/* Doc title */}
-          <div style={{ padding: '10px 14px 6px' }}>
-            <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
-              当前文档
-            </p>
-            <p style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', lineHeight: 1.4, wordBreak: 'break-word' }}>
-              {docTitle || '无标题文档'}
-            </p>
-          </div>
-
-          <Divider />
-
           {/* TOC */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '8px 0' }}>
-            <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '4px 14px 6px' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
+            <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0 16px 8px' }}>
               目录
             </p>
 
             {toc.length === 0 ? (
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 14px', fontStyle: 'italic' }}>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 16px', fontStyle: 'italic' }}>
                 使用标题(# ## ###)生成目录
               </p>
             ) : (
-              <nav>
-                {toc.map(entry => (
-                  <button
-                    key={entry.id}
-                    onClick={() => scrollToBlock(entry.id)}
-                    style={{
-                      display: 'block',
-                      width: '100%',
-                      textAlign: 'left',
-                      background: 'none',
-                      border: 'none',
-                      cursor: 'pointer',
-                      padding: `5px 14px 5px ${10 + (entry.level - 1) * 14}px`,
-                      fontSize: entry.level === 1 ? 13 : 12,
-                      fontWeight: entry.level === 1 ? 500 : 400,
-                      color: entry.level === 1 ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      lineHeight: 1.4,
-                      borderRadius: 4,
-                      transition: 'background 0.15s',
-                      wordBreak: 'break-word',
-                    }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-tertiary)' }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'none' }}
-                  >
-                    {entry.level > 1 && (
-                      <span style={{ marginRight: 4, color: 'var(--text-muted)' }}>{'·'.repeat(entry.level - 1)}</span>
-                    )}
-                    {entry.text}
-                  </button>
-                ))}
+              <nav style={{ padding: '0 8px' }}>
+                {toc.map((entry) => {
+                  const indent = (entry.level - 1) * 16
+                  
+                  return (
+                    <button
+                      key={entry.id}
+                      onClick={() => scrollToBlock(entry.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        width: '100%',
+                        textAlign: 'left',
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: '8px 10px',
+                        marginBottom: 4,
+                        marginLeft: indent,
+                        fontSize: 13,
+                        fontWeight: entry.level === 1 ? 600 : 400,
+                        color: entry.level === 1 ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        lineHeight: 1.5,
+                        borderRadius: 8,
+                        transition: 'all 0.15s ease',
+                        wordBreak: 'break-word',
+                        position: 'relative',
+                      }}
+                      onMouseEnter={e => { 
+                        e.currentTarget.style.background = 'var(--bg-tertiary)'
+                      }}
+                      onMouseLeave={e => { 
+                        e.currentTarget.style.background = 'none'
+                      }}
+                    >
+                      {/* 编号 */}
+                      <span style={{
+                        minWidth: entry.level === 1 ? 24 : 44,
+                        fontWeight: entry.level === 1 ? 600 : 400,
+                        color: entry.level === 1 ? 'var(--primary)' : 'var(--text-muted)',
+                        marginRight: 8,
+                        fontSize: entry.level === 1 ? 13 : 12,
+                      }}>
+                        {entry.number}
+                      </span>
+                      <span style={{ 
+                        flex: 1, 
+                        overflow: 'hidden', 
+                        textOverflow: 'ellipsis', 
+                        whiteSpace: 'nowrap',
+                      }}>
+                        {entry.text}
+                      </span>
+                    </button>
+                  )
+                })}
               </nav>
             )}
           </div>

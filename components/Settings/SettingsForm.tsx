@@ -23,6 +23,7 @@ import {
 import { getSettings, saveSettings, generateId } from '@/lib/storage'
 import type { AppSettings, FeatureSelectItem, AIProvider, AIModel } from '@/lib/types'
 import { defaultSettings, selectFeatures } from '@/lib/types'
+import { EDITOR_THEMES, injectGoogleFont } from '@/lib/editorThemes'
 import { Icon } from '@iconify/react'
 
 // 获取所有可用模型（用于下拉选择）
@@ -476,6 +477,79 @@ export function SettingsForm() {
                 />
               </div>
             ))}
+          </CardBody>
+        </Card>
+
+        {/* 编辑器主题 */}
+        <Card shadow="sm">
+          <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+            <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>编辑器主题</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              选择字体与配色风格，支持 Google Fonts 动态加载
+            </p>
+          </CardHeader>
+          <Divider />
+          <CardBody style={{ padding: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+              {EDITOR_THEMES.map(theme => {
+                const isSelected = (settings.editorThemeId ?? 'default') === theme.id
+                return (
+                  <div
+                    key={theme.id}
+                    onClick={() => {
+                      if (theme.googleFontUrl) injectGoogleFont(theme.googleFontUrl)
+                      setSettings(s => ({ ...s, editorThemeId: theme.id }))
+                    }}
+                    style={{
+                      border: `2px solid ${isSelected ? 'var(--accent-color, #006fee)' : 'var(--border-color, #e4e4e7)'}`,
+                      borderRadius: 10,
+                      padding: '12px 14px',
+                      cursor: 'pointer',
+                      background: isSelected ? 'color-mix(in srgb, var(--accent-color, #006fee) 8%, transparent)' : 'var(--bg-secondary)',
+                      transition: 'border-color 0.15s, background 0.15s',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <p style={{
+                      fontFamily: theme.fontFamily,
+                      fontSize: 15,
+                      fontWeight: 600,
+                      margin: '0 0 2px',
+                      color: 'var(--text-primary)',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}>
+                      {theme.name}
+                    </p>
+                    <p style={{
+                      fontFamily: theme.fontFamily,
+                      fontSize: 12,
+                      color: 'var(--text-muted)',
+                      margin: '0 0 6px',
+                      lineHeight: 1.4,
+                    }}>
+                      {theme.description}
+                    </p>
+                    <p style={{
+                      fontFamily: theme.fontFamily,
+                      fontSize: 13,
+                      color: 'var(--text-secondary)',
+                      margin: 0,
+                      fontStyle: 'italic',
+                    }}>
+                      The quick brown fox…
+                    </p>
+                    {isSelected && (
+                      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <Icon icon="solar:check-circle-bold" width={14} style={{ color: 'var(--accent-color, #006fee)' }} />
+                        <span style={{ fontSize: 11, color: 'var(--accent-color, #006fee)', fontWeight: 500 }}>已选择</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
           </CardBody>
         </Card>
 

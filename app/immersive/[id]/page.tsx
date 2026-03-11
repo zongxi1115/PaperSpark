@@ -19,7 +19,7 @@ import {
 } from '@/lib/pdfCache'
 import PDFViewer from '@/components/PDF/PDFViewer'
 import { parsePDF } from '@/lib/pdfParser'
-import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor } from '@/lib/types'
+import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
 
 export default function ImmersiveReaderPage() {
@@ -222,13 +222,22 @@ export default function ImmersiveReaderPage() {
     if (translating || blocks.length === 0) return
 
     setTranslating(true)
+    setHasTranslation(false)
+    setShowTranslation(true)
+    setTranslatedBlocks(new Map())
     setTranslationProgress({ current: 0, total: blocks.length })
 
     const settings = getSettings()
     const modelConfig = getSelectedSmallModel(settings)
 
-    // 直接发送原始 blocks，API 内部会智能分块
-    const blocksData = blocks.map(b => ({ id: b.id, text: b.text, type: b.type }))
+    const blocksData: TranslationBlockPayload[] = blocks.map(block => ({
+      id: block.id,
+      type: block.type,
+      text: block.text,
+      pageNum: block.pageNum,
+      bbox: block.bbox,
+      style: block.style,
+    }))
 
     try {
       const response = await fetch('/api/pdf/translate', {
@@ -262,22 +271,32 @@ export default function ImmersiveReaderPage() {
             try {
               const event = JSON.parse(line.slice(6)) as TranslationStreamEvent
 
-              if (event.type === 'progress') {
+              if (event.type === 'start') {
+                setTranslationProgress({
+                  current: event.data?.progress || 0,
+                  total: event.data?.total || blocks.length,
+                })
+              } else if (event.type === 'progress') {
                 setTranslationProgress({
                   current: event.data?.progress || 0,
                   total: event.data?.total || blocks.length,
                 })
               } else if (event.type === 'chunk' && event.data) {
-                // 实时更新翻译结果
+                const blockId = event.data.blockId || event.data.chunkId
+                if (!blockId) continue
+
                 setTranslatedBlocks(prev => {
                   const next = new Map(prev)
-                  next.set(event.data!.chunkId!, event.data!.translated!)
+                  next.set(blockId, event.data.translated || '')
                   return next
                 })
-                setTranslationProgress({
-                  current: event.data.progress || 0,
-                  total: event.data.total || blocks.length,
-                })
+
+                if (event.data.done) {
+                  setTranslationProgress({
+                    current: event.data.progress || 0,
+                    total: event.data.total || blocks.length,
+                  })
+                }
               } else if (event.type === 'complete') {
                 setHasTranslation(true)
                 // 重新加载翻译缓存以获取完整的 blockId 映射
@@ -502,7 +521,7 @@ export default function ImmersiveReaderPage() {
                   </span>
                 </div>
                 <Progress
-                  value={(translationProgress.current / translationProgress.total) * 100}
+                  value={translationProgress.total > 0 ? (translationProgress.current / translationProgress.total) * 100 : 0}
                   size="sm"
                   color="primary"
                 />
@@ -526,9 +545,11 @@ export default function ImmersiveReaderPage() {
               </div>
             )}
 
-            {hasTranslation && !translating && (
+            {(translatedBlocks.size > 0 || hasTranslation) && (
               <div className="space-y-3">
-                <p className="text-xs text-green-400">✓ 翻译已完成</p>
+                <p className={`text-xs ${translating ? 'text-blue-400' : 'text-green-400'}`}>
+                  {translating ? '实时回显中…' : '✓ 翻译已完成'}
+                </p>
                 <div className="max-h-96 overflow-auto space-y-2">
                   {Array.from(translatedBlocks.entries()).slice(0, 20).map(([id, translated]) => {
                     const block = blocks.find(b => b.id === id)
@@ -645,7 +666,7 @@ export default function ImmersiveReaderPage() {
               color={showTranslation ? 'primary' : 'default'}
               className="text-gray-400 hover:text-white min-w-8 h-8"
               onPress={() => setShowTranslation(!showTranslation)}
-              isDisabled={!hasTranslation}
+              isDisabled={!hasTranslation && !translating && translatedBlocks.size === 0}
             >
               <Icon icon="mdi:translate" className="text-lg" />
             </Button>

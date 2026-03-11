@@ -56,6 +56,8 @@ export type AppSettings = {
   largeModel?: ModelConfig
   // Zotero 引用格式
   citationStyle?: string
+  // 编辑器主题
+  editorThemeId?: string
 } & { [key in typeof selectFeatures[number]]: boolean
 }
 
@@ -102,6 +104,7 @@ function getDefaultSettings(): AppSettings {
     defaultSmallModelId: 'model-step-3.5-flash',
     defaultLargeModelId: 'model-gpt-4o',
     citationStyle: 'apa',
+    editorThemeId: 'default',
     smallModel: {
       baseUrl: process.env.NEXT_PUBLIC_SMALL_MODEL_BASE_URL || 'https://openrouter.ai/api/v1',
       apiKey: process.env.NEXT_PUBLIC_SMALL_MODEL_API_KEY || '',
@@ -312,6 +315,15 @@ export interface SmartChunk {
   translated?: string
 }
 
+export interface TranslationBlockPayload {
+  id: string
+  type: TextBlockType
+  text: string
+  pageNum: number
+  bbox: BoundingBox
+  style: TextStyle
+}
+
 // ============ 批注相关类型 ============
 
 // 高亮颜色
@@ -355,10 +367,12 @@ export interface TranslationStreamEvent {
   type: 'start' | 'progress' | 'chunk' | 'complete' | 'error'
   data?: {
     chunkId?: string
+    blockId?: string
     original?: string
     translated?: string
     progress?: number
     total?: number
     error?: string
+    done?: boolean
   }
 }

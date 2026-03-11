@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Button, Chip, Tooltip, Skeleton, Progress } from '@heroui/react'
+import { Button, Chip, Tooltip, Skeleton, Progress, Tabs, Tab } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { getKnowledgeItem, getSettings, getSelectedSmallModel } from '@/lib/storage'
 import { 
@@ -27,6 +27,8 @@ export default function ImmersiveReaderPage() {
   const [documentTitle, setDocumentTitle] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
+  const [scale, setScale] = useState(1)
+  const [sidebarTab, setSidebarTab] = useState('info')
   
   // 后台处理状态
   const [processing, setProcessing] = useState(false)
@@ -74,20 +76,17 @@ export default function ImmersiveReaderPage() {
       let blob: Blob | null = null
 
       if (item.sourceType === 'upload' && item.sourceId) {
-        // 从 IndexedDB 获取上传的文件
         const { getStoredFile } = await import('@/lib/localFiles')
         const fileRecord = await getStoredFile(item.sourceId)
         if (fileRecord?.blob) {
           blob = fileRecord.blob
         }
       } else if (item.attachmentUrl) {
-        // 通过代理获取远程 PDF
         const res = await fetch(`/api/pdf/proxy?url=${encodeURIComponent(item.attachmentUrl)}`)
         if (!res.ok) {
           throw new Error('获取 PDF 失败')
         }
         const data = await res.json()
-        // base64 转 blob
         const binaryString = atob(data.base64)
         const bytes = new Uint8Array(binaryString.length)
         for (let i = 0; i < binaryString.length; i++) {
@@ -102,9 +101,7 @@ export default function ImmersiveReaderPage() {
         return
       }
 
-      // 缓存 PDF 文件
       await savePDFFile(knowledgeId, blob, item.fileName || 'document.pdf')
-
       const url = URL.createObjectURL(blob)
       setPdfUrl(url)
       setLoading(false)
@@ -116,12 +113,11 @@ export default function ImmersiveReaderPage() {
     }
   }, [knowledgeId])
 
-  // 后台处理：文本提取、智能分块、翻译
+  // 后台处理
   const processPDF = useCallback(async () => {
     if (processedRef.current) return
     processedRef.current = true
 
-    // 检查是否已有翻译缓存
     const existingDoc = await getPDFDocumentByKnowledgeId(knowledgeId)
     if (existingDoc) {
       const translation = await getTranslation(knowledgeId)
@@ -131,7 +127,6 @@ export default function ImmersiveReaderPage() {
         if (pages.length > 0) {
           setTotalPages(pages.length)
         }
-        // 从缓存恢复元数据
         setMetadata({
           title: existingDoc.metadata.title,
           authors: existingDoc.metadata.authors,
@@ -160,18 +155,16 @@ export default function ImmersiveReaderPage() {
 
       const arrayBuffer = await cachedFile.blob.arrayBuffer()
 
-      // 使用 PDF.js 提取文本
       const { parsePDF } = await import('@/lib/pdfParser')
       const result = await parsePDF(arrayBuffer, knowledgeId, (current, total) => {
         setProcessProgress(10 + (current / total) * 40)
-        setProcessStatus(`正在提取文本 ${current}/${total}...`)
+        setProcessStatus(`提取文本 ${current}/${total}...`)
       })
 
       setTotalPages(result.pages.length)
       setProcessProgress(55)
-      setProcessStatus('正在保存文档...')
+      setProcessStatus('保存文档...')
 
-      // 保存文档缓存
       await savePDFDocument({
         id: knowledgeId,
         knowledgeItemId: knowledgeId,
@@ -190,7 +183,6 @@ export default function ImmersiveReaderPage() {
         updatedAt: new Date().toISOString(),
       })
 
-      // 更新元数据显示
       setMetadata({
         title: result.metadata.title || item.title,
         authors: result.metadata.authors?.length ? result.metadata.authors : item.authors,
@@ -200,32 +192,24 @@ export default function ImmersiveReaderPage() {
       })
       setMetadataLoading(false)
 
-      // 保存页面缓存
       await savePDFPages(result.pages)
 
       setProcessProgress(60)
-      setProcessStatus('正在智能分块...')
+      setProcessStatus('智能分块...')
 
-      // 准备分块数据
       const allBlocks: { id: string; text: string; type: string }[] = []
       result.pages.forEach(page => {
         page.blocks.forEach(block => {
           if (block.text.trim() && block.type !== 'header' && block.type !== 'footer') {
-            allBlocks.push({
-              id: block.id,
-              text: block.text,
-              type: block.type,
-            })
+            allBlocks.push({ id: block.id, text: block.text, type: block.type })
           }
         })
       })
 
-      // 获取小模型配置
       const settings = getSettings()
       const modelConfig = getSelectedSmallModel(settings)
 
-      // 智能分块
-      let chunks: { id: string; text: string }[] = allBlocks
+      let chunks = allBlocks
       try {
         const chunkRes = await fetch('/api/pdf/chunk', {
           method: 'POST',
@@ -234,18 +218,13 @@ export default function ImmersiveReaderPage() {
         })
         if (chunkRes.ok) {
           const chunkData = await chunkRes.json()
-          if (chunkData.chunks?.length) {
-            chunks = chunkData.chunks
-          }
+          if (chunkData.chunks?.length) chunks = chunkData.chunks
         }
-      } catch {
-        // 分块失败，使用原始块
-      }
+      } catch { /* ignore */ }
 
       setProcessProgress(70)
-      setProcessStatus('正在翻译...')
+      setProcessStatus('翻译中...')
 
-      // 批量翻译
       const translateRes = await fetch('/api/pdf/translate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -255,9 +234,9 @@ export default function ImmersiveReaderPage() {
       if (translateRes.ok) {
         setHasTranslation(true)
         setProcessProgress(100)
-        setProcessStatus('翻译完成')
+        setProcessStatus('完成')
       } else {
-        setProcessStatus('翻译失败，可稍后重试')
+        setProcessStatus('翻译失败')
       }
 
     } catch (err) {
@@ -273,39 +252,25 @@ export default function ImmersiveReaderPage() {
     loadPDF()
   }, [loadPDF])
 
-  // PDF 加载完成后开始后台处理
   useEffect(() => {
     if (pdfUrl && !loading) {
-      // 延迟 1 秒开始后台处理，让用户先看到 PDF
-      const timer = setTimeout(() => {
-        processPDF()
-      }, 1000)
+      const timer = setTimeout(() => processPDF(), 1500)
       return () => clearTimeout(timer)
     }
   }, [pdfUrl, loading, processPDF])
 
-  // 清理 URL
   useEffect(() => {
     return () => {
-      if (pdfUrl) {
-        URL.revokeObjectURL(pdfUrl)
-      }
+      if (pdfUrl) URL.revokeObjectURL(pdfUrl)
     }
   }, [pdfUrl])
 
   // 加载状态
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-52px)] bg-gray-50">
-        <div className="w-96 p-8 bg-white rounded-xl shadow-lg">
-          <div className="text-center mb-6">
-            <Icon icon="mdi:file-document-outline" className="text-6xl text-primary mb-4" />
-            <h2 className="text-xl font-semibold">正在加载 PDF...</h2>
-          </div>
-          <div className="flex justify-center">
-            <Icon icon="mdi:loading" className="text-3xl text-primary animate-spin" />
-          </div>
-        </div>
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-52px)] bg-[#1a1a1a]">
+        <Icon icon="mdi:file-pdf-box" className="text-6xl text-blue-500 mb-4 animate-pulse" />
+        <p className="text-gray-400">正在加载 PDF...</p>
       </div>
     )
   }
@@ -313,153 +278,267 @@ export default function ImmersiveReaderPage() {
   // 错误状态
   if (error) {
     return (
-      <div className="flex flex-col items-center justify-center h-[calc(100vh-52px)] bg-gray-50">
-        <div className="w-96 p-8 bg-white rounded-xl shadow-lg text-center">
-          <Icon icon="mdi:alert-circle-outline" className="text-6xl text-danger mb-4" />
-          <h2 className="text-xl font-semibold mb-2">加载失败</h2>
-          <p className="text-gray-500 mb-6">{error}</p>
-          <div className="flex gap-4 justify-center">
-            <Button color="primary" onPress={loadPDF}>
-              重试
-            </Button>
-            <Button variant="light" onPress={() => router.back()}>
-              返回
-            </Button>
-          </div>
+      <div className="flex flex-col items-center justify-center h-[calc(100vh-52px)] bg-[#1a1a1a]">
+        <Icon icon="mdi:alert-circle" className="text-6xl text-red-500 mb-4" />
+        <p className="text-gray-400 mb-4">{error}</p>
+        <div className="flex gap-4">
+          <Button color="primary" onPress={loadPDF}>重试</Button>
+          <Button variant="light" onPress={() => router.back()}>返回</Button>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-[calc(100vh-52px)] bg-gray-100">
-      {/* 左侧工具栏 */}
-      <div className="w-14 bg-white border-r border-gray-200 flex flex-col items-center py-4 gap-2">
+    <div className="flex h-[calc(100vh-52px)] bg-[#1a1a1a]">
+      {/* 左侧边栏 */}
+      <div className="w-12 bg-[#252525] flex flex-col items-center py-3 gap-1 border-r border-[#333]">
         <Tooltip content="返回" placement="right">
-          <Button isIconOnly variant="light" onPress={() => router.back()}>
+          <Button isIconOnly size="sm" variant="light" className="text-gray-400 hover:text-white" onPress={() => router.back()}>
             <Icon icon="mdi:arrow-left" className="text-xl" />
           </Button>
         </Tooltip>
-
-        <div className="w-8 h-px bg-gray-200 my-2" />
-
-        <Tooltip content="上一页" placement="right">
-          <Button
-            isIconOnly
-            variant="light"
-            onPress={() => setCurrentPage(p => Math.max(1, p - 1))}
-            isDisabled={currentPage <= 1}
+        
+        <div className="w-6 h-px bg-[#444] my-2" />
+        
+        <Tooltip content="文档信息" placement="right">
+          <Button 
+            isIconOnly 
+            size="sm" 
+            variant={sidebarTab === 'info' ? 'solid' : 'light'} 
+            color={sidebarTab === 'info' ? 'primary' : 'default'}
+            className={sidebarTab === 'info' ? '' : 'text-gray-400 hover:text-white'}
+            onPress={() => setSidebarTab('info')}
           >
-            <Icon icon="mdi:chevron-up" className="text-xl" />
+            <Icon icon="mdi:information-outline" className="text-xl" />
           </Button>
         </Tooltip>
 
-        <Tooltip content="下一页" placement="right">
-          <Button
-            isIconOnly
-            variant="light"
-            onPress={() => setCurrentPage(p => p + 1)}
-            isDisabled={!totalPages || currentPage >= totalPages}
+        <Tooltip content="翻译结果" placement="right">
+          <Button 
+            isIconOnly 
+            size="sm" 
+            variant={sidebarTab === 'translate' ? 'solid' : 'light'} 
+            color={sidebarTab === 'translate' ? 'primary' : 'default'}
+            className={sidebarTab === 'translate' ? '' : 'text-gray-400 hover:text-white'}
+            onPress={() => setSidebarTab('translate')}
           >
-            <Icon icon="mdi:chevron-down" className="text-xl" />
+            <Icon icon="mdi:translate" className="text-xl" />
           </Button>
         </Tooltip>
 
-        <div className="w-8 h-px bg-gray-200 my-2" />
+        <Tooltip content="批注" placement="right">
+          <Button 
+            isIconOnly 
+            size="sm" 
+            variant={sidebarTab === 'notes' ? 'solid' : 'light'} 
+            color={sidebarTab === 'notes' ? 'primary' : 'default'}
+            className={sidebarTab === 'notes' ? '' : 'text-gray-400 hover:text-white'}
+            onPress={() => setSidebarTab('notes')}
+          >
+            <Icon icon="mdi:comment-text-outline" className="text-xl" />
+          </Button>
+        </Tooltip>
 
-        {/* 处理状态指示 */}
+        <div className="flex-1" />
+
+        {/* 处理状态 */}
         {processing && (
           <Tooltip content={processStatus} placement="right">
-            <div className="flex flex-col items-center">
-              <Icon icon="mdi:sync" className="text-xl text-primary animate-spin" />
-              <span className="text-xs text-gray-500 mt-1">{Math.round(processProgress)}%</span>
+            <div className="flex flex-col items-center p-2">
+              <Icon icon="mdi:sync" className="text-xl text-blue-400 animate-spin" />
+              <span className="text-[10px] text-gray-500 mt-1">{Math.round(processProgress)}%</span>
             </div>
           </Tooltip>
         )}
 
         {hasTranslation && !processing && (
           <Tooltip content="翻译已完成" placement="right">
-            <Icon icon="mdi:check-circle" className="text-xl text-success" />
+            <Icon icon="mdi:check-circle" className="text-xl text-green-500" />
           </Tooltip>
         )}
-
-        <div className="mt-auto flex flex-col items-center gap-2">
-          {totalPages > 0 && (
-            <span className="text-xs text-gray-400">{currentPage}/{totalPages}</span>
-          )}
-        </div>
       </div>
 
-      {/* 主内容区域 */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* 顶部信息栏 */}
-        <div className="bg-white border-b border-gray-200 px-6 py-3">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              {/* 标题 */}
-              {metadataLoading ? (
-                <Skeleton className="h-6 w-3/4 rounded-lg" />
-              ) : (
-                <h1 className="text-lg font-semibold truncate">
-                  {metadata?.title || documentTitle}
-                </h1>
-              )}
+      {/* 左侧面板 */}
+      {sidebarTab !== 'none' && (
+        <div className="w-72 bg-[#252525] border-r border-[#333] flex flex-col overflow-hidden">
+          {/* 文档信息 */}
+          {sidebarTab === 'info' && (
+            <div className="flex-1 overflow-auto p-4">
+              <h3 className="text-sm font-medium text-gray-300 mb-3">文档信息</h3>
               
-              {/* 作者 */}
-              <div className="mt-1">
-                {metadataLoading ? (
-                  <Skeleton className="h-4 w-1/2 rounded-lg" />
-                ) : (
-                  <p className="text-sm text-gray-500">
-                    {metadata?.authors?.length ? metadata.authors.join(', ') : ''}
-                    {metadata?.year && ` (${metadata.year})`}
-                    {metadata?.journal && ` - ${metadata.journal}`}
-                  </p>
-                )}
-              </div>
+              {metadataLoading ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-5 w-full rounded bg-[#333]" />
+                  <Skeleton className="h-4 w-3/4 rounded bg-[#333]" />
+                  <Skeleton className="h-4 w-1/2 rounded bg-[#333]" />
+                </div>
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <label className="text-xs text-gray-500 block mb-1">标题</label>
+                    <p className="text-sm text-gray-200">{metadata?.title || documentTitle}</p>
+                  </div>
 
-              {/* 摘要 */}
-              {(metadataLoading || metadata?.abstract) && (
-                <div className="mt-2">
-                  {metadataLoading ? (
-                    <div className="space-y-1">
-                      <Skeleton className="h-3 w-full rounded" />
-                      <Skeleton className="h-3 w-full rounded" />
-                      <Skeleton className="h-3 w-3/4 rounded" />
+                  {metadata?.authors?.length > 0 && (
+                    <div className="mb-4">
+                      <label className="text-xs text-gray-500 block mb-1">作者</label>
+                      <p className="text-sm text-gray-300">{metadata.authors.join(', ')}</p>
                     </div>
-                  ) : (
-                    <p className="text-xs text-gray-600 line-clamp-3">
-                      {metadata?.abstract}
-                    </p>
                   )}
+
+                  {(metadata?.year || metadata?.journal) && (
+                    <div className="mb-4">
+                      <label className="text-xs text-gray-500 block mb-1">来源</label>
+                      <p className="text-sm text-gray-400">
+                        {metadata.journal && <span>{metadata.journal}</span>}
+                        {metadata.year && <span> ({metadata.year})</span>}
+                      </p>
+                    </div>
+                  )}
+
+                  {metadata?.abstract && (
+                    <div className="mb-4">
+                      <label className="text-xs text-gray-500 block mb-1">摘要</label>
+                      <p className="text-xs text-gray-400 leading-relaxed">{metadata.abstract}</p>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {/* 处理进度 */}
+              {processing && (
+                <div className="mt-6 p-3 bg-[#1a1a1a] rounded-lg">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Icon icon="mdi:sync" className="text-blue-400 animate-spin" />
+                    <span className="text-xs text-gray-400">{processStatus}</span>
+                  </div>
+                  <Progress value={processProgress} size="sm" color="primary" />
                 </div>
               )}
             </div>
+          )}
 
-            {/* 处理进度 */}
-            {processing && (
-              <div className="w-48 flex-shrink-0">
-                <Progress 
-                  value={processProgress} 
-                  size="sm" 
-                  color="primary"
-                  className="mb-1"
-                />
-                <p className="text-xs text-gray-500 text-center">{processStatus}</p>
+          {/* 翻译结果 */}
+          {sidebarTab === 'translate' && (
+            <div className="flex-1 overflow-auto p-4">
+              <h3 className="text-sm font-medium text-gray-300 mb-3">翻译结果</h3>
+              
+              {processing && !hasTranslation && (
+                <div className="flex flex-col items-center justify-center py-8 text-gray-500">
+                  <Icon icon="mdi:sync" className="text-3xl animate-spin mb-2" />
+                  <p className="text-sm">正在翻译中...</p>
+                  <Progress value={processProgress} size="sm" color="primary" className="w-32 mt-2" />
+                </div>
+              )}
+
+              {!processing && !hasTranslation && (
+                <div className="flex flex-col items-center justify-center py-8 text-gray-500">
+                  <Icon icon="mdi:translate" className="text-3xl mb-2" />
+                  <p className="text-sm">尚未翻译</p>
+                  <Button size="sm" color="primary" variant="flat" className="mt-2" onPress={processPDF}>
+                    开始翻译
+                  </Button>
+                </div>
+              )}
+
+              {hasTranslation && (
+                <div className="text-sm text-gray-400">
+                  <p className="text-green-400 mb-2">✓ 翻译已完成</p>
+                  <p className="text-xs">点击文档中的段落查看翻译</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 批注 */}
+          {sidebarTab === 'notes' && (
+            <div className="flex-1 overflow-auto p-4">
+              <h3 className="text-sm font-medium text-gray-300 mb-3">批注</h3>
+              <div className="flex flex-col items-center justify-center py-8 text-gray-500">
+                <Icon icon="mdi:comment-text-outline" className="text-3xl mb-2" />
+                <p className="text-sm">暂无批注</p>
               </div>
-            )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 主内容区域 */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* 顶部工具栏 */}
+        <div className="h-10 bg-[#252525] border-b border-[#333] flex items-center px-3 gap-2">
+          <div className="flex items-center gap-1">
+            <Tooltip content="缩小">
+              <Button isIconOnly size="sm" variant="light" className="text-gray-400 hover:text-white min-w-8 h-8" onPress={() => setScale(s => Math.max(0.5, s - 0.25))}>
+                <Icon icon="mdi:magnify-minus" className="text-lg" />
+              </Button>
+            </Tooltip>
+            <span className="text-xs text-gray-500 w-12 text-center">{Math.round(scale * 100)}%</span>
+            <Tooltip content="放大">
+              <Button isIconOnly size="sm" variant="light" className="text-gray-400 hover:text-white min-w-8 h-8" onPress={() => setScale(s => Math.min(3, s + 0.25))}>
+                <Icon icon="mdi:magnify-plus" className="text-lg" />
+              </Button>
+            </Tooltip>
+            <Tooltip content="适应宽度">
+              <Button isIconOnly size="sm" variant="light" className="text-gray-400 hover:text-white min-w-8 h-8" onPress={() => setScale(1)}>
+                <Icon icon="mdi:fit-to-width" className="text-lg" />
+              </Button>
+            </Tooltip>
+          </div>
+
+          <div className="w-px h-5 bg-[#444] mx-2" />
+
+          {/* 翻译切换 */}
+          <Tooltip content="显示翻译">
+            <Button 
+              isIconOnly 
+              size="sm" 
+              variant="light" 
+              className="text-gray-400 hover:text-white min-w-8 h-8"
+            >
+              <Icon icon="mdi:translate" className="text-lg" />
+            </Button>
+          </Tooltip>
+
+          <div className="flex-1" />
+
+          {/* 页码 */}
+          <div className="flex items-center gap-2">
+            <Tooltip content="上一页">
+              <Button isIconOnly size="sm" variant="light" className="text-gray-400 hover:text-white min-w-8 h-8" onPress={() => setCurrentPage(p => Math.max(1, p - 1))} isDisabled={currentPage <= 1}>
+                <Icon icon="mdi:chevron-left" className="text-lg" />
+              </Button>
+            </Tooltip>
+            <span className="text-sm text-gray-400 px-2">
+              {currentPage} / {totalPages || '?'}
+            </span>
+            <Tooltip content="下一页">
+              <Button isIconOnly size="sm" variant="light" className="text-gray-400 hover:text-white min-w-8 h-8" onPress={() => setCurrentPage(p => Math.min(totalPages || 999, p + 1))} isDisabled={!totalPages || currentPage >= totalPages}>
+                <Icon icon="mdi:chevron-right" className="text-lg" />
+              </Button>
+            </Tooltip>
           </div>
         </div>
 
         {/* PDF 查看器 */}
-        <div className="flex-1 overflow-auto p-4">
+        <div className="flex-1 overflow-auto p-4 flex justify-center">
           {pdfUrl && (
-            <iframe
-              ref={iframeRef}
-              src={pdfUrl}
-              className="w-full h-full min-h-[800px] border-0 rounded-lg shadow-lg"
-              title="PDF Viewer"
-            />
+            <div 
+              className="bg-white shadow-2xl rounded-sm overflow-hidden"
+              style={{ 
+                width: `${scale * 100}%`,
+                maxWidth: '900px',
+                minWidth: '400px'
+              }}
+            >
+              <iframe
+                ref={iframeRef}
+                src={pdfUrl}
+                className="w-full h-[calc(100vh-180px)] border-0"
+                title="PDF Viewer"
+              />
+            </div>
           )}
         </div>
       </div>

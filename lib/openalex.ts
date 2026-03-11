@@ -451,22 +451,30 @@ export function scoreKeywordMatches(
   queryGroups: QueryExpansionGroup[],
   extraKeywords: string[] = [],
 ) {
-  const searchable = normalizeText(
-    [
-      paper.title,
-      paper.abstract,
-      paper.venue,
-      paper.concepts.map(item => item.displayName).join(' '),
-      paper.topics.join(' '),
-    ].filter(Boolean).join(' '),
-  )
+  const titleText = normalizeText(paper.title || '')
+  const abstractText = normalizeText(paper.abstract || '')
+  const venueText = normalizeText(paper.venue || '')
+  const conceptText = normalizeText(paper.concepts.map(item => item.displayName).join(' '))
+  const topicText = normalizeText(paper.topics.join(' '))
+  const searchable = [titleText, abstractText, venueText, conceptText, topicText].join(' ')
 
   const keywords = Array.from(new Set([
     ...queryGroups.flatMap(group => [group.query, ...group.synonyms, ...group.relatedConcepts, ...group.multilingualKeywords]),
     ...extraKeywords,
   ].flatMap(tokenize)))
 
-  const matches = keywords.filter(keyword => searchable.includes(keyword))
+  const titleMatches = keywords.filter(keyword => titleText.includes(keyword))
+  const conceptMatches = keywords.filter(keyword => conceptText.includes(keyword))
+  const topicMatches = keywords.filter(keyword => topicText.includes(keyword))
+  const abstractMatches = keywords.filter(keyword => abstractText.includes(keyword))
+  const venueMatches = keywords.filter(keyword => venueText.includes(keyword))
+  const matches = Array.from(new Set([
+    ...titleMatches,
+    ...conceptMatches,
+    ...topicMatches,
+    ...abstractMatches,
+    ...venueMatches,
+  ]))
   const matchedQueries = queryGroups
     .filter(group => tokenize([group.query, ...group.synonyms].join(' ')).some(keyword => searchable.includes(keyword)))
     .map(group => group.label)
@@ -474,10 +482,35 @@ export function scoreKeywordMatches(
     .map(item => item.displayName)
     .filter(name => keywords.some(keyword => normalizeText(name).includes(keyword)))
 
+  const coverage = keywords.length === 0 ? 0.35 : Math.min(1, matches.length / Math.max(3, keywords.length))
+  const weightedSignal = keywords.length === 0
+    ? 0.35
+    : Math.min(
+        1,
+        (
+          titleMatches.length * 0.45 +
+          conceptMatches.length * 0.3 +
+          topicMatches.length * 0.15 +
+          abstractMatches.length * 0.08 +
+          venueMatches.length * 0.02
+        ) / Math.max(2, keywords.length * 0.55),
+      )
+  let lexicalScore = Math.min(
+    1,
+    weightedSignal * 0.72 +
+      coverage * 0.28 +
+      (matchedQueries.length > 0 ? 0.08 : 0) +
+      (matchedConcepts.length > 0 ? 0.05 : 0),
+  )
+
+  if (titleMatches.length === 0 && conceptMatches.length === 0 && matchedQueries.length === 0 && coverage < 0.15) {
+    lexicalScore = Math.min(lexicalScore, 0.28)
+  }
+
   return {
-    keywordMatches: Array.from(new Set(matches)),
+    keywordMatches: matches,
     matchedQueries,
     matchedConcepts,
-    lexicalScore: keywords.length === 0 ? 0.35 : Math.min(1, matches.length / Math.max(3, keywords.length * 0.7)),
+    lexicalScore,
   }
 }

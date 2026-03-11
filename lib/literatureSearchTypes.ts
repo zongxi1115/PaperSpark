@@ -199,6 +199,21 @@ export interface ResearchAnalysis {
   rationale: string[]
 }
 
+export interface SearchReview {
+  acceptedPaperIds: string[]
+  rejectedPaperIds: string[]
+  retryNeeded: boolean
+  retryReason?: string
+  recommendedQueries: string[]
+  relaxedFilters?: {
+    minCitations?: number
+    openAccessOnly?: boolean
+    fromYear?: number
+    toYear?: number
+  }
+  reviewNotes: string[]
+}
+
 export interface LiteratureSearchResultPayload {
   summary: string
   papers: SearchPaper[]
@@ -206,6 +221,8 @@ export interface LiteratureSearchResultPayload {
   duplicatesRemoved: number
   queryGroups: QueryExpansionGroup[]
   intent: SearchIntent
+  reviewNotes: string[]
+  retryCount: number
 }
 
 export interface LiteratureSearchRequest {

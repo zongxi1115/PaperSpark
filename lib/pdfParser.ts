@@ -20,7 +20,7 @@ interface PDFJSLib {
 
 let pdfjsPromise: Promise<PDFJSLib> | null = null
 
-// 通过 CDN 加载 PDF.js，避免 webpack 打包问题
+// 通过 CDN 加载 PDF.js
 async function getPdfjs(): Promise<PDFJSLib> {
   if (pdfjsPromise) return pdfjsPromise
 
@@ -33,18 +33,17 @@ async function getPdfjs(): Promise<PDFJSLib> {
     // 检查是否已加载
     const win = window as unknown as { pdfjsLib?: PDFJSLib }
     if (win.pdfjsLib) {
-      win.pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${win.pdfjsLib.version}/pdf.worker.min.mjs`
       resolve(win.pdfjsLib)
       return
     }
 
-    // 动态加载 UMD 版本脚本
+    // 使用 jsDelivr CDN 加载稳定版本
     const script = document.createElement('script')
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.umd.min.js'
+    script.src = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js'
     script.onload = () => {
       const win = window as unknown as { pdfjsLib?: PDFJSLib }
       if (win.pdfjsLib) {
-        win.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.umd.min.js'
+        win.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js'
         resolve(win.pdfjsLib)
       } else {
         reject(new Error('PDF.js 加载失败'))

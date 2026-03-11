@@ -7,6 +7,7 @@ import type {
   ResearchAnalysis,
   SearchIntent,
   SearchPaper,
+  SearchReview,
 } from './literatureSearchTypes'
 import type { ModelConfig } from './types'
 
@@ -381,6 +382,99 @@ function fallbackAnalysis(papers: SearchPaper[]): ResearchAnalysis {
   }
 }
 
+function buildFallbackReviewQueries(intent: SearchIntent, papers: SearchPaper[]) {
+  const paperSignals = uniqueStrings(
+    papers.flatMap(paper => [
+      ...paper.matchedConcepts,
+      ...paper.concepts.map(item => item.displayName),
+      ...paper.keywordMatches,
+      ...paper.topics,
+    ]),
+  ).slice(0, 8)
+
+  const queries = [
+    intent.coreConcepts.slice(0, 2).join(' AND '),
+    [intent.coreConcepts[0], paperSignals[0]].filter(Boolean).join(' AND '),
+    [...intent.coreConcepts.slice(0, 2), ...paperSignals.slice(0, 1)].filter(Boolean).join(' AND '),
+    intent.clarifiedQuery,
+  ]
+
+  return uniqueStrings(queries).slice(0, 3)
+}
+
+function fallbackReview(intent: SearchIntent, papers: SearchPaper[]): SearchReview {
+  const accepted = papers.filter(paper => {
+    const directMatch = paper.matchedQueries.length > 0 || paper.matchedConcepts.length > 0
+    const keywordSupport = paper.keywordMatches.length >= 2
+    const scoreSupport = paper.relevanceScore >= 0.56 || paper.finalScore >= 0.5
+    return (directMatch && scoreSupport) || (keywordSupport && paper.relevanceScore >= 0.48)
+  })
+
+  const acceptedPaperIds = (accepted.length > 0 ? accepted : papers.slice(0, Math.min(3, papers.length)))
+    .map(paper => paper.openAlexId)
+  const acceptedIdSet = new Set(acceptedPaperIds)
+  const reviewNotes = uniqueStrings([
+    papers.length === 0 ? '当前候选为空，需要放宽限制并重组查询词。' : '',
+    acceptedPaperIds.length < papers.length ? `已剔除 ${papers.length - acceptedPaperIds.length} 篇弱相关候选。` : '',
+    acceptedPaperIds.length < 4 ? '保留下来的高相关论文偏少，建议继续自动重检。' : '',
+    acceptedPaperIds.length > 0 ? '优先保留同时命中核心概念、检索组或摘要关键词的论文。' : '',
+  ]).slice(0, 4)
+
+  const citationBaseline = intent.citationPreference === 'high-impact'
+    ? Math.max(8, Math.floor((intent.citationThreshold || 40) * 0.45))
+    : 0
+
+  return {
+    acceptedPaperIds,
+    rejectedPaperIds: papers
+      .filter(paper => !acceptedIdSet.has(paper.openAlexId))
+      .map(paper => paper.openAlexId),
+    retryNeeded:
+      papers.length === 0 ||
+      acceptedPaperIds.length < 4 ||
+      (papers[0]?.relevanceScore || 0) < 0.45,
+    retryReason: papers.length === 0
+      ? '首轮结果为空'
+      : acceptedPaperIds.length < 4
+        ? '高相关论文数量不足'
+        : (papers[0]?.relevanceScore || 0) < 0.45
+          ? '头部论文相关性偏低'
+          : undefined,
+    recommendedQueries: buildFallbackReviewQueries(intent, papers),
+    relaxedFilters: {
+      minCitations: citationBaseline,
+      openAccessOnly: false,
+      fromYear: intent.preferredYears?.from ? Math.max(1900, intent.preferredYears.from - 3) : undefined,
+      toYear: intent.preferredYears?.to,
+    },
+    reviewNotes,
+  }
+}
+
+function normalizeReview(raw: SearchReview, fallback: SearchReview, papers: SearchPaper[]): SearchReview {
+  const availableIds = new Set(papers.map(paper => paper.openAlexId))
+  const acceptedPaperIds = uniqueStrings(raw.acceptedPaperIds || []).filter(id => availableIds.has(id))
+  const rejectedPaperIds = uniqueStrings(raw.rejectedPaperIds || []).filter(id => availableIds.has(id))
+  const normalizedAccepted = acceptedPaperIds.length > 0 ? acceptedPaperIds : fallback.acceptedPaperIds
+
+  return {
+    acceptedPaperIds: normalizedAccepted,
+    rejectedPaperIds: rejectedPaperIds.length > 0 ? rejectedPaperIds : fallback.rejectedPaperIds,
+    retryNeeded:
+      Boolean(raw.retryNeeded) ||
+      (normalizedAccepted.length < 4 && fallback.retryNeeded),
+    retryReason: raw.retryReason?.trim() || fallback.retryReason,
+    recommendedQueries: uniqueStrings(raw.recommendedQueries || fallback.recommendedQueries).slice(0, 3),
+    relaxedFilters: {
+      minCitations: raw.relaxedFilters?.minCitations ?? fallback.relaxedFilters?.minCitations,
+      openAccessOnly: raw.relaxedFilters?.openAccessOnly ?? fallback.relaxedFilters?.openAccessOnly,
+      fromYear: raw.relaxedFilters?.fromYear ?? fallback.relaxedFilters?.fromYear,
+      toYear: raw.relaxedFilters?.toYear ?? fallback.relaxedFilters?.toYear,
+    },
+    reviewNotes: uniqueStrings(raw.reviewNotes || fallback.reviewNotes).slice(0, 4),
+  }
+}
+
 export async function runAnalysisAgent(
   intent: SearchIntent,
   papers: SearchPaper[],
@@ -448,6 +542,72 @@ ${JSON.stringify(compactPapers, null, 2)}`
       relevanceAssessments: assessments.length > 0 ? assessments : fallback.relevanceAssessments,
       rationale: uniqueStrings(raw.rationale || []).slice(0, 4),
     }
+  } catch {
+    return fallback
+  }
+}
+
+export async function runResultReviewAgent(
+  intent: SearchIntent,
+  papers: SearchPaper[],
+  modelConfig: ModelConfig,
+): Promise<SearchReview> {
+  const fallback = fallbackReview(intent, papers)
+  if (papers.length === 0) {
+    return fallback
+  }
+
+  const compactPapers = papers.slice(0, 10).map(paper => ({
+    paperId: paper.openAlexId,
+    title: paper.title,
+    year: paper.year,
+    citedByCount: paper.citedByCount,
+    relevanceScore: paper.relevanceScore,
+    finalScore: paper.finalScore,
+    venue: paper.venue,
+    keywordMatches: paper.keywordMatches.slice(0, 6),
+    matchedQueries: paper.matchedQueries,
+    matchedConcepts: paper.matchedConcepts,
+    concepts: paper.concepts.map(item => item.displayName).slice(0, 4),
+    abstractSnippet: paper.abstractSnippet,
+  }))
+
+  const systemPrompt = `你是论文检索系统中的结果检阅智能体。
+目标是审查候选文献是否真正契合研究问题，并在结果不足时给出重检建议。
+
+只输出 JSON：
+{
+  "acceptedPaperIds": ["https://openalex.org/W..."],
+  "rejectedPaperIds": ["https://openalex.org/W..."],
+  "retryNeeded": false,
+  "retryReason": "string",
+  "recommendedQueries": ["string"],
+  "relaxedFilters": {
+    "minCitations": 10,
+    "openAccessOnly": false,
+    "fromYear": 2019,
+    "toYear": 2026
+  },
+  "reviewNotes": ["string"]
+}
+
+规则：
+1. acceptedPaperIds 和 rejectedPaperIds 只能使用给定 paperId。
+2. 若高相关论文过少、主题偏移或没有结果，retryNeeded 必须为 true。
+3. recommendedQueries 最多 3 条，要更聚焦、更利于召回。
+4. reviewNotes 给 2 到 4 条可展示给用户的简短说明。
+5. 只返回 JSON，不要附带解释。`
+
+  const userPrompt = `研究意图：
+${JSON.stringify(intent, null, 2)}
+
+候选论文：
+${JSON.stringify(compactPapers, null, 2)}`
+
+  try {
+    const raw = await runJsonPrompt<SearchReview>(systemPrompt, userPrompt, modelConfig)
+    if (!raw) return fallback
+    return normalizeReview(raw, fallback, papers)
   } catch {
     return fallback
   }

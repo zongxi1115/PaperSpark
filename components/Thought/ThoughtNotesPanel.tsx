@@ -204,18 +204,15 @@ function ThoughtEditorModal({
         emptyDocument: '记录想法...',
       },
     },
-    initialContent: (thought.content as Block[])?.length > 0 ? thought.content as Block[] : undefined,
+    initialContent: Array.isArray(thought.content) && thought.content.length > 0 ? (thought.content as Block[]) : undefined,
   })
 
   // 获取纯文本
   const getPlainText = useCallback(() => {
     return editor.document
       .filter(b => b.type === 'paragraph' || b.type === 'heading')
-      .map(b => {
-        const block = b as { content?: { type: string; text: string }[] }
-        return block.content?.filter(c => c.type === 'text').map(c => c.text).join('') ?? ''
-      })
-      .filter(t => t.trim())
+      .map(b => getBlockText(b).trim())
+      .filter(Boolean)
       .join('\n')
   }, [editor])
 
@@ -399,19 +396,54 @@ function ThoughtEditorModal({
 function getContentPreview(content: unknown[]): string {
   if (!content || !Array.isArray(content)) return '点击编辑...'
   const texts = content
-    .map(block => {
-      const b = block as { content?: { type: string; text: string }[] }
-      return b.content?.filter(c => c.type === 'text').map(c => c.text).join('') ?? ''
-    })
+    .map(block => getBlockText(block))
     .filter(t => t.trim())
     .join(' ')
-  return texts.slice(0, 80) + (texts.length > 80 ? '...' : '') || '点击编辑...'
+    .trim()
+
+  if (!texts) return '点击编辑...'
+  return texts.slice(0, 80) + (texts.length > 80 ? '...' : '')
 }
 
 function formatDate(dateStr: string) {
   return new Date(dateStr).toLocaleDateString('zh-CN', {
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   })
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function getInlineText(inline: unknown): string {
+  if (!inline) return ''
+  if (typeof inline === 'string') return inline
+  if (Array.isArray(inline)) return inline.map(getInlineText).join('')
+  if (!isRecord(inline)) return ''
+
+  const text = inline.text
+  if (typeof text === 'string') return text
+
+  const content = inline.content
+  if (Array.isArray(content)) return content.map(getInlineText).join('')
+
+  return ''
+}
+
+function getBlockText(block: unknown, depth = 0): string {
+  if (!block || depth > 10 || !isRecord(block)) return ''
+
+  const selfText = getInlineText(block.content)
+  const children = block.children
+
+  if (!Array.isArray(children)) return selfText
+
+  const childrenText = children
+    .map(child => getBlockText(child, depth + 1))
+    .filter(t => t.trim())
+    .join(' ')
+
+  return [selfText, childrenText].filter(Boolean).join(' ')
 }
 
 // 图标

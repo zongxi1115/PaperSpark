@@ -7,6 +7,7 @@ import {
   runAnalysisAgent,
   runIntentAgent,
   runQueryExpansionAgent,
+  runResultReviewAgent,
 } from '@/lib/literatureSearchService'
 import type {
   AuthorWorksOutput,
@@ -20,12 +21,19 @@ import type {
   RelatedWorksOutput,
   SearchFilters,
   SearchPaper,
+  SearchReview,
   SearchWorksOutput,
   StepStatus,
 } from '@/lib/literatureSearchTypes'
 import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
 
 export const maxDuration = 120
+
+interface DiscoveryPassResult {
+  works: SearchPaper[]
+  ranked: RankedWorksOutput
+  filterResult: FilterWorksOutput
+}
 
 function stageDetail(stage: LiteratureSearchStage) {
   switch (stage) {
@@ -40,6 +48,10 @@ function stageDetail(stage: LiteratureSearchStage) {
     case 'aggregation':
       return '正在去重、排序并生成最终推荐'
   }
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.map(value => value.trim()).filter(Boolean)))
 }
 
 function buildBaseFilters(intent: {
@@ -66,6 +78,118 @@ function buildBaseFilters(intent: {
         ? 'citations'
         : 'relevance',
   } as SearchFilters
+}
+
+function buildRetryFilters(
+  baseFilters: SearchFilters,
+  retryCount: number,
+  review?: SearchReview,
+): SearchFilters {
+  const next: SearchFilters = {
+    ...baseFilters,
+    maxResults: Math.min(16, (baseFilters.maxResults || 8) + retryCount * 2),
+    sortBy: 'relevance',
+  }
+
+  if (retryCount >= 1) {
+    next.minCitations = next.minCitations ? Math.max(0, Math.floor(next.minCitations * 0.5)) : 0
+    next.openAccessOnly = false
+  }
+
+  if (retryCount >= 2) {
+    next.minCitations = 0
+    next.fromYear = next.fromYear ? Math.max(1900, next.fromYear - 3) : undefined
+    next.toYear = next.toYear ? next.toYear + 1 : undefined
+  }
+
+  if (review?.relaxedFilters) {
+    next.minCitations = review.relaxedFilters.minCitations ?? next.minCitations
+    next.openAccessOnly = review.relaxedFilters.openAccessOnly ?? next.openAccessOnly
+    next.fromYear = review.relaxedFilters.fromYear ?? next.fromYear
+    next.toYear = review.relaxedFilters.toYear ?? next.toYear
+  }
+
+  return next
+}
+
+function createAdHocQueryGroups(queries: string[], prefix: string): QueryExpansionGroup[] {
+  return uniqueStrings(queries)
+    .slice(0, 5)
+    .map((query, index) => ({
+      id: `${prefix.toLowerCase().replace(/\s+/g, '-')}-${index + 1}`,
+      label: `${prefix} ${index + 1}`,
+      focus: '基于当前结果质量自动追加的补充检索',
+      query,
+      synonyms: [],
+      relatedConcepts: [],
+      multilingualKeywords: [],
+    }))
+}
+
+function mergeQueryGroups(
+  baseGroups: QueryExpansionGroup[],
+  extraGroups: QueryExpansionGroup[],
+) {
+  const seen = new Set<string>()
+  const merged: QueryExpansionGroup[] = []
+
+  for (const group of [...baseGroups, ...extraGroups]) {
+    const key = group.query.trim().toLowerCase()
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    merged.push(group)
+  }
+
+  return merged.slice(0, 6)
+}
+
+function buildRetryQueries(
+  intent: {
+    clarifiedQuery: string
+    coreConcepts: string[]
+    relatedFields: string[]
+  },
+  queryGroups: QueryExpansionGroup[],
+  analysisQueries: string[] = [],
+  reviewQueries: string[] = [],
+) {
+  return uniqueStrings([
+    ...reviewQueries,
+    ...analysisQueries,
+    intent.coreConcepts.slice(0, 2).join(' AND '),
+    [intent.coreConcepts[0], intent.relatedFields[0]].filter(Boolean).join(' AND '),
+    [...intent.coreConcepts.slice(0, 2), ...intent.relatedFields.slice(0, 1)].filter(Boolean).join(' AND '),
+    intent.clarifiedQuery,
+    ...queryGroups.map(group => group.query),
+  ]).slice(0, 5)
+}
+
+function assessDiscoveryRetryNeed(ranked: RankedWorksOutput) {
+  const topWorks = ranked.works.slice(0, 3)
+  const averageRelevance = topWorks.length > 0
+    ? topWorks.reduce((sum, paper) => sum + paper.relevanceScore, 0) / topWorks.length
+    : 0
+
+  if (ranked.works.length === 0) {
+    return '当前没有检索到可用候选文献'
+  }
+
+  if (ranked.works.length < 4) {
+    return '首轮候选文献过少'
+  }
+
+  if (
+    averageRelevance < 0.34 &&
+    topWorks.every(paper =>
+      paper.matchedQueries.length === 0 &&
+      paper.matchedConcepts.length === 0 &&
+      paper.keywordMatches.length < 2,
+    )
+  ) {
+    return '头部候选缺少明确的主题命中'
+  }
+
+  return undefined
 }
 
 function mergeWorks(
@@ -139,6 +263,38 @@ function getPrimaryAuthorIds(papers: SearchPaper[]) {
   return authorIds
 }
 
+function selectFinalPapers(rankedWorks: SearchPaper[], review: SearchReview) {
+  const acceptedIds = new Set(review.acceptedPaperIds)
+  const rejectedIds = new Set(review.rejectedPaperIds)
+
+  let selected = rankedWorks.filter(paper => acceptedIds.has(paper.openAlexId))
+  const fallbackPool = rankedWorks.filter(paper => {
+    if (acceptedIds.has(paper.openAlexId) || rejectedIds.has(paper.openAlexId)) return false
+    return (
+      paper.relevanceScore >= 0.48 ||
+      paper.matchedQueries.length > 0 ||
+      paper.matchedConcepts.length > 0 ||
+      paper.keywordMatches.length >= 2
+    )
+  })
+
+  if (selected.length < 6) {
+    selected = [...selected, ...fallbackPool].slice(0, 12)
+  }
+
+  if (selected.length === 0) {
+    selected = rankedWorks
+      .filter(paper => !rejectedIds.has(paper.openAlexId))
+      .slice(0, 12)
+  }
+
+  if (selected.length === 0) {
+    selected = rankedWorks.slice(0, 12)
+  }
+
+  return selected
+}
+
 async function callTool<TResult>(
   toolDef: { execute?: (...args: any[]) => unknown },
   input: unknown,
@@ -156,6 +312,93 @@ async function callTool<TResult>(
       abortSignal,
     }),
   ) as TResult
+}
+
+async function runDiscoveryPass(
+  tools: ReturnType<typeof createOpenAlexToolset>,
+  intent: {
+    clarifiedQuery: string
+    coreConcepts: string[]
+    relatedFields: string[]
+    preferredYears?: { from?: number; to?: number }
+    openAccessOnly?: boolean
+  },
+  queryGroups: QueryExpansionGroup[],
+  filters: SearchFilters,
+  abortSignal?: AbortSignal,
+): Promise<DiscoveryPassResult> {
+  const extraKeywords = [...intent.coreConcepts, ...intent.relatedFields]
+  const searchQueries = uniqueStrings(queryGroups.map(group => group.query)).slice(0, 5)
+
+  const keywordSearchResults = await Promise.all(
+    searchQueries.map(query =>
+      callTool<SearchWorksOutput>(tools.searchWorks, {
+        query,
+        filters: {
+          ...filters,
+          maxResults: filters.maxResults || 8,
+        },
+      }, abortSignal),
+    ),
+  )
+
+  const conceptTreeResults = await Promise.all(
+    intent.coreConcepts.slice(0, 2).map(conceptName =>
+      callTool<ConceptTreeOutput>(tools.getConceptTree, { conceptName }, abortSignal),
+    ),
+  )
+
+  const conceptSearchResults = await Promise.all(
+    conceptTreeResults
+      .filter(result => result.matched?.id)
+      .slice(0, 2)
+      .map((result, index) =>
+        callTool<SearchWorksOutput>(tools.searchWorks, {
+          query: searchQueries[index] || result.matched!.displayName || intent.clarifiedQuery,
+          filters: {
+            ...filters,
+            conceptIds: [result.matched!.id],
+            maxResults: Math.min(filters.maxResults || 8, 8),
+          },
+        }, abortSignal),
+      ),
+  )
+
+  let combined = mergeWorks(
+    [
+      ...keywordSearchResults.flatMap(result => result.works),
+      ...conceptSearchResults.flatMap(result => result.works),
+    ],
+    queryGroups,
+    extraKeywords,
+  )
+
+  const filterResult = await callTool<FilterWorksOutput>(tools.filterWorks, {
+    workIds: combined.map(work => work.openAlexId),
+    criteria: {
+      fromYear: filters.fromYear,
+      toYear: filters.toYear,
+      minCitations: filters.minCitations,
+      openAccessOnly: filters.openAccessOnly,
+      sourceTypes: filters.sourceTypes,
+      requireAbstract: false,
+      relaxIfSparse: true,
+    },
+  }, abortSignal)
+
+  combined = mergeWorks(filterResult.works, queryGroups, extraKeywords)
+
+  const ranked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
+    workList: combined,
+    queryGroups,
+    extraKeywords,
+  }, abortSignal)
+
+  return {
+    works: combined,
+    ranked,
+    filterResult,
+  }
 }
 
 function ensureActive(signal?: AbortSignal) {
@@ -246,93 +489,71 @@ export async function POST(req: NextRequest) {
         ensureActive(req.signal)
         pushStage('expansion', 'in_progress')
         pushThinking('expansion', '正在把核心概念扩成多组关键词，兼顾英文术语、缩写和相邻概念。')
-        const queryGroups = await runQueryExpansionAgent(intent, modelConfig)
-        send({ type: 'strategy', queryGroups, intent })
-        pushStage('expansion', 'completed', `已生成 ${queryGroups.length} 组检索策略。`)
+        let activeQueryGroups = await runQueryExpansionAgent(intent, modelConfig)
+        send({ type: 'strategy', queryGroups: activeQueryGroups, intent })
+        pushStage('expansion', 'completed', `已生成 ${activeQueryGroups.length} 组检索策略。`)
+
+        const baseFilters = buildBaseFilters(intent)
+        let retryCount = 0
 
         ensureActive(req.signal)
         pushStage('parallel-search', 'in_progress')
-        pushThinking('parallel-search', '并行拉起关键词检索与概念检索，再用候选核心作者补充该方向代表性工作。')
+        pushThinking('parallel-search', '并行拉起关键词检索与概念检索，再根据候选规模决定是否自动放宽条件。')
 
-        const baseFilters = buildBaseFilters(intent)
+        let discovery = await runDiscoveryPass(tools, intent, activeQueryGroups, baseFilters, req.signal)
 
-        const keywordSearchResults = await Promise.all(
-          queryGroups.map(group =>
-            callTool<SearchWorksOutput>(tools.searchWorks, {
-              query: group.query,
-              filters: {
-                ...baseFilters,
-                maxResults: 8,
-              },
-            }, req.signal),
-          ),
-        )
+        if (discovery.filterResult.note) {
+          pushThinking('parallel-search', discovery.filterResult.note)
+        }
 
-        const conceptTreeResults = await Promise.all(
-          intent.coreConcepts.slice(0, 2).map(conceptName =>
-            callTool<ConceptTreeOutput>(tools.getConceptTree, { conceptName }, req.signal),
-          ),
-        )
+        const discoveryRetryReason = assessDiscoveryRetryNeed(discovery.ranked)
+        if (discoveryRetryReason) {
+          retryCount += 1
+          pushThinking('parallel-search', `${discoveryRetryReason}，已自动放宽筛选并补充重检查询。`)
+          const retryQueries = buildRetryQueries(intent, activeQueryGroups)
+          activeQueryGroups = mergeQueryGroups(
+            activeQueryGroups,
+            createAdHocQueryGroups(retryQueries, `补充检索 ${retryCount}`),
+          )
+          send({ type: 'strategy', queryGroups: activeQueryGroups, intent })
 
-        const conceptSearchResults = await Promise.all(
-          conceptTreeResults
-            .filter(result => result.matched?.id)
-            .slice(0, 2)
-            .map((result, index) =>
-              callTool<SearchWorksOutput>(tools.searchWorks, {
-                query: queryGroups[index]?.query || result.matched?.displayName || intent.clarifiedQuery,
-                filters: {
-                  ...baseFilters,
-                  conceptIds: [result.matched!.id],
-                  maxResults: 6,
-                },
-              }, req.signal),
-            ),
-        )
+          const retryFilters = buildRetryFilters(baseFilters, retryCount)
+          const retryPass = await runDiscoveryPass(tools, intent, activeQueryGroups, retryFilters, req.signal)
 
-        let combined = mergeWorks(
-          [
-            ...keywordSearchResults.flatMap(result => result.works),
-            ...conceptSearchResults.flatMap(result => result.works),
-          ],
-          queryGroups,
-          [...intent.coreConcepts, ...intent.relatedFields],
-        )
+          if (retryPass.filterResult.note) {
+            pushThinking('parallel-search', retryPass.filterResult.note)
+          }
 
-        const filteredInitial = await callTool<FilterWorksOutput>(tools.filterWorks, {
-          workIds: combined.map(work => work.openAlexId),
-          criteria: {
-            fromYear: intent.preferredYears?.from,
-            toYear: intent.preferredYears?.to,
-            minCitations: baseFilters.minCitations,
-            openAccessOnly: intent.openAccessOnly,
-            requireAbstract: false,
-            relaxIfSparse: true,
-          },
-        }, req.signal)
+          const mergedRetryWorks = mergeWorks(
+            [...discovery.works, ...retryPass.works],
+            activeQueryGroups,
+            [...intent.coreConcepts, ...intent.relatedFields],
+          )
 
-        combined = mergeWorks(
-          filteredInitial.works,
-          queryGroups,
-          [...intent.coreConcepts, ...intent.relatedFields],
-        )
+          const reranked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
+            workList: mergedRetryWorks,
+            queryGroups: activeQueryGroups,
+            extraKeywords: [...intent.coreConcepts, ...intent.relatedFields],
+          }, req.signal)
 
-        const preliminaryRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
-          workList: combined,
-          queryGroups,
-          extraKeywords: [...intent.coreConcepts, ...intent.relatedFields],
-        }, req.signal)
+          discovery = {
+            works: mergedRetryWorks,
+            ranked: reranked,
+            filterResult: retryPass.filterResult,
+          }
+        }
 
-        pushStage('parallel-search', 'completed', `初轮检索获得 ${preliminaryRanked.works.length} 篇候选文献。`)
+        pushStage('parallel-search', 'completed', `初轮检索获得 ${discovery.ranked.works.length} 篇候选文献。`)
 
         ensureActive(req.signal)
         pushStage('analysis', 'in_progress')
         pushThinking('analysis', '先给候选文献做相关性评分，再用核心论文的引用链做滚雪球扩展。')
 
-        const analysis = await runAnalysisAgent(intent, preliminaryRanked.works, modelConfig)
+        let analysis = await runAnalysisAgent(intent, discovery.ranked.works, modelConfig)
         pushThinking('analysis', analysis.rationale[0] || '已识别出可继续深挖的核心论文与补充查询词。')
 
-        let analysisEnriched = applyAnalysisToPapers(preliminaryRanked.works, analysis)
+        const activeFilters = buildRetryFilters(baseFilters, retryCount)
+        let analysisEnriched = applyAnalysisToPapers(discovery.ranked.works, analysis)
 
         const reSearchResults = analysis.newQueries.length > 0
           ? await Promise.all(
@@ -340,8 +561,8 @@ export async function POST(req: NextRequest) {
                 callTool<SearchWorksOutput>(tools.searchWorks, {
                   query: searchQuery,
                   filters: {
-                    ...baseFilters,
-                    maxResults: 6,
+                    ...activeFilters,
+                    maxResults: Math.max(activeFilters.maxResults || 8, 8),
                   },
                 }, req.signal),
               ),
@@ -365,7 +586,7 @@ export async function POST(req: NextRequest) {
               authorIds.map(authorId =>
                 callTool<AuthorWorksOutput>(tools.getAuthorWorks, {
                   authorId,
-                  fromYear: intent.preferredYears?.from,
+                  fromYear: activeFilters.fromYear,
                   limit: 5,
                 }, req.signal),
               ),
@@ -379,7 +600,7 @@ export async function POST(req: NextRequest) {
             ...relatedResults.flatMap(result => result.works),
             ...authorResults.flatMap(result => result.works),
           ],
-          queryGroups,
+          activeQueryGroups,
           [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
         )
 
@@ -387,22 +608,93 @@ export async function POST(req: NextRequest) {
 
         ensureActive(req.signal)
         pushStage('aggregation', 'in_progress')
-        pushThinking('aggregation', '开始按相关性、被引、新颖性和开放获取综合排序，并补齐推荐理由。')
+        pushThinking('aggregation', '开始综合排序，并由结果检阅智能体判断是否需要再次重检。')
 
-        const finalRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
+        let finalRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
           workList: analysisEnriched,
-          queryGroups,
+          queryGroups: activeQueryGroups,
           extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
         }, req.signal)
 
-        const finalPapers = finalRanked.works
+        let review = await runResultReviewAgent(intent, finalRanked.works.slice(0, 12), modelConfig)
+        let reviewNotes = uniqueStrings(review.reviewNotes)
+
+        if (reviewNotes.length > 0) {
+          pushThinking('aggregation', reviewNotes[0])
+        }
+
+        if (review.retryNeeded || selectFinalPapers(finalRanked.works, review).length < 4) {
+          retryCount += 1
+          pushThinking(
+            'aggregation',
+            `${review.retryReason || '结果检阅认为当前返回结果仍不足以支撑阅读列表'}，正在自动重检。`,
+          )
+
+          const retryQueries = buildRetryQueries(
+            intent,
+            activeQueryGroups,
+            analysis.newQueries,
+            review.recommendedQueries,
+          )
+          activeQueryGroups = mergeQueryGroups(
+            activeQueryGroups,
+            createAdHocQueryGroups(retryQueries, `结果检阅重检 ${retryCount}`),
+          )
+          send({ type: 'strategy', queryGroups: activeQueryGroups, intent })
+
+          const reviewRetryFilters = buildRetryFilters(baseFilters, retryCount, review)
+          const reviewRetryPass = await runDiscoveryPass(
+            tools,
+            intent,
+            activeQueryGroups,
+            reviewRetryFilters,
+            req.signal,
+          )
+
+          reviewNotes = uniqueStrings([
+            ...reviewNotes,
+            reviewRetryPass.filterResult.note || '',
+          ])
+
+          let recheckedWorks = mergeWorks(
+            [...analysisEnriched, ...reviewRetryPass.works],
+            activeQueryGroups,
+            [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
+          )
+
+          const recheckedRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
+            workList: recheckedWorks,
+            queryGroups: activeQueryGroups,
+            extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
+          }, req.signal)
+
+          analysis = await runAnalysisAgent(intent, recheckedRanked.works, modelConfig)
+          recheckedWorks = applyAnalysisToPapers(recheckedRanked.works, analysis)
+
+          analysisEnriched = mergeWorks(
+            recheckedWorks,
+            activeQueryGroups,
+            [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
+          )
+
+          finalRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
+            workList: analysisEnriched,
+            queryGroups: activeQueryGroups,
+            extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
+          }, req.signal)
+
+          review = await runResultReviewAgent(intent, finalRanked.works.slice(0, 12), modelConfig)
+          reviewNotes = uniqueStrings([...reviewNotes, ...review.reviewNotes])
+        }
+
+        const finalPapers = selectFinalPapers(finalRanked.works, review)
           .slice(0, 12)
           .map(paper => ({
             ...paper,
             recommendationReason: fillRecommendationReason(paper),
           }))
 
-        const summary = buildSearchSummary(intent, analysis, finalPapers)
+        const summary = `${buildSearchSummary(intent, analysis, finalPapers)}${retryCount > 0 ? ` 系统已自动重检 ${retryCount} 次。` : ''}`
 
         send({
           type: 'results',
@@ -411,11 +703,17 @@ export async function POST(req: NextRequest) {
             papers: finalPapers,
             totalCandidates: analysisEnriched.length,
             duplicatesRemoved: finalRanked.duplicatesRemoved,
-            queryGroups,
+            queryGroups: activeQueryGroups,
             intent,
+            reviewNotes: reviewNotes.slice(0, 4),
+            retryCount,
           },
         })
-        pushStage('aggregation', 'completed', `最终输出 ${finalPapers.length} 篇推荐文献。`)
+        pushStage(
+          'aggregation',
+          'completed',
+          `最终输出 ${finalPapers.length} 篇推荐文献${retryCount > 0 ? `，自动重检 ${retryCount} 次` : ''}。`,
+        )
         send({ type: 'done', outcome: 'results' })
         controller.close()
       } catch (error) {

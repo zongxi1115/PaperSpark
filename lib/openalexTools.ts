@@ -179,6 +179,47 @@ function applyCriteria(works: SearchPaper[], criteria: FilterCriteria) {
   })
 }
 
+function buildRelaxedCriteriaVariants(criteria: FilterCriteria): Array<{ criteria: FilterCriteria; note: string }> {
+  const loosenedCitation = criteria.minCitations
+    ? Math.max(0, Math.floor(criteria.minCitations * 0.5))
+    : 0
+  const widenedFromYear = criteria.fromYear ? Math.max(1900, criteria.fromYear - 3) : undefined
+  const widenedToYear = criteria.toYear ? criteria.toYear + 1 : undefined
+
+  return [
+    {
+      criteria: {
+        ...criteria,
+        minCitations: loosenedCitation,
+        openAccessOnly: false,
+      },
+      note: '结果偏少，已放宽引用量与开放获取限制。',
+    },
+    {
+      criteria: {
+        ...criteria,
+        minCitations: 0,
+        openAccessOnly: false,
+        fromYear: widenedFromYear,
+        toYear: widenedToYear,
+      },
+      note: '结果仍偏少，已进一步放宽年份范围并取消最低引用要求。',
+    },
+    {
+      criteria: {
+        ...criteria,
+        minCitations: 0,
+        openAccessOnly: false,
+        fromYear: undefined,
+        toYear: undefined,
+        sourceTypes: undefined,
+        requireAbstract: false,
+      },
+      note: '结果持续稀疏，已切换到宽松筛选以保留更多候选供后续检阅。',
+    },
+  ]
+}
+
 async function runToolWithReport<T>(
   name: ToolCallEvent['name'],
   input: unknown,
@@ -424,18 +465,34 @@ export function createOpenAlexToolset(context: ToolContext) {
       let note: string | undefined
 
       if (filtered.length < 5 && criteria.relaxIfSparse) {
-        const relaxedCriteria: FilterCriteria = {
-          ...criteria,
-          minCitations: criteria.minCitations ? Math.max(0, Math.floor(criteria.minCitations * 0.5)) : undefined,
-          openAccessOnly: false,
+        let best = {
+          works: filtered,
+          criteria,
+          note,
         }
-        filtered = applyCriteria(allWorks, relaxedCriteria)
-        relaxed = true
-        note = '结果过少，已自动放宽引用量与开放获取限制。'
+
+        for (const variant of buildRelaxedCriteriaVariants(criteria)) {
+          const nextWorks = applyCriteria(allWorks, variant.criteria)
+          if (nextWorks.length > best.works.length) {
+            best = {
+              works: nextWorks,
+              criteria: variant.criteria,
+              note: variant.note,
+            }
+          }
+          if (nextWorks.length >= 5) {
+            break
+          }
+        }
+
+        filtered = best.works
+        relaxed = best.criteria !== criteria
+        note = best.note
+
         return {
           count: filtered.length,
           works: filtered,
-          criteriaApplied: relaxedCriteria,
+          criteriaApplied: best.criteria,
           relaxed,
           note,
         }

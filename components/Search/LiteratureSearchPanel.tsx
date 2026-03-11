@@ -591,8 +591,61 @@ export function LiteratureSearchPanel() {
                 <MetricPill label="候选文献" value={String(results.totalCandidates)} />
                 <MetricPill label="去重数量" value={String(results.duplicatesRemoved)} />
                 <MetricPill label="最终推荐" value={String(results.papers.length)} />
+                {results.retryCount > 0 && (
+                  <MetricPill label="自动重检" value={String(results.retryCount)} />
+                )}
               </div>
+
+              {(results.retryCount > 0 || results.reviewNotes.length > 0) && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: '10px 12px',
+                    borderRadius: 14,
+                    background: 'rgba(255,255,255,0.72)',
+                    border: '1px solid color-mix(in srgb, var(--border-color) 72%, transparent)',
+                    display: 'grid',
+                    gap: 6,
+                  }}
+                >
+                  {results.retryCount > 0 && (
+                    <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                      系统已根据候选质量自动重检 {results.retryCount} 次。
+                    </div>
+                  )}
+                  {results.reviewNotes.map(note => (
+                    <div
+                      key={note}
+                      style={{
+                        fontSize: 11,
+                        color: 'var(--text-secondary)',
+                        lineHeight: 1.6,
+                        wordBreak: 'break-word',
+                      }}
+                    >
+                      {note}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
+
+            {results.papers.length === 0 && (
+              <div
+                style={{
+                  padding: 14,
+                  borderRadius: 18,
+                  border: '1px solid color-mix(in srgb, var(--border-color) 78%, transparent)',
+                  background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
+                  boxShadow: '0 14px 32px rgba(15, 23, 42, 0.06)',
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700 }}>当前仍未形成可推荐文献列表</div>
+                <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.7 }}>
+                  系统已经执行自动重检。你可以进一步补充研究对象、方法、应用场景或时间窗口，让下一轮检索更聚焦。
+                </div>
+              </div>
+            )}
 
             {results.papers.map((paper, index) => (
               <motion.article

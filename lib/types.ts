@@ -119,7 +119,7 @@ function getDefaultSettings(): AppSettings {
 export const defaultSettings: AppSettings = getDefaultSettings()
 
 // 知识库条目类型
-export type KnowledgeSourceType = 'zotero' | 'upload' | 'url'
+export type KnowledgeSourceType = 'zotero' | 'upload' | 'url' | 'literature-search'
 
 export interface KnowledgeItem {
   id: string
@@ -310,4 +310,55 @@ export interface SmartChunk {
   blockIds: string[] // 包含的原始 block id
   text: string // 合并后的文本
   translated?: string
+}
+
+// ============ 批注相关类型 ============
+
+// 高亮颜色
+export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple'
+
+// 高亮颜色映射
+export const HIGHLIGHT_COLORS: Record<HighlightColor, { bg: string; border: string }> = {
+  yellow: { bg: 'rgba(255, 235, 59, 0.4)', border: 'rgba(255, 193, 7, 0.8)' },
+  green: { bg: 'rgba(76, 175, 80, 0.3)', border: 'rgba(76, 175, 80, 0.8)' },
+  blue: { bg: 'rgba(33, 150, 243, 0.3)', border: 'rgba(33, 150, 243, 0.8)' },
+  pink: { bg: 'rgba(233, 30, 99, 0.25)', border: 'rgba(233, 30, 99, 0.8)' },
+  purple: { bg: 'rgba(156, 39, 176, 0.3)', border: 'rgba(156, 39, 176, 0.8)' },
+}
+
+// 批注类型
+export type AnnotationType = 'highlight' | 'note' | 'underline'
+
+// 批注数据
+export interface PDFAnnotation {
+  id: string
+  documentId: string
+  type: AnnotationType
+  pageNum: number
+  // 文本选择信息
+  selectedText: string
+  startOffset: number // 在页面文本中的起始位置
+  endOffset: number // 在页面文本中的结束位置
+  // 位置信息（相对于页面）
+  rects: BoundingBox[] // 可能跨多行
+  // 样式
+  color: HighlightColor
+  // 批注内容（note类型）
+  content?: string
+  // 元数据
+  createdAt: string
+  updatedAt: string
+}
+
+// 流式翻译事件
+export interface TranslationStreamEvent {
+  type: 'start' | 'progress' | 'chunk' | 'complete' | 'error'
+  data?: {
+    chunkId?: string
+    original?: string
+    translated?: string
+    progress?: number
+    total?: number
+    error?: string
+  }
 }

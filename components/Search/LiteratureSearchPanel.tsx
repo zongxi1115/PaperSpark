@@ -86,19 +86,31 @@ async function readSearchStream(
 
 function createKnowledgeItemFromPaper(paper: SearchPaper): KnowledgeItem {
   const openAlexShortId = paper.openAlexId.split('/').pop()?.toLowerCase() || generateId()
+  const safeFileBase = (paper.title || 'paper')
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80) || 'paper'
+  const pdfFileName = paper.pdfUrl ? `${safeFileBase}.pdf` : undefined
 
   return {
     id: `openalex-${openAlexShortId}`,
     title: paper.title,
     authors: paper.authors,
-    abstract: paper.abstract,
+    abstract: paper.abstract || '',
     year: paper.year ? String(paper.year) : '',
     journal: paper.venue,
     doi: paper.doi,
     url: paper.url || `https://openalex.org/${openAlexShortId.toUpperCase()}`,
-    sourceType: 'url',
+    sourceType: 'literature-search',
     sourceId: paper.openAlexId,
-    cachedSummary: paper.recommendationReason,
+    fileName: pdfFileName,
+    fileType: paper.pdfUrl ? 'pdf' : undefined,
+    hasAttachment: Boolean(paper.pdfUrl),
+    attachmentUrl: paper.pdfUrl,
+    attachmentFileName: pdfFileName,
+    itemType: '漫游搜索',
+    tags: ['漫游搜索'],
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }

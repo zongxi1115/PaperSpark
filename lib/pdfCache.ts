@@ -1,7 +1,7 @@
 'use client'
 
 import Dexie, { type EntityTable } from 'dexie'
-import type { PDFDocumentCache, PDFPageCache, TranslationCache, TextBlock } from './types'
+import type { PDFDocumentCache, PDFPageCache, TranslationCache, TextBlock, PDFAnnotation } from './types'
 
 // PDF 文件缓存（存储原始 PDF blob）
 interface PDFFileCache {
@@ -18,14 +18,16 @@ const db = new Dexie('PaperReaderPDF') as Dexie & {
   documents: EntityTable<PDFDocumentCache, 'id'>
   pages: EntityTable<PDFPageCache, 'id'>
   translations: EntityTable<TranslationCache, 'id'>
+  annotations: EntityTable<PDFAnnotation, 'id'>
 }
 
 // 初始化数据库
-db.version(2).stores({
+db.version(3).stores({
   files: 'id, cachedAt',
   documents: 'id, knowledgeItemId, parsedAt',
   pages: 'id, documentId, pageNum',
   translations: 'id, documentId, translatedAt',
+  annotations: 'id, documentId, pageNum, createdAt',
 })
 
 // ============ PDF 文件缓存操作 ============
@@ -198,6 +200,7 @@ export async function getCacheStats(): Promise<{
   documentCount: number
   pageCount: number
   translationCount: number
+  annotationCount: number
 }> {
   const files = await db.files.toArray()
   return {
@@ -206,7 +209,65 @@ export async function getCacheStats(): Promise<{
     documentCount: await db.documents.count(),
     pageCount: await db.pages.count(),
     translationCount: await db.translations.count(),
+    annotationCount: await db.annotations.count(),
   }
+}
+
+// ============ 批注操作 ============
+
+/**
+ * 保存批注
+ */
+export async function saveAnnotation(annotation: PDFAnnotation): Promise<void> {
+  await db.annotations.put(annotation)
+}
+
+/**
+ * 获取单个批注
+ */
+export async function getAnnotation(id: string): Promise<PDFAnnotation | undefined> {
+  return await db.annotations.get(id)
+}
+
+/**
+ * 获取文档的所有批注
+ */
+export async function getAnnotationsByDocumentId(documentId: string): Promise<PDFAnnotation[]> {
+  return await db.annotations.where('documentId').equals(documentId).sortBy('createdAt')
+}
+
+/**
+ * 获取特定页面的批注
+ */
+export async function getAnnotationsByPage(documentId: string, pageNum: number): Promise<PDFAnnotation[]> {
+  return await db.annotations
+    .where('[documentId+pageNum]')
+    .equals([documentId, pageNum])
+    .sortBy('createdAt')
+}
+
+/**
+ * 更新批注
+ */
+export async function updateAnnotation(id: string, updates: Partial<PDFAnnotation>): Promise<void> {
+  await db.annotations.update(id, {
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+/**
+ * 删除批注
+ */
+export async function deleteAnnotation(id: string): Promise<void> {
+  await db.annotations.delete(id)
+}
+
+/**
+ * 删除文档的所有批注
+ */
+export async function deleteAnnotationsByDocumentId(documentId: string): Promise<void> {
+  await db.annotations.where('documentId').equals(documentId).delete()
 }
 
 export { db }

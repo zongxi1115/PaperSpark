@@ -34,6 +34,16 @@ import {
 } from '@/lib/storage'
 import type { KnowledgeItem, ZoteroConfig } from '@/lib/types'
 
+function getSourceLabel(item: KnowledgeItem) {
+  if (item.sourceType === 'zotero') {
+    return item.itemType === 'webpage' ? '网页' : 'Zotero'
+  }
+  if (item.sourceType === 'literature-search') {
+    return '漫游搜索'
+  }
+  return item.sourceType === 'url' ? 'URL' : '上传'
+}
+
 export function KnowledgePanel() {
   const router = useRouter()
   const [items, setItems] = useState<KnowledgeItem[]>([])
@@ -474,7 +484,7 @@ export function KnowledgePanel() {
                     borderRadius: 3,
                     color: 'var(--text-muted)',
                   }}>
-                    {item.sourceType === 'zotero' ? (item.itemType === 'webpage' ? '网页' : 'Zotero') : item.sourceType === 'url' ? 'URL' : '上传'}
+                    {getSourceLabel(item)}
                   </span>
                   {item.hasAttachment && (
                     <span style={{ fontSize: 10, color: 'var(--accent-color)' }}>PDF</span>
@@ -895,7 +905,9 @@ function SettingsIcon() {
 }
 
 function FileIcon({ type, hasAttachment }: { type: string; hasAttachment?: boolean }) {
-  const color = hasAttachment ? 'var(--accent-color)' : (type === 'zotero' ? 'var(--accent-color)' : 'var(--text-muted)')
+  const color = hasAttachment
+    ? 'var(--accent-color)'
+    : (type === 'zotero' || type === 'literature-search' ? 'var(--accent-color)' : 'var(--text-muted)')
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />

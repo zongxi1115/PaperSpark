@@ -7,7 +7,8 @@ declare module 'react' {
         value?: string
         'read-only'?: boolean
       }, HTMLElement>
+      'math-span': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>
+      'math-div': React.DetailedHTMLProps<React.HTMLAttributes<HTMLElement>, HTMLElement>
     }
   }
 }
-

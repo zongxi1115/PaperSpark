@@ -479,6 +479,33 @@ export function SettingsForm() {
           </CardBody>
         </Card>
 
+        {/* Zotero 设置 */}
+        <Card shadow="sm">
+          <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+            <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>Zotero 设置</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              配置 Zotero 同步和引用格式
+            </p>
+          </CardHeader>
+          <Divider />
+          <CardBody style={{ padding: 16 }}>
+            <Select
+              label="引用格式"
+              placeholder="选择引用格式"
+              selectedKeys={settings.citationStyle ? new Set([settings.citationStyle]) : new Set(['apa'])}
+              onSelectionChange={keys => setSettings(s => ({ ...s, citationStyle: keys instanceof Set && keys.size > 0 ? [...keys][0] as string : 'apa' }))}
+              variant="bordered"
+              description="从 Zotero 同步文献时使用的引用格式"
+            >
+              <SelectItem key="apa">APA 7th Edition</SelectItem>
+              <SelectItem key="mla">MLA 9th Edition</SelectItem>
+              <SelectItem key="ieee">IEEE</SelectItem>
+              <SelectItem key="chicago-author-date">Chicago Author-Date</SelectItem>
+              <SelectItem key="gb-t-7714-2015-numeric">GB/T 7714-2015 (中文)</SelectItem>
+            </Select>
+          </CardBody>
+        </Card>
+
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 12, paddingTop: 4 }}>
           <Button color="primary" onPress={handleSave} isDisabled={saved}>

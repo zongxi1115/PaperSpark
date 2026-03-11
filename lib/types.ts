@@ -54,6 +54,8 @@ export type AppSettings = {
   // 保留旧配置用于兼容迁移
   smallModel?: ModelConfig
   largeModel?: ModelConfig
+  // Zotero 引用格式
+  citationStyle?: string
 } & { [key in typeof selectFeatures[number]]: boolean
 }
 
@@ -99,6 +101,7 @@ function getDefaultSettings(): AppSettings {
     providers: defaultProviders,
     defaultSmallModelId: 'model-step-3.5-flash',
     defaultLargeModelId: 'model-gpt-4o',
+    citationStyle: 'apa',
     smallModel: {
       baseUrl: process.env.NEXT_PUBLIC_SMALL_MODEL_BASE_URL || 'https://openrouter.ai/api/v1',
       apiKey: process.env.NEXT_PUBLIC_SMALL_MODEL_API_KEY || '',

@@ -27,6 +27,19 @@ export function FormulaEditor({ isOpen, initialLatex, onSave, onClose }: Formula
   useEffect(() => {
     if (!isOpen || !containerRef.current) return
 
+    // 配置 MathLive 字体资源目录（必须在创建 math-field 之前设置）
+    // 默认使用 public/fonts；也可通过 CSS 变量 `--mathfield-fonts-directory` 覆盖
+    const MathfieldElement = (globalThis as any).MathfieldElement as
+      | { fontsDirectory?: string | null }
+      | undefined
+    const cssFontsDirectory = getComputedStyle(document.documentElement)
+      .getPropertyValue('--mathfield-fonts-directory')
+      .trim()
+    const fontsDirectory = cssFontsDirectory || '/fonts'
+    if (MathfieldElement && MathfieldElement.fontsDirectory !== fontsDirectory) {
+      MathfieldElement.fontsDirectory = fontsDirectory
+    }
+
     // 清除旧的 mathfield
     containerRef.current.innerHTML = ''
     
@@ -42,6 +55,8 @@ export function FormulaEditor({ isOpen, initialLatex, onSave, onClose }: Formula
       min-height: 60px;
       font-size: 18px;
       border: none;
+      outline: none;
+      box-shadow: none;
       background: transparent;
     `
     
@@ -132,10 +147,6 @@ export function FormulaEditor({ isOpen, initialLatex, onSave, onClose }: Formula
             <label className="text-sm text-default-500">可视化编辑</label>
             <div 
               className="rounded-lg border-1 border-default-200 bg-default-50 p-4 min-h-[60px]"
-              style={{
-                // mathlive 字体配置
-                '--mathfield-fonts-directory': 'https://cdn.jsdelivr.net/npm/mathlive/dist/fonts/',
-              } as React.CSSProperties}
             >
               <div ref={containerRef} />
             </div>

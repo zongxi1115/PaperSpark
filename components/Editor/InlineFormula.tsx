@@ -1,26 +1,78 @@
 'use client'
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { createReactInlineContentSpec } from '@blocknote/react'
+import type { ReactCustomInlineContentRenderProps } from '@blocknote/react'
+import 'mathlive'
 import { FormulaEditor } from './FormulaEditor'
 
 // 全局状态管理：当前打开的公式编辑器
 let currentOpenEditor: ((open: boolean) => void) | null = null
 
-// 行内公式组件的 Props 类型
-interface FormulaInlineContentProps {
-  inlineContent: {
+type FormulaInlineContentProps = ReactCustomInlineContentRenderProps<
+  {
     type: 'formula'
-    props: {
-      latex: string
+    propSchema: {
+      latex: {
+        default: string
+      }
     }
+    content: 'none'
+  },
+  any
+>
+
+function ensureMathliveFontsDirectory() {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return
+  const MathfieldElement = (globalThis as any).MathfieldElement as
+    | { fontsDirectory?: string | null }
+    | undefined
+  if (!MathfieldElement) return
+
+  const cssFontsDirectory = getComputedStyle(document.documentElement)
+    .getPropertyValue('--mathfield-fonts-directory')
+    .trim()
+  const fontsDirectory = cssFontsDirectory || '/fonts'
+  if (MathfieldElement.fontsDirectory !== fontsDirectory) {
+    MathfieldElement.fontsDirectory = fontsDirectory
   }
 }
 
+function MathLiveInline({ latex }: { latex: string }) {
+  const spanRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    ensureMathliveFontsDirectory()
+  }, [])
+
+  useEffect(() => {
+    const el = spanRef.current as (HTMLElement & { render?: () => Promise<void> }) | null
+    if (!el) return
+    el.textContent = latex || ''
+    const renderPromise = el.render?.()
+    if (renderPromise) {
+      renderPromise.catch(() => {})
+    }
+  }, [latex])
+
+  return (
+    <math-span
+      ref={(el) => {
+        spanRef.current = el
+      }}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'baseline',
+        lineHeight: 1.2,
+      }}
+    />
+  )
+}
+
 // 行内公式渲染组件
-function FormulaInlineContent({ inlineContent }: FormulaInlineContentProps) {
+function FormulaInlineContent({ inlineContent, updateInlineContent }: FormulaInlineContentProps) {
   const [isEditing, setIsEditing] = useState(false)
-  const [currentLatex, setCurrentLatex] = useState(inlineContent.props.latex)
   const [isHovered, setIsHovered] = useState(false)
+  const currentLatex = inlineContent.props.latex || ''
 
   // 关闭其他编辑器
   const openEditor = useCallback(() => {
@@ -41,19 +93,18 @@ function FormulaInlineContent({ inlineContent }: FormulaInlineContentProps) {
   }, [])
 
   const handleSave = useCallback((newLatex: string) => {
-    setCurrentLatex(newLatex)
+    updateInlineContent({
+      type: 'formula',
+      props: {
+        latex: newLatex,
+      },
+    })
     setIsEditing(false)
-  }, [])
+  }, [updateInlineContent])
 
   const handleClose = useCallback(() => {
     setIsEditing(false)
   }, [])
-
-  // 使用 useMemo 优化渲染
-  const formulaHtml = useMemo(() => {
-    if (!currentLatex) return ''
-    return renderLatexToHtml(currentLatex)
-  }, [currentLatex])
 
   // 渲染公式预览
   const renderFormula = () => {
@@ -62,13 +113,7 @@ function FormulaInlineContent({ inlineContent }: FormulaInlineContentProps) {
     }
 
     return (
-      <span 
-        style={{ 
-          fontFamily: "'Times New Roman', 'STIX Two Math', 'Latin Modern Math', serif",
-          fontStyle: 'italic',
-        }}
-        dangerouslySetInnerHTML={{ __html: formulaHtml }}
-      />
+      <MathLiveInline latex={currentLatex} />
     )
   }
 
@@ -113,113 +158,6 @@ function FormulaInlineContent({ inlineContent }: FormulaInlineContentProps) {
   )
 }
 
-// 简单的 LaTeX 到 HTML 转换（用于预览）
-function renderLatexToHtml(latex: string): string {
-  if (!latex) return ''
-  
-  let html = latex
-  
-  // 希腊字母
-  const greekLetters: Record<string, string> = {
-    '\\alpha': 'α', '\\beta': 'β', '\\gamma': 'γ', '\\delta': 'δ',
-    '\\epsilon': 'ε', '\\zeta': 'ζ', '\\eta': 'η', '\\theta': 'θ',
-    '\\iota': 'ι', '\\kappa': 'κ', '\\lambda': 'λ', '\\mu': 'μ',
-    '\\nu': 'ν', '\\xi': 'ξ', '\\pi': 'π', '\\rho': 'ρ',
-    '\\sigma': 'σ', '\\tau': 'τ', '\\upsilon': 'υ', '\\phi': 'φ',
-    '\\chi': 'χ', '\\psi': 'ψ', '\\omega': 'ω',
-    '\\Gamma': 'Γ', '\\Delta': 'Δ', '\\Theta': 'Θ', '\\Lambda': 'Λ',
-    '\\Xi': 'Ξ', '\\Pi': 'Π', '\\Sigma': 'Σ', '\\Phi': 'Φ',
-    '\\Psi': 'Ψ', '\\Omega': 'Ω',
-  }
-  
-  // 替换希腊字母
-  for (const [latex, symbol] of Object.entries(greekLetters)) {
-    html = html.split(latex).join(symbol)
-    html = html.split(latex + ' ').join(symbol + ' ')
-  }
-  
-  // 分数 \frac{a}{b} -> a/b
-  html = html.replace(/\\frac\{([^}]*)\}\{([^}]*)\}/g, '($1)/($2)')
-  
-  // 上标 ^{x} -> <sup>x</sup>
-  html = html.replace(/\^\{([^}]*)\}/g, '<sup>$1</sup>')
-  html = html.replace(/\^([a-zA-Z0-9])/g, '<sup>$1</sup>')
-  
-  // 下标 _{x} -> <sub>x</sub>
-  html = html.replace(/_\{([^}]*)\}/g, '<sub>$1</sub>')
-  html = html.replace(/_([a-zA-Z0-9])/g, '<sub>$1</sub>')
-  
-  // 平方根 \sqrt{x} -> √x
-  html = html.replace(/\\sqrt\{([^}]*)\}/g, '√($1)')
-  
-  // 求和符号
-  html = html.replace(/\\sum/g, '∑')
-  html = html.replace(/\\prod/g, '∏')
-  html = html.replace(/\\int/g, '∫')
-  
-  // 常用运算符
-  html = html.replace(/\\times/g, '×')
-  html = html.replace(/\\div/g, '÷')
-  html = html.replace(/\\pm/g, '±')
-  html = html.replace(/\\mp/g, '∓')
-  html = html.replace(/\\cdot/g, '·')
-  html = html.replace(/\\leq/g, '≤')
-  html = html.replace(/\\geq/g, '≥')
-  html = html.replace(/\\neq/g, '≠')
-  html = html.replace(/\\approx/g, '≈')
-  html = html.replace(/\\equiv/g, '≡')
-  html = html.replace(/\\infty/g, '∞')
-  html = html.replace(/\\partial/g, '∂')
-  html = html.replace(/\\nabla/g, '∇')
-  
-  // 箭头
-  html = html.replace(/\\rightarrow/g, '→')
-  html = html.replace(/\\leftarrow/g, '←')
-  html = html.replace(/\\Rightarrow/g, '⇒')
-  html = html.replace(/\\Leftarrow/g, '⇐')
-  
-  // 集合符号
-  html = html.replace(/\\in/g, '∈')
-  html = html.replace(/\\notin/g, '∉')
-  html = html.replace(/\\subset/g, '⊂')
-  html = html.replace(/\\supset/g, '⊃')
-  html = html.replace(/\\cup/g, '∪')
-  html = html.replace(/\\cap/g, '∩')
-  html = html.replace(/\\emptyset/g, '∅')
-  
-  // 逻辑符号
-  html = html.replace(/\\forall/g, '∀')
-  html = html.replace(/\\exists/g, '∃')
-  html = html.replace(/\\neg/g, '¬')
-  html = html.replace(/\\land/g, '∧')
-  html = html.replace(/\\lor/g, '∨')
-  
-  // 括号
-  html = html.replace(/\\left\(/g, '(')
-  html = html.replace(/\\right\)/g, ')')
-  html = html.replace(/\\left\[/g, '[')
-  html = html.replace(/\\right\]/g, ']')
-  html = html.replace(/\\left\{/g, '{')
-  html = html.replace(/\\right\}/g, '}')
-  
-  // 文本
-  html = html.replace(/\\text\{([^}]*)\}/g, '$1')
-  html = html.replace(/\\mathrm\{([^}]*)\}/g, '$1')
-  
-  // 空格和换行
-  html = html.replace(/\\quad/g, ' ')
-  html = html.replace(/\\qquad/g, '  ')
-  html = html.replace(/\\,/g, ' ')
-  html = html.replace(/\\;/g, ' ')
-  html = html.replace(/\\!/g, '')
-  html = html.replace(/\\ /g, ' ')
-  
-  // 清理剩余的反斜杠命令（保持原样显示）
-  // html = html.replace(/\\[a-zA-Z]+/g, '')
-  
-  return html
-}
-
 // 创建 BlockNote 自定义内联内容规范
 export const FormulaInlineContentSpec = createReactInlineContentSpec(
   {
@@ -232,9 +170,7 @@ export const FormulaInlineContentSpec = createReactInlineContentSpec(
     content: 'none',
   } as const,
   {
-    render: (props: { inlineContent: any }) => (
-      <FormulaInlineContent inlineContent={props.inlineContent} />
-    ),
+    render: (props) => <FormulaInlineContent {...(props as any)} />,
   }
 )
 

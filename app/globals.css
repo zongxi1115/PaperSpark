@@ -64,4 +64,11 @@ body {
 
 math-field {
   font-size: 18px;
+  border: none;
+  outline: none;
+}
+
+math-field:focus,
+math-field:focus-within {
+  outline: none;
 }

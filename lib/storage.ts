@@ -9,6 +9,11 @@ function isBrowser() {
   return typeof window !== 'undefined'
 }
 
+function emitStorageEvent(eventName: string) {
+  if (!isBrowser()) return
+  window.dispatchEvent(new Event(eventName))
+}
+
 export function getDocuments(): AppDocument[] {
   if (!isBrowser()) return []
   try {
@@ -146,6 +151,7 @@ export function getKnowledgeItems(): KnowledgeItem[] {
 export function saveKnowledgeItems(items: KnowledgeItem[]): void {
   if (!isBrowser()) return
   localStorage.setItem(KNOWLEDGE_KEY, JSON.stringify(items))
+  emitStorageEvent('knowledge-items-updated')
 }
 
 export function addKnowledgeItem(item: KnowledgeItem): void {

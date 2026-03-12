@@ -1,7 +1,7 @@
 'use client'
 
 import Dexie, { type EntityTable } from 'dexie'
-import type { PDFDocumentCache, PDFPageCache, TranslationCache, TextBlock, PDFAnnotation, GuideCache } from './types'
+import type { PDFDocumentCache, PDFPageCache, TranslationCache, TextBlock, PDFAnnotation, GuideCache, VectorDocument } from './types'
 
 // PDF 文件缓存（存储原始 PDF blob）
 interface PDFFileCache {
@@ -20,16 +20,18 @@ const db = new Dexie('PaperReaderPDF') as Dexie & {
   translations: EntityTable<TranslationCache, 'id'>
   annotations: EntityTable<PDFAnnotation, 'id'>
   guides: EntityTable<GuideCache, 'id'>
+  vectors: EntityTable<VectorDocument, 'id'>
 }
 
 // 初始化数据库
-db.version(4).stores({
+db.version(5).stores({
   files: 'id, cachedAt',
   documents: 'id, knowledgeItemId, parsedAt',
   pages: 'id, documentId, pageNum',
   translations: 'id, documentId, translatedAt',
   annotations: 'id, documentId, pageNum, createdAt',
   guides: 'id, documentId, knowledgeItemId, generatedAt',
+  vectors: 'id, documentId, blockId',
 })
 
 // ============ PDF 文件缓存操作 ============
@@ -413,6 +415,33 @@ export async function updateGuide(id: string, updates: Partial<GuideCache>): Pro
  */
 export async function deleteGuide(documentId: string): Promise<void> {
   await db.guides.where('documentId').equals(documentId).delete()
+}
+
+// ============ RAG 向量缓存操作 ============
+
+export async function saveVectorDocuments(documentId: string, vectors: VectorDocument[]): Promise<void> {
+  await db.transaction('rw', [db.vectors], async () => {
+    await db.vectors.where('documentId').equals(documentId).delete()
+    await db.vectors.bulkPut(
+      vectors.map(vector => ({
+        ...vector,
+        id: `${documentId}:${vector.blockId}`,
+        documentId,
+      })),
+    )
+  })
+}
+
+export async function getVectorDocumentsByDocumentId(documentId: string): Promise<VectorDocument[]> {
+  return await db.vectors.where('documentId').equals(documentId).toArray()
+}
+
+export async function deleteVectorDocumentsByDocumentId(documentId: string): Promise<void> {
+  await db.vectors.where('documentId').equals(documentId).delete()
+}
+
+export async function hasVectorDocuments(documentId: string): Promise<boolean> {
+  return (await db.vectors.where('documentId').equals(documentId).count()) > 0
 }
 
 export { db }

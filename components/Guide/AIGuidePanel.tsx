@@ -72,10 +72,11 @@ export default function AIGuidePanel({
       summary: newSummary || summary,
       structure: newStructure || structure,
       blockKeyPoints: newBlockKeyPoints || blockKeyPoints,
+      modelUsed: modelConfig?.modelName || 'unknown',
       generatedAt: now,
       updatedAt: now,
     })
-  }, [documentId, knowledgeItemId, summary, structure, blockKeyPoints])
+  }, [documentId, knowledgeItemId, summary, structure, blockKeyPoints, modelConfig])
 
   // 组件挂载时加载缓存
   useEffect(() => {

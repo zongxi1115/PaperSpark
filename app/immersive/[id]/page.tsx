@@ -25,6 +25,7 @@ import AIGuidePanel from '@/components/Guide/AIGuidePanel'
 import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
 import { parsePDFWithSurya } from '@/lib/suryaParser'
+import { indexKnowledgeForRAG } from '@/lib/rag'
 
 function attachPageMetrics(blocks: TextBlock[], pageWidth: number, pageHeight: number) {
   return blocks.map(block => ({
@@ -84,6 +85,35 @@ export default function ImmersiveReaderPage() {
   const [abstractExpanded, setAbstractExpanded] = useState(false)
 
   const processedRef = useRef(false)
+
+  const buildRAGIndex = useCallback(async (sourceBlocks: TextBlock[], documentUpdatedAt: string) => {
+    updateKnowledgeItem(knowledgeId, {
+      ragStatus: 'indexing',
+      ragError: '',
+    })
+
+    const result = await indexKnowledgeForRAG({
+      documentId: knowledgeId,
+      blocks: sourceBlocks,
+    })
+
+    if (result.success) {
+      updateKnowledgeItem(knowledgeId, {
+        ragStatus: 'indexed',
+        ragIndexedAt: new Date().toISOString(),
+        ragChunks: result.count,
+        ragStoredLocally: result.storedLocally,
+        ragError: '',
+        ragDocumentUpdatedAt: documentUpdatedAt,
+      })
+      return
+    }
+
+    updateKnowledgeItem(knowledgeId, {
+      ragStatus: 'failed',
+      ragError: result.error || 'RAG 建库失败',
+    })
+  }, [knowledgeId])
 
   // 加载 PDF 文件
   const loadPDF = useCallback(async () => {
@@ -226,6 +256,10 @@ export default function ImmersiveReaderPage() {
     }
 
     if (hasCompletedSuryaCache) {
+      if (item.ragStatus !== 'indexed' || item.ragDocumentUpdatedAt !== existingDoc.updatedAt) {
+        const cachedBlocks = existingPages.flatMap(p => attachPageMetrics(p.blocks, p.width, p.height))
+        void buildRAGIndex(cachedBlocks, existingDoc.updatedAt)
+      }
       return
     }
 
@@ -334,6 +368,7 @@ export default function ImmersiveReaderPage() {
         immersiveCacheAt: parsedAt,
         extractedMetadata: mergedMetadata,
       })
+      void buildRAGIndex(allBlocks, parsedAt)
       setMetadataLoading(false)
 
     } catch (err) {
@@ -348,7 +383,7 @@ export default function ImmersiveReaderPage() {
     } finally {
       setStructureParsing(false)
     }
-  }, [knowledgeId])
+  }, [buildRAGIndex, knowledgeId])
 
   // 流式翻译
   const startStreamingTranslation = useCallback(async () => {

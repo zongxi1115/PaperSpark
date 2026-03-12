@@ -7,6 +7,7 @@ import { AssetsPanel } from '@/components/Assets/AssetsPanel'
 import { AgentSettingsPanel } from '@/components/Agent/AgentSettingsPanel'
 import { AssistantChatPanel } from '@/components/Assistant/AssistantChatPanel'
 import { LiteratureSearchPanel } from '@/components/Search/LiteratureSearchPanel'
+import { ReadingPanel } from '@/components/Sidebar/ReadingPanel'
 
 type SidebarTab = 'assistant' | 'search' | 'knowledge' | 'assets' | 'agents' | 'read'
 
@@ -125,7 +126,7 @@ export function RightSidebar() {
               {activeTab === 'search' && <LiteratureSearchPanel />}
               {activeTab === 'assets' && <AssetsPanel />}
               {activeTab === 'agents' && <AgentSettingsPanel />}
-              {activeTab === 'read' && <PlaceholderPanel title="知识库精读" desc="功能开发中..." />}
+              {activeTab === 'read' && <ReadingPanel />}
             </div>
 
             {/* 可拖拽调整宽度 */}
@@ -210,6 +211,8 @@ export function RightSidebar() {
         }}>
           <Tooltip content="帮助" placement="left">
             <button
+              aria-label="帮助"
+              title="帮助"
               style={{
                 width: 36,
                 height: 36,

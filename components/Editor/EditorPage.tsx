@@ -7,7 +7,10 @@ import {
   getFormattingToolbarItems,
   SuggestionMenuController,
   getDefaultReactSlashMenuItems,
+  SideMenuController,
+  SideMenu,
 } from '@blocknote/react'
+import { CustomDragHandleMenu } from './CustomDragHandleMenu'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import { filterSuggestionItems } from '@blocknote/core/extensions'
@@ -30,6 +33,7 @@ import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallM
 import type { AppDocument, AppSettings, ArticleAuthor } from '@/lib/types'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
+import { FormulaInputExtension } from '@/lib/formulaInputExtension'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
 import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
 
@@ -202,7 +206,46 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           body: () => ({ modelConfig: getSelectedLargeModel(settingsRef.current) }),
         }),
       }),
+      FormulaInputExtension(),
     ],
+    // 粘贴处理器：解析 markdown 中的公式
+    pasteHandler: async ({ event, editor, defaultPasteHandler }) => {
+      const clipboardData = event.clipboardData
+      if (!clipboardData) {
+        return defaultPasteHandler()
+      }
+
+      // 获取纯文本内容
+      const plainText = clipboardData.getData('text/plain')
+      
+      // 检查是否包含公式标记
+      if (plainText && (plainText.includes('$') || plainText.includes('$$'))) {
+        // 导入公式解析函数
+        const { parseMarkdownWithFormulas, convertToInlineContent } = await import('@/lib/formulaInputExtension')
+        
+        // 解析公式
+        const parsed = parseMarkdownWithFormulas(plainText)
+        
+        // 如果有公式被解析出来
+        const hasFormulas = parsed.some(p => p.type === 'formula')
+        
+        if (hasFormulas) {
+          // 处理包含公式的粘贴
+          // 对于块级公式，需要创建新块
+          // 对于行内公式，转换为行内内容
+          
+          // 将解析结果转换为 BlockNote 可用的格式
+          const inlineContent = convertToInlineContent(parsed)
+          
+          // 插入内容
+          editor.insertInlineContent(inlineContent)
+          return true
+        }
+      }
+      
+      // 默认处理
+      return defaultPasteHandler({ prioritizeMarkdownOverHTML: true })
+    },
     uploadFile: async (file) => {
       try {
         if (file.size > MAX_PASTE_UPLOAD_BYTES) {
@@ -967,6 +1010,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               theme={activeTheme}
               formattingToolbar={false}
               slashMenu={false}
+              sideMenu={false}
             >
               {/* AI 命令菜单：选中文字弹出或输入 /ai 触发 */}
               <AIMenuController aiMenu={() => (
@@ -990,6 +1034,13 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                 )}
               />
 
+              {/* 自定义侧边菜单：包含块类型转换功能 */}
+              <SideMenuController
+                sideMenu={() => (
+                  <SideMenu dragHandleMenu={CustomDragHandleMenu} />
+                )}
+              />
+
               {/* 带 AI 选项的斜杠菜单 */}
               <SuggestionMenuController
                 triggerCharacter="/"
@@ -1002,7 +1053,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                         title: '行内公式',
                         groupName: '其他',
                         icon: <FormulaIcon />,
-                        keywords: ['formula', 'math', '公式', '数学'],
+                        keywords: ['formula', 'math', '公式', '数学','latex','gs'],
                         onItemClick: () => {
                           editor.insertInlineContent([
                             {

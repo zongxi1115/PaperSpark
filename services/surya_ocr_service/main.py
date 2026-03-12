@@ -38,6 +38,23 @@ TEXTUAL_LABELS = {
 JOB_ROOT = Path("out") / "surya_jobs"
 JOB_ROOT.mkdir(parents=True, exist_ok=True)
 
+
+def load_local_env_file() -> None:
+    env_path = Path('.env.local')
+    if not env_path.exists():
+        return
+
+    for raw_line in env_path.read_text(encoding='utf-8').splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+
+        key, value = line.split('=', 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+
+
+load_local_env_file()
+
 MAX_WORKERS = max(1, int(os.environ.get("SURYA_MAX_WORKERS", "1")))
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="surya-job")
 JOB_LOCK = threading.Lock()
@@ -562,16 +579,18 @@ class EmbedRequest(BaseModel):
     texts: list[str]
     block_ids: list[str]
     metadatas: list[dict[str, Any]]
-    openai_api_key: str
-    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    embedding_name: str | None = None
 
 
 class SearchRequest(BaseModel):
     document_id: str
     query: str
     top_k: int = 5
-    openai_api_key: str
-    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    embedding_name: str | None = None
 
 
 class EmbedResponse(BaseModel):
@@ -593,23 +612,67 @@ class SearchResponse(BaseModel):
     query: str
 
 
+def get_env_value(*keys: str) -> str:
+    for key in keys:
+        value = os.environ.get(key)
+        if value and value.strip():
+            return value.strip()
+    return ""
+
+
+def normalize_api_url(base_url: str, fallback_path: str) -> str:
+    trimmed = base_url.strip().rstrip("/")
+    if not trimmed:
+        return ""
+    if trimmed.endswith("/embeddings") or trimmed.endswith("/rerank"):
+        return trimmed
+    return f"{trimmed}/{fallback_path}"
+
+
+def sanitize_metadata_value(value: Any) -> Any:
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def sanitize_metadatas(metadatas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    sanitized: list[dict[str, Any]] = []
+    for metadata in metadatas:
+        sanitized.append({
+            key: sanitize_metadata_value(value)
+            for key, value in metadata.items()
+        })
+    return sanitized
+
+
 async def generate_embeddings(
     texts: list[str],
-    api_key: str,
-    base_url: str
+    api_key: str | None,
+    base_url: str | None,
+    model_name: str | None,
 ) -> list[list[float]]:
     """调用 OpenAI API 生成嵌入向量"""
     import httpx
 
+    resolved_api_key = api_key or get_env_value("api_key", "API_KEY")
+    resolved_base_url = normalize_api_url(
+        base_url or get_env_value("base_url", "BASE_URL") or "https://api.openai.com/v1",
+        "embeddings",
+    )
+    resolved_model_name = model_name or get_env_value("embedding_name", "EMBEDDING_NAME") or "text-embedding-3-small"
+
+    if not resolved_api_key or not resolved_base_url or not resolved_model_name:
+        raise HTTPException(status_code=500, detail="Missing embedding provider configuration")
+
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
-            f"{base_url}/embeddings",
+            resolved_base_url,
             headers={
                 "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
+                "Authorization": f"Bearer {resolved_api_key}",
             },
             json={
-                "model": "text-embedding-3-small",
+                "model": resolved_model_name,
                 "input": texts,
             },
         )
@@ -650,7 +713,8 @@ async def rag_embed(request: EmbedRequest = Body(...)) -> EmbedResponse:
         embeddings = await generate_embeddings(
             request.texts,
             request.openai_api_key,
-            request.openai_base_url
+            request.openai_base_url,
+            request.embedding_name,
         )
 
         # 获取或创建集合
@@ -670,7 +734,7 @@ async def rag_embed(request: EmbedRequest = Body(...)) -> EmbedResponse:
             ids=request.block_ids,
             embeddings=embeddings,
             documents=request.texts,
-            metadatas=request.metadatas,
+            metadatas=sanitize_metadatas(request.metadatas),
         )
 
         return EmbedResponse(
@@ -690,7 +754,8 @@ async def rag_search(request: SearchRequest = Body(...)) -> SearchResponse:
         query_embeddings = await generate_embeddings(
             [request.query],
             request.openai_api_key,
-            request.openai_base_url
+            request.openai_base_url,
+            request.embedding_name,
         )
 
         # 获取集合并搜索

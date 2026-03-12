@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type { TextBlock, ModelConfig, VectorDocument } from '@/lib/types'
+import { resolveEmbeddingProvider } from '@/lib/ragServerConfig'
 
 export const maxDuration = 120
 
@@ -22,40 +23,32 @@ async function checkSuryaService(): Promise<boolean> {
 // 使用 OpenAI API 生成嵌入
 async function generateEmbeddings(
   texts: string[],
-  modelConfig: ModelConfig
+  modelConfig?: ModelConfig | null
 ): Promise<number[][]> {
-  const response = await fetch(`${modelConfig.baseUrl || 'https://api.openai.com/v1'}/embeddings`, {
+  const provider = resolveEmbeddingProvider(modelConfig)
+
+  if (!provider.apiKey || !provider.baseUrl || !provider.modelName) {
+    throw new Error('Missing embedding provider configuration')
+  }
+
+  const response = await fetch(provider.baseUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${modelConfig.apiKey}`,
+      'Authorization': `Bearer ${provider.apiKey}`,
     },
     body: JSON.stringify({
-      model: 'text-embedding-3-small',
+      model: provider.modelName,
       input: texts,
     }),
   })
 
   if (!response.ok) {
-    throw new Error('Failed to generate embeddings')
+    throw new Error(`Failed to generate embeddings: ${response.status} ${await response.text()}`)
   }
 
   const data = await response.json()
   return data.data.map((item: { embedding: number[] }) => item.embedding)
-}
-
-// 简单的余弦相似度计算
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0
-  let dotProduct = 0
-  let normA = 0
-  let normB = 0
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i]
-    normA += a[i] * a[i]
-    normB += b[i] * b[i]
-  }
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
 }
 
 export async function POST(req: NextRequest) {
@@ -64,7 +57,16 @@ export async function POST(req: NextRequest) {
     const { documentId, blocks, modelConfig } = body as {
       documentId: string
       blocks: TextBlock[]
-      modelConfig: ModelConfig
+      modelConfig?: ModelConfig | null
+    }
+
+    const provider = resolveEmbeddingProvider(modelConfig)
+
+    if (!provider.apiKey || !provider.baseUrl || !provider.modelName) {
+      return NextResponse.json({
+        success: false,
+        error: '缺少嵌入模型配置，请检查 .env.local 中的 embedding_name、base_url、api_key',
+      }, { status: 500 })
     }
 
     if (!documentId || !blocks || blocks.length === 0) {
@@ -102,8 +104,9 @@ export async function POST(req: NextRequest) {
             texts,
             block_ids: ids,
             metadatas,
-            openai_api_key: modelConfig.apiKey,
-            openai_base_url: modelConfig.baseUrl || 'https://api.openai.com/v1',
+            openai_api_key: provider.apiKey,
+            openai_base_url: provider.baseUrl,
+            embedding_name: provider.modelName,
           }),
         })
 
@@ -130,7 +133,7 @@ export async function POST(req: NextRequest) {
       console.error('Embedding generation failed:', error)
       return NextResponse.json({
         success: false,
-        error: '生成嵌入向量失败，请检查 API 配置',
+        error: error instanceof Error ? error.message : '生成嵌入向量失败，请检查 API 配置',
       }, { status: 500 })
     }
 
@@ -162,6 +165,3 @@ export async function POST(req: NextRequest) {
     )
   }
 }
-
-// 导出工具函数
-export { cosineSimilarity }

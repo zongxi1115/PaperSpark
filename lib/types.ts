@@ -165,6 +165,13 @@ export interface KnowledgeItem {
   hasImmersiveCache?: boolean // 是否有沉浸式翻译缓存
   immersiveCacheAt?: string // 缓存时间
   extractedMetadata?: PDFMetadata // 提取的元数据缓存
+  // RAG 索引相关
+  ragStatus?: 'idle' | 'indexing' | 'indexed' | 'failed'
+  ragIndexedAt?: string
+  ragChunks?: number
+  ragStoredLocally?: boolean
+  ragError?: string
+  ragDocumentUpdatedAt?: string
   createdAt: string
   updatedAt: string
 }

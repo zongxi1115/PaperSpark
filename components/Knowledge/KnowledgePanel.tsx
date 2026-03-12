@@ -443,6 +443,43 @@ export function KnowledgePanel() {
                   {item.hasAttachment && (
                     <span style={{ fontSize: 10, color: 'var(--accent-color)' }}>PDF</span>
                   )}
+                  {item.hasImmersiveCache && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        router.push(`/immersive/${item.id}`)
+                      }}
+                      style={{
+                        fontSize: 10,
+                        padding: '1px 6px',
+                        borderRadius: 3,
+                        border: '1px solid rgba(99,102,241,0.28)',
+                        background: 'rgba(99,102,241,0.12)',
+                        color: '#818cf8',
+                        cursor: 'pointer',
+                      }}
+                      title="继续精读"
+                    >
+                      精读
+                    </button>
+                  )}
+                  {item.ragStatus === 'indexing' && (
+                    <span style={{ fontSize: 10, color: '#f59e0b' }}>建库中</span>
+                  )}
+                  {item.ragStatus === 'indexed' && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: '1px 6px',
+                        background: 'rgba(16,185,129,0.12)',
+                        borderRadius: 3,
+                        color: '#10b981',
+                      }}
+                      title={item.ragStoredLocally ? '已索引（本地）' : '已索引（数据库）'}
+                    >
+                      RAG {item.ragChunks ? `· ${item.ragChunks}` : ''}
+                    </span>
+                  )}
                 </div>
               </div>
               
@@ -608,6 +645,30 @@ export function KnowledgePanel() {
                     </div>
                   </div>
                 )}
+
+                <Divider />
+
+                <div>
+                  <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>精读与检索</p>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-secondary)' }}>
+                    <span>
+                      沉浸式缓存：{selectedItem.hasImmersiveCache ? '已完成' : '未生成'}
+                    </span>
+                    <span>
+                      RAG 状态：
+                      {selectedItem.ragStatus === 'indexed'
+                        ? `已建库${selectedItem.ragStoredLocally ? '（本地）' : '（数据库）'}`
+                        : selectedItem.ragStatus === 'indexing'
+                          ? '建库中'
+                          : selectedItem.ragStatus === 'failed'
+                            ? `失败${selectedItem.ragError ? `：${selectedItem.ragError}` : ''}`
+                            : '未建库'}
+                    </span>
+                    {typeof selectedItem.ragChunks === 'number' && selectedItem.ragChunks > 0 && (
+                      <span>索引块数：{selectedItem.ragChunks}</span>
+                    )}
+                  </div>
+                </div>
 
                 <Divider />
 

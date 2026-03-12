@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { cosineSimilarity } from '../embed/route'
 import type { ModelConfig, RAGSearchResult, VectorDocument } from '@/lib/types'
+import { cosineSimilarity } from '@/lib/ragUtils'
+import { resolveEmbeddingProvider, resolveRerankProvider } from '@/lib/ragServerConfig'
 
 export const maxDuration = 60
 
@@ -23,26 +24,89 @@ async function checkSuryaService(): Promise<boolean> {
 // 生成查询嵌入
 async function generateQueryEmbedding(
   query: string,
-  modelConfig: ModelConfig
+  modelConfig?: ModelConfig | null
 ): Promise<number[]> {
-  const response = await fetch(`${modelConfig.baseUrl || 'https://api.openai.com/v1'}/embeddings`, {
+  const provider = resolveEmbeddingProvider(modelConfig)
+
+  if (!provider.apiKey || !provider.baseUrl || !provider.modelName) {
+    throw new Error('Missing embedding provider configuration')
+  }
+
+  const response = await fetch(provider.baseUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${modelConfig.apiKey}`,
+      'Authorization': `Bearer ${provider.apiKey}`,
     },
     body: JSON.stringify({
-      model: 'text-embedding-3-small',
+      model: provider.modelName,
       input: query,
     }),
   })
 
   if (!response.ok) {
-    throw new Error('Failed to generate query embedding')
+    throw new Error(`Failed to generate query embedding: ${response.status} ${await response.text()}`)
   }
 
   const data = await response.json()
   return data.data[0].embedding
+}
+
+async function rerankResults(query: string, results: RAGSearchResult[]): Promise<RAGSearchResult[]> {
+  const provider = resolveRerankProvider()
+
+  if (!provider || results.length === 0) {
+    return results
+  }
+
+  try {
+    const response = await fetch(provider.baseUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${provider.apiKey}`,
+      },
+      body: JSON.stringify({
+        model: provider.modelName,
+        query,
+        documents: results.map(result => result.text),
+        top_n: results.length,
+        return_documents: false,
+      }),
+    })
+
+    if (!response.ok) {
+      throw new Error(`Failed to rerank results: ${response.status} ${await response.text()}`)
+    }
+
+    const payload = await response.json()
+    const items = Array.isArray(payload.results) ? payload.results : []
+
+    if (items.length === 0) {
+      return results
+    }
+
+    return items
+      .map((item: { index?: number; relevance_score?: number; score?: number }) => {
+        const index = typeof item.index === 'number' ? item.index : -1
+        if (index < 0 || index >= results.length) {
+          return null
+        }
+
+        return {
+          ...results[index],
+          score: typeof item.relevance_score === 'number'
+            ? item.relevance_score
+            : typeof item.score === 'number'
+              ? item.score
+              : results[index].score,
+        }
+      })
+      .filter((item): item is RAGSearchResult => Boolean(item))
+  } catch (error) {
+    console.error('Rerank failed:', error)
+    return results
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -52,13 +116,24 @@ export async function POST(req: NextRequest) {
       documentId?: string
       query: string
       topK?: number
-      modelConfig: ModelConfig
+      modelConfig?: ModelConfig | null
       localVectors?: VectorDocument[] // 本地存储的向量数据
     }
 
-    if (!query || !modelConfig) {
+    const provider = resolveEmbeddingProvider(modelConfig)
+
+    if (!query) {
       return NextResponse.json({ success: false, error: '参数不完整' }, { status: 400 })
     }
+
+    if (!provider.apiKey || !provider.baseUrl || !provider.modelName) {
+      return NextResponse.json({
+        success: false,
+        error: '缺少检索嵌入配置，请检查 .env.local 中的 embedding_name、base_url、api_key',
+      }, { status: 500 })
+    }
+
+    const candidateCount = Math.min(Math.max(topK * 4, topK), 20)
 
     // 尝试使用 Surya Python 服务搜索
     if (documentId) {
@@ -72,17 +147,19 @@ export async function POST(req: NextRequest) {
             body: JSON.stringify({
               document_id: documentId,
               query,
-              top_k: topK,
-              openai_api_key: modelConfig.apiKey,
-              openai_base_url: modelConfig.baseUrl || 'https://api.openai.com/v1',
+              top_k: candidateCount,
+              openai_api_key: provider.apiKey,
+              openai_base_url: provider.baseUrl,
+              embedding_name: provider.modelName,
             }),
           })
 
           if (response.ok) {
             const result = await response.json()
+            const rerankedResults = await rerankResults(query, Array.isArray(result.results) ? result.results : [])
             return NextResponse.json({
               success: true,
-              results: result.results,
+              results: rerankedResults.slice(0, topK),
               query,
               searchedRemotely: true,
             })
@@ -126,7 +203,7 @@ export async function POST(req: NextRequest) {
     similarities.sort((a, b) => b.similarity - a.similarity)
 
     const results: RAGSearchResult[] = similarities
-      .slice(0, topK)
+      .slice(0, candidateCount)
       .map(({ vector, similarity }) => ({
         blockId: vector.blockId,
         text: vector.text,
@@ -135,9 +212,11 @@ export async function POST(req: NextRequest) {
         type: vector.metadata.type,
       }))
 
+    const rerankedResults = await rerankResults(query, results)
+
     return NextResponse.json({
       success: true,
-      results,
+      results: rerankedResults.slice(0, topK),
       query,
       searchedRemotely: false,
     })

@@ -19,7 +19,8 @@ type ParagraphBlock = TranslationBlockPayload & {
 
 function shouldTranslateBlock(block: TranslationBlockPayload): boolean {
   if (!block.text.trim()) return false
-  return block.type !== 'header' && block.type !== 'footer'
+  if (block.type === 'header' || block.type === 'footer') return false
+  return block.sourceLabel !== 'Picture'
 }
 
 function buildParagraphBlocks(blocks: TranslationBlockPayload[]): ParagraphBlock[] {

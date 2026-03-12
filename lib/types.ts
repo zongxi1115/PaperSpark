@@ -427,6 +427,7 @@ export interface TranslationBlockPayload {
   pageNum: number
   bbox: BoundingBox
   style: TextStyle
+  sourceLabel?: string
 }
 
 // ============ 批注相关类型 ============

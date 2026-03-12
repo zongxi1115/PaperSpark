@@ -199,20 +199,98 @@ export function AssistantChatPanel() {
   }, [])
 
   const extractBlockNoteText = useCallback((value: unknown): string => {
-    if (typeof value === 'string') return value
-    if (!value) return ''
-    if (Array.isArray(value)) {
-      return value.map(item => extractBlockNoteText(item)).filter(Boolean).join('\n')
-    }
-    if (typeof value === 'object') {
-      const record = value as Record<string, unknown>
+    const extractInlineText = (inline: unknown): string => {
+      if (typeof inline === 'string') return inline
+      if (!inline) return ''
+      if (Array.isArray(inline)) {
+        return inline.map(item => extractInlineText(item)).filter(Boolean).join('')
+      }
+      if (typeof inline !== 'object') return ''
+
+      const record = inline as Record<string, unknown>
       return [
-        extractBlockNoteText(record.text),
-        extractBlockNoteText(record.content),
-        extractBlockNoteText(record.children),
+        typeof record.text === 'string' ? record.text : '',
+        extractInlineText(record.content),
+        extractInlineText(record.children),
+      ].filter(Boolean).join('')
+    }
+
+    const visit = (node: unknown): string => {
+      if (typeof node === 'string') return node
+      if (typeof node === 'number' || typeof node === 'boolean') return String(node)
+      if (!node) return ''
+
+      if (Array.isArray(node)) {
+        return node.map(item => visit(item)).filter(Boolean).join('\n')
+      }
+
+      if (typeof node !== 'object') {
+        return ''
+      }
+
+      const record = node as Record<string, unknown>
+
+      const contentRecord = typeof record.content === 'object' && record.content !== null
+        ? record.content as Record<string, unknown>
+        : null
+
+      if (contentRecord?.type === 'tableContent' && Array.isArray(contentRecord.rows)) {
+        const tableRows = contentRecord.rows
+          .map(row => {
+            if (!row || typeof row !== 'object') return ''
+            const rowRecord = row as Record<string, unknown>
+            if (!Array.isArray(rowRecord.cells)) return ''
+
+            const cellTexts = rowRecord.cells
+              .map(cell => extractInlineText(cell).replace(/\s+/g, ' ').trim())
+              .filter(Boolean)
+
+            return cellTexts.join(' | ')
+          })
+          .filter(Boolean)
+
+        const blockText = extractInlineText(record.content).replace(/\s+/g, ' ').trim()
+        return [blockText, ...tableRows].filter(Boolean).join('\n')
+      }
+
+      const tableRows = [record.rows, record.children, record.content]
+        .filter(Array.isArray)
+        .flatMap(item => item as unknown[])
+        .filter(row => typeof row === 'object' && row !== null && (
+          Array.isArray((row as Record<string, unknown>).cells)
+          || Array.isArray((row as Record<string, unknown>).content)
+          || Array.isArray((row as Record<string, unknown>).children)
+        ))
+
+      if (tableRows.length > 0 || record.type === 'table' || record.type === 'tableRow' || record.type === 'tableCell') {
+        const formattedRows = tableRows.map(row => {
+          const rowRecord = row as Record<string, unknown>
+          const cells = [rowRecord.cells, rowRecord.content, rowRecord.children]
+            .filter(Array.isArray)
+            .flatMap(item => item as unknown[])
+          return cells.map(cell => visit(cell).replace(/\s+/g, ' ').trim()).filter(Boolean).join(' | ')
+        }).filter(Boolean)
+
+        const looseTableParts = [
+          visit(record.caption),
+          visit(record.header),
+          visit(record.footer),
+        ].filter(Boolean)
+
+        return [...looseTableParts, ...formattedRows].join('\n')
+      }
+
+      return [
+        visit(record.text),
+        visit(record.content),
+        visit(record.children),
+        visit(record.props),
+        visit(record.cells),
+        visit(record.rows),
       ].filter(Boolean).join('\n')
     }
-    return ''
+
+    return visit(value)
   }, [])
 
   const buildTextBlocks = useCallback((documentId: string, text: string) => {
@@ -267,10 +345,12 @@ export function AssistantChatPanel() {
     setMentions(prev => prev.filter(item => !(item.id === id && item.type === type)))
   }, [])
 
-  const buildMentionKnowledgeCandidates = useCallback(async (query: string) => {
+  const buildMentionKnowledgeCandidates = useCallback(async (query: string, options?: { allowIndexing?: boolean }) => {
     const focusedResults: AssistantCitation[] = []
     const knowledgeMentions = mentions.filter(item => item.type === 'knowledge')
     const assetMentions = mentions.filter(item => item.type === 'asset')
+    const normalizedQuery = query.trim().toLowerCase()
+    const allowIndexing = options?.allowIndexing ?? false
 
     for (const mention of knowledgeMentions) {
       const knowledge = getKnowledgeItems().find(item => item.id === mention.id)
@@ -291,7 +371,7 @@ export function AssistantChatPanel() {
       }
 
       let vectorDocuments = await getVectorDocumentsByDocumentId(knowledge.id)
-      if (!vectorDocuments.length && knowledge.hasImmersiveCache) {
+      if (!vectorDocuments.length && knowledge.hasImmersiveCache && allowIndexing) {
         const fullText = await getFullTextByKnowledgeId(knowledge.id)
         const blocks = buildTextBlocks(knowledge.id, fullText || '')
         if (blocks.length) {
@@ -300,10 +380,38 @@ export function AssistantChatPanel() {
         }
       }
 
+      if (!vectorDocuments.length && knowledge.hasImmersiveCache) {
+        const fullText = await getFullTextByKnowledgeId(knowledge.id)
+        const paragraphs = (fullText || '')
+          .split(/\n{2,}/)
+          .map(part => part.trim())
+          .filter(Boolean)
+          .sort((a, b) => {
+            const aScore = normalizedQuery && a.toLowerCase().includes(normalizedQuery) ? 1 : 0
+            const bScore = normalizedQuery && b.toLowerCase().includes(normalizedQuery) ? 1 : 0
+            return bScore - aScore
+          })
+          .slice(0, 3)
+
+        paragraphs.forEach((paragraph, index) => {
+          focusedResults.push({
+            id: `mention-fulltext-direct-${knowledge.id}-${index}`,
+            knowledgeItemId: knowledge.id,
+            title: knowledge.title,
+            excerpt: paragraph,
+            score: normalizedQuery && paragraph.toLowerCase().includes(normalizedQuery) ? 0.96 : 0.86,
+            sourceKind: 'fulltext',
+            year: knowledge.year,
+            journal: knowledge.journal,
+            authors: knowledge.authors,
+          })
+        })
+      }
+
       const matchedVectors = vectorDocuments
         .map(doc => ({
           ...doc,
-          score: doc.text.toLowerCase().includes(query.toLowerCase()) ? 0.99 : 0.9,
+          score: normalizedQuery && doc.text.toLowerCase().includes(normalizedQuery) ? 0.99 : 0.9,
         }))
         .sort((a, b) => b.score - a.score)
         .slice(0, 3)
@@ -335,8 +443,8 @@ export function AssistantChatPanel() {
         .map(part => part.trim())
         .filter(Boolean)
         .sort((a, b) => {
-          const aScore = a.toLowerCase().includes(query.toLowerCase()) ? 1 : 0
-          const bScore = b.toLowerCase().includes(query.toLowerCase()) ? 1 : 0
+          const aScore = normalizedQuery && a.toLowerCase().includes(normalizedQuery) ? 1 : 0
+          const bScore = normalizedQuery && b.toLowerCase().includes(normalizedQuery) ? 1 : 0
           return bScore - aScore
         })
         .slice(0, 3)
@@ -347,7 +455,7 @@ export function AssistantChatPanel() {
           knowledgeItemId: asset.id,
           title: asset.title,
           excerpt: paragraph,
-          score: paragraph.toLowerCase().includes(query.toLowerCase()) ? 0.97 : 0.88,
+          score: normalizedQuery && paragraph.toLowerCase().includes(normalizedQuery) ? 0.97 : 0.88,
           sourceKind: 'asset',
         })
       })
@@ -526,11 +634,12 @@ export function AssistantChatPanel() {
       let knowledgeCandidates: AssistantCitation[] = []
       const assetContext = useAssets ? buildAssetContext(content) : ''
       const mentionCandidates = mentions.length > 0
-        ? await buildMentionKnowledgeCandidates(content)
+        ? await buildMentionKnowledgeCandidates(content, { allowIndexing: useKnowledge })
         : []
-      const shouldUseKnowledge = useKnowledge || mentionCandidates.length > 0
+      const shouldRunGlobalKnowledgeSearch = useKnowledge
+      const shouldSendKnowledgeContext = mentionCandidates.length > 0 || shouldRunGlobalKnowledgeSearch
 
-      if (shouldUseKnowledge) {
+      if (shouldRunGlobalKnowledgeSearch) {
         setKnowledgeBusy(true)
         assistantMessage.toolEvents = [{
           id: 'knowledge-hybrid-search',
@@ -549,7 +658,7 @@ export function AssistantChatPanel() {
         knowledgeCandidates = await runKnowledgeSearch(content)
         knowledgeCandidates = [...mentionCandidates, ...knowledgeCandidates]
           .sort((left, right) => right.score - left.score)
-          .filter((candidate, index, array) => array.findIndex(item => item.id === candidate.id) === index)
+          .filter((candidate, index, array) => array.findIndex(item => item.knowledgeItemId === candidate.knowledgeItemId && item.excerpt === candidate.excerpt && item.sourceKind === candidate.sourceKind) === index)
           .slice(0, 8)
         assistantMessage.toolEvents = [{
           id: 'knowledge-hybrid-search',
@@ -590,7 +699,7 @@ export function AssistantChatPanel() {
           })),
           modelConfig,
           systemPrompt,
-          useKnowledge: shouldUseKnowledge,
+          useKnowledge: shouldSendKnowledgeContext,
           knowledgeCandidates,
           assetContext,
         }),

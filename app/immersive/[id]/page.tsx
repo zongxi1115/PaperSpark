@@ -64,6 +64,7 @@ export default function ImmersiveReaderPage() {
   const [translationProgress, setTranslationProgress] = useState({ current: 0, total: 0 })
   const [showTranslation, setShowTranslation] = useState(false)
   const [hasTranslation, setHasTranslation] = useState(false)
+  const [translationDisplayMode, setTranslationDisplayMode] = useState<'overlay' | 'parallel'>('overlay')
   const [structureParsing, setStructureParsing] = useState(false)
   const [suryaReady, setSuryaReady] = useState(false)
 
@@ -220,6 +221,13 @@ export default function ImmersiveReaderPage() {
     // 检查已有缓存
     const existingDoc = await getPDFDocumentByKnowledgeId(knowledgeId)
     const existingPages = await getPDFPagesByDocumentId(knowledgeId)
+    const pictureBlockIds = new Set(
+      existingPages.flatMap(page =>
+        page.blocks
+          .filter(block => block.sourceLabel === 'Picture')
+          .map(block => block.id),
+      ),
+    )
     const hasCompletedSuryaCache =
       existingDoc?.parser === 'surya' &&
       existingDoc?.parseStatus === 'completed' &&
@@ -230,8 +238,9 @@ export default function ImmersiveReaderPage() {
       if (existingDoc.parser === 'surya') {
         const translation = await getTranslation(knowledgeId)
         if (translation) {
-          setHasTranslation(true)
-          const transMap = new Map(translation.blocks.map(b => [b.blockId, b.translated]))
+          const visibleBlocks = translation.blocks.filter(block => !pictureBlockIds.has(block.blockId))
+          setHasTranslation(visibleBlocks.length > 0)
+          const transMap = new Map(visibleBlocks.map(b => [b.blockId, b.translated]))
           setTranslatedBlocks(transMap)
         } else {
           setHasTranslation(false)
@@ -432,6 +441,7 @@ export default function ImmersiveReaderPage() {
       pageNum: block.pageNum,
       bbox: block.bbox,
       style: block.style,
+      sourceLabel: block.sourceLabel,
     }))
 
     try {
@@ -559,8 +569,11 @@ export default function ImmersiveReaderPage() {
   // 更新 blocks 的翻译
   const blocksWithTranslation = blocks.map(b => ({
     ...b,
-    translated: translatedBlocks.get(b.id),
+    translated: b.sourceLabel === 'Picture' ? undefined : translatedBlocks.get(b.id),
   }))
+  const visibleTranslatedEntries = Array.from(translatedBlocks.entries()).filter(
+    ([id]) => blocks.find(block => block.id === id)?.sourceLabel !== 'Picture',
+  )
   const canTranslate = suryaReady && !structureParsing && blocks.length > 0
 
   useEffect(() => {
@@ -864,14 +877,36 @@ export default function ImmersiveReaderPage() {
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-medium text-gray-300">翻译</h3>
               {hasTranslation && (
-                <Button
-                  size="sm"
-                  variant="flat"
-                  color={showTranslation ? 'primary' : 'default'}
-                  onPress={() => setShowTranslation(!showTranslation)}
-                >
-                  {showTranslation ? '隐藏译文' : '显示译文'}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    color={showTranslation ? 'primary' : 'default'}
+                    onPress={() => setShowTranslation(!showTranslation)}
+                  >
+                    {showTranslation ? '隐藏译文' : '显示译文'}
+                  </Button>
+                  <div className="flex items-center gap-1 rounded-lg border border-[#3a3a3a] bg-[#1a1a1a] p-1">
+                    <Button
+                      size="sm"
+                      variant={translationDisplayMode === 'overlay' ? 'solid' : 'light'}
+                      color={translationDisplayMode === 'overlay' ? 'primary' : 'default'}
+                      className="min-w-0 px-2"
+                      onPress={() => setTranslationDisplayMode('overlay')}
+                    >
+                      原位
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={translationDisplayMode === 'parallel' ? 'solid' : 'light'}
+                      color={translationDisplayMode === 'parallel' ? 'primary' : 'default'}
+                      className="min-w-0 px-2"
+                      onPress={() => setTranslationDisplayMode('parallel')}
+                    >
+                      并排
+                    </Button>
+                  </div>
+                </div>
               )}
             </div>
 
@@ -914,13 +949,13 @@ export default function ImmersiveReaderPage() {
               </div>
             )}
 
-            {(translatedBlocks.size > 0 || hasTranslation) && (
+            {(visibleTranslatedEntries.length > 0 || hasTranslation) && (
               <div className="space-y-3">
                 <p className={`text-xs ${translating ? 'text-blue-400' : 'text-green-400'}`}>
                   {translating ? '实时回显中…' : '✓ 翻译已完成'}
                 </p>
                 <div className="max-h-96 overflow-auto space-y-2">
-                  {Array.from(translatedBlocks.entries()).slice(0, 20).map(([id, translated]) => {
+                  {visibleTranslatedEntries.slice(0, 20).map(([id, translated]) => {
                     const block = blocks.find(b => b.id === id)
                     return (
                       <div key={id} className="p-2 bg-[#1a1a1a] rounded text-xs">
@@ -929,8 +964,8 @@ export default function ImmersiveReaderPage() {
                       </div>
                     )
                   })}
-                  {translatedBlocks.size > 20 && (
-                    <p className="text-xs text-gray-500 text-center">... 还有 {translatedBlocks.size - 20} 条</p>
+                  {visibleTranslatedEntries.length > 20 && (
+                    <p className="text-xs text-gray-500 text-center">... 还有 {visibleTranslatedEntries.length - 20} 条</p>
                   )}
                 </div>
               </div>
@@ -1158,6 +1193,37 @@ export default function ImmersiveReaderPage() {
             </Button>
           </Tooltip>
 
+          {(hasTranslation || translating || translatedBlocks.size > 0) && (
+            <div className="flex items-center gap-1 rounded-lg border border-[#3a3a3a] bg-[#1a1a1a] p-1">
+              <Tooltip content="译文覆盖在原 PDF 上">
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant={translationDisplayMode === 'overlay' ? 'solid' : 'light'}
+                  color={translationDisplayMode === 'overlay' ? 'primary' : 'default'}
+                  className="min-w-8 h-8"
+                  onPress={() => setTranslationDisplayMode('overlay')}
+                  isDisabled={!showTranslation}
+                >
+                  <Icon icon="mdi:layers-outline" className="text-lg" />
+                </Button>
+              </Tooltip>
+              <Tooltip content="右侧生成对应位置的译文页，图片保持原样">
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant={translationDisplayMode === 'parallel' ? 'solid' : 'light'}
+                  color={translationDisplayMode === 'parallel' ? 'primary' : 'default'}
+                  className="min-w-8 h-8"
+                  onPress={() => setTranslationDisplayMode('parallel')}
+                  isDisabled={!showTranslation}
+                >
+                  <Icon icon="mdi:view-column-outline" className="text-lg" />
+                </Button>
+              </Tooltip>
+            </div>
+          )}
+
           {!hasTranslation && !translating && (
             <Button
               size="sm"
@@ -1204,6 +1270,7 @@ export default function ImmersiveReaderPage() {
               onTotalPagesChange={setTotalPages}
               blocks={blocksWithTranslation}
               showTranslation={showTranslation}
+              translationDisplayMode={translationDisplayMode}
               annotations={annotations}
               onAnnotationAdd={handleAnnotationAdd}
               onAnnotationDelete={handleAnnotationDelete}

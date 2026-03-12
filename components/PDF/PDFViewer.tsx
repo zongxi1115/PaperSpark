@@ -115,6 +115,7 @@ interface PDFViewerProps {
   onAnnotationDelete?: (id: string) => void
   onAnnotationUpdate?: (annotation: PDFAnnotation) => void
   jumpToBlock?: { blockId: string; pageNum: number } | null
+  translationDisplayMode?: 'overlay' | 'parallel'
 }
 
 interface TranslationLayout {
@@ -124,6 +125,8 @@ interface TranslationLayout {
   height: number
   fontSize: number
   lineHeight: number
+  paddingX: number
+  paddingY: number
 }
 
 let translationMeasureContext: CanvasRenderingContext2D | null = null
@@ -138,39 +141,71 @@ function getTranslationMeasureContext() {
   return translationMeasureContext
 }
 
+const TRANSLATION_TOKEN_PATTERN = /([\u3400-\u9fff]|[^\s\u3400-\u9fff]+|\s+)/g
+
 function wrapTextToWidth(text: string, width: number, fontSize: number, fontFamily: string) {
   const context = getTranslationMeasureContext()
+  const normalizedText = text.replace(/\r\n/g, '\n')
   if (!context || width <= 0) {
-    return text.split(/\n+/).filter(Boolean)
+    return normalizedText.split(/\n+/).filter(Boolean)
   }
 
   context.font = `${fontSize}px ${fontFamily}`
-  const paragraphs = text.split(/\n+/).filter(Boolean)
+  const paragraphs = normalizedText.split('\n')
   const lines: string[] = []
+  const appendLine = (value: string) => {
+    const normalized = value.trim()
+    if (normalized) {
+      lines.push(normalized)
+    }
+  }
 
   paragraphs.forEach(paragraph => {
+    const normalizedParagraph = paragraph.replace(/\s+/g, ' ').trim()
+    if (!normalizedParagraph) return
+
+    const tokens = normalizedParagraph.match(TRANSLATION_TOKEN_PATTERN) || [normalizedParagraph]
     let current = ''
-    for (const char of Array.from(paragraph)) {
-      const candidate = `${current}${char}`
+
+    for (const token of tokens) {
+      const candidate = `${current}${token}`
       if (current && context.measureText(candidate).width > width) {
-        lines.push(current)
-        current = char.trim() ? char : ''
+        if (!token.trim()) {
+          continue
+        }
+
+        if (context.measureText(token).width > width) {
+          for (const char of Array.from(token)) {
+            const charCandidate = `${current}${char}`
+            if (current && context.measureText(charCandidate).width > width) {
+              appendLine(current)
+              current = char.trim() ? char : ''
+            } else {
+              current = charCandidate
+            }
+          }
+          continue
+        }
+
+        appendLine(current)
+        current = token.trimStart()
       } else {
         current = candidate
       }
     }
 
-    if (current.trim()) {
-      lines.push(current)
-    }
+    appendLine(current)
   })
 
-  return lines.length > 0 ? lines : [text]
+  return lines.length > 0 ? lines : [normalizedText.trim()]
 }
 
-function buildTranslationLayout(block: TextBlock, scale: number, viewport: PDFViewport): TranslationLayout {
-  const paddingX = 6
-  const paddingY = 4
+function buildTranslationLayout(
+  block: TextBlock,
+  scale: number,
+  viewport: PDFViewport,
+): TranslationLayout {
+  const isHeading = block.type === 'title' || block.type === 'subtitle'
   const xScale = block.sourcePageWidth
     ? viewport.width / block.sourcePageWidth
     : scale
@@ -188,31 +223,42 @@ function buildTranslationLayout(block: TextBlock, scale: number, viewport: PDFVi
     20,
     Math.min(block.bbox.height * yScale, viewport.height - top - 8),
   )
+  const compactBlock = height <= 42 || width <= 150
+  const paddingX = isHeading ? (compactBlock ? 8 : 10) : (compactBlock ? 5 : 8)
+  const paddingY = isHeading ? (compactBlock ? 4 : 6) : (compactBlock ? 2.5 : 5)
   const contentWidth = Math.max(24, width - paddingX * 2)
-  const contentHeight = Math.max(12, height - paddingY * 2)
   const fontFamily = block.style.fontFamily || 'serif'
+  const translatedText = block.translated || ''
   const preferredFontSize = Math.max(
-    10,
-    Math.min(block.style.fontSize * unitScale * 0.82, contentHeight),
+    isHeading ? 11 : 8,
+    Math.min(
+      block.style.fontSize * unitScale * (isHeading ? 0.86 : 0.76),
+      isHeading ? 28 : 20,
+    ),
   )
-  const minFontSize = Math.max(8, Math.min(12, preferredFontSize))
+  const minFontSize = Math.min(preferredFontSize, isHeading ? 7.2 : 4.4)
+  const absoluteMinFontSize = isHeading ? 6.4 : 3.8
+  const lineHeightRatio = isHeading
+    ? (compactBlock ? 1.16 : 1.22)
+    : (compactBlock ? 1.2 : 1.28)
+  const targetHeight = height
   let low = minFontSize
   let high = preferredFontSize
   let bestFontSize = minFontSize
-  let bestLineHeight = minFontSize * 1.45
+  let bestLineHeight = minFontSize * lineHeightRatio
 
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 10; i++) {
     const candidateFontSize = (low + high) / 2
-    const candidateLineHeight = candidateFontSize * 1.45
+    const candidateLineHeight = candidateFontSize * lineHeightRatio
     const wrappedLines = wrapTextToWidth(
-      block.translated || '',
+      translatedText,
       contentWidth,
       candidateFontSize,
       fontFamily,
     )
-    const totalHeight = wrappedLines.length * candidateLineHeight
+    const totalHeight = wrappedLines.length * candidateLineHeight + paddingY * 2 + 2
 
-    if (totalHeight <= contentHeight) {
+    if (totalHeight <= targetHeight) {
       bestFontSize = candidateFontSize
       bestLineHeight = candidateLineHeight
       low = candidateFontSize
@@ -221,13 +267,30 @@ function buildTranslationLayout(block: TextBlock, scale: number, viewport: PDFVi
     }
   }
 
+  let wrappedLines = wrapTextToWidth(translatedText, contentWidth, bestFontSize, fontFamily)
+  let measuredHeight = wrappedLines.length * bestLineHeight + paddingY * 2 + 2
+
+  while (measuredHeight > targetHeight && bestFontSize > absoluteMinFontSize) {
+    bestFontSize = Math.max(absoluteMinFontSize, bestFontSize - 0.35)
+    bestLineHeight = bestFontSize * lineHeightRatio
+    wrappedLines = wrapTextToWidth(translatedText, contentWidth, bestFontSize, fontFamily)
+    measuredHeight = wrappedLines.length * bestLineHeight + paddingY * 2 + 2
+  }
+
+  if (measuredHeight > targetHeight && !isHeading) {
+    bestLineHeight = Math.max(bestFontSize * 1.14, bestLineHeight - 1)
+    measuredHeight = wrappedLines.length * bestLineHeight + paddingY * 2 + 2
+  }
+
   return {
     left,
     top,
     width,
     height,
     fontSize: bestFontSize,
-    lineHeight: bestLineHeight / bestFontSize,
+    lineHeight: bestLineHeight,
+    paddingX,
+    paddingY,
   }
 }
 
@@ -238,6 +301,9 @@ function PDFPage({
   documentId,
   blocks,
   showTranslation,
+  pageMode = 'source',
+  showTextLayer = true,
+  interactive = true,
   annotations,
   onAnnotationAdd,
   onAnnotationDelete,
@@ -248,6 +314,9 @@ function PDFPage({
   documentId?: string
   blocks?: TextBlock[]
   showTranslation?: boolean
+  pageMode?: 'source' | 'translated'
+  showTextLayer?: boolean
+  interactive?: boolean
   annotations?: PDFAnnotation[]
   onAnnotationAdd?: (annotation: PDFAnnotation) => void
   onAnnotationDelete?: (id: string) => void
@@ -283,7 +352,8 @@ function PDFPage({
     let textLayerRenderTask: { promise: Promise<void>; cancel?: () => void } | null = null
 
     async function render() {
-      if (!canvasRef.current || !textLayerRef.current) return
+      if (!canvasRef.current) return
+      if (showTextLayer && !textLayerRef.current) return
 
       setRendered(false)
       const viewport = page.getViewport({ scale })
@@ -301,10 +371,12 @@ function PDFPage({
       context.setTransform(1, 0, 0, 1, 0, 0)
       context.clearRect(0, 0, canvas.width, canvas.height)
 
-      textLayer.replaceChildren()
-      textLayer.style.width = `${viewport.width}px`
-      textLayer.style.height = `${viewport.height}px`
-      textLayer.style.setProperty('--scale-factor', `${scale}`)
+      if (textLayer) {
+        textLayer.replaceChildren()
+        textLayer.style.width = `${viewport.width}px`
+        textLayer.style.height = `${viewport.height}px`
+        textLayer.style.setProperty('--scale-factor', `${scale}`)
+      }
 
       canvasRenderTask = page.render({
         canvasContext: context,
@@ -315,19 +387,21 @@ function PDFPage({
 
       if (cancelled) return
 
-      const textContent = await page.getTextContent()
-      if (cancelled) return
+      if (showTextLayer && textLayer) {
+        const textContent = await page.getTextContent()
+        if (cancelled) return
 
-      textLayerRenderTask = pdfjs.renderTextLayer({
-        textContentSource: textContent,
-        container: textLayer,
-        viewport,
-        textDivs: [],
-        textDivProperties: new WeakMap(),
-      })
-      await textLayerRenderTask.promise
+        textLayerRenderTask = pdfjs.renderTextLayer({
+          textContentSource: textContent,
+          container: textLayer,
+          viewport,
+          textDivs: [],
+          textDivProperties: new WeakMap(),
+        })
+        await textLayerRenderTask.promise
 
-      if (cancelled) return
+        if (cancelled) return
+      }
 
       setRendered(true)
     }
@@ -339,10 +413,11 @@ function PDFPage({
       canvasRenderTask?.cancel?.()
       textLayerRenderTask?.cancel?.()
     }
-  }, [page, scale, pixelRatio])
+  }, [page, scale, pixelRatio, showTextLayer])
 
   // 文本选择处理
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
+    if (!interactive) return
     // 点击菜单内部时不触发
     if (menuRef.current?.contains(e.target as Node)) return
 
@@ -389,7 +464,7 @@ function PDFPage({
         setShowHighlightMenu(true)
       }
     })
-  }, [])
+  }, [interactive])
 
   // 从选区计算坐标
   const buildRectsFromSelection = useCallback(() => {
@@ -551,6 +626,7 @@ function PDFPage({
   }, [freeNoteDraft?.annotationId, onAnnotationDelete, resetFreeNoteDraft])
 
   const handleBlankAreaDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (!interactive) return
     if (menuRef.current?.contains(event.target as Node)) return
     if (selection) return
     if (window.getSelection()?.toString().trim()) return
@@ -580,29 +656,45 @@ function PDFPage({
         height: 148 / scale,
       },
     })
-  }, [scale, selection])
+  }, [interactive, scale, selection])
 
   const viewport = page.getViewport({ scale })
   const activeNoteAnnotation = annotations?.find(annotation => annotation.id === activeNoteId && annotation.content)
   const activeNoteAnchorRect = activeNoteAnnotation?.rects[0]
 
   // 渲染翻译覆盖层
-  const pageBlocks = blocks?.filter(b => b.pageNum === page.pageNumber && b.translated && showTranslation) || []
+  const pageBlocks = blocks?.filter(
+    b => b.pageNum === page.pageNumber
+      && b.translated
+      && showTranslation
+      && b.sourceLabel !== 'Picture',
+  ) || []
+  const translationLayouts = showTranslation
+    ? pageBlocks.map(block => ({
+      block,
+      layout: buildTranslationLayout(block, scale, viewport),
+    }))
+    : []
 
   return (
     <div
       ref={containerRef}
-      className="pdf-page relative bg-white shadow-lg mb-4"
-      data-page-number={page.pageNumber}
+      className={`pdf-page relative shadow-lg ${pageMode === 'translated' ? 'bg-[#fcfcfa]' : 'bg-white'}`}
       style={{ width: viewport.width, height: viewport.height }}
-      onMouseUp={handleMouseUp}
-      onDoubleClick={handleBlankAreaDoubleClick}
+      onMouseUp={interactive ? handleMouseUp : undefined}
+      onDoubleClick={interactive ? handleBlankAreaDoubleClick : undefined}
     >
-      <canvas ref={canvasRef} className="pdf-canvas block" />
+      <canvas
+        ref={canvasRef}
+        className="pdf-canvas block"
+        style={pageMode === 'translated'
+          ? { opacity: 0.22, filter: 'grayscale(1) brightness(1.08) contrast(0.92)' }
+          : undefined}
+      />
 
       <div
         ref={textLayerRef}
-        className="pdf-text-layer absolute inset-0 overflow-hidden select-text z-2"
+        className={`pdf-text-layer absolute inset-0 overflow-hidden z-2 ${showTextLayer ? 'select-text' : 'pointer-events-none opacity-0'}`}
       />
 
       <div className="absolute inset-0 overflow-hidden pointer-events-none z-3">
@@ -712,13 +804,13 @@ function PDFPage({
       </div>
 
       {/* 翻译覆盖层 */}
-      {pageBlocks.map(block => {
-        const layout = buildTranslationLayout(block, scale, viewport)
+      {translationLayouts.map(({ block, layout }) => {
 
         return (
           <div
             key={block.id}
             className="translation-overlay"
+            data-block-id={block.id}
             style={{
               position: 'absolute',
               left: layout.left,
@@ -727,16 +819,19 @@ function PDFPage({
               height: layout.height,
               fontSize: `${layout.fontSize}px`,
               color: '#1a1a1a',
-              backgroundColor: 'rgba(255, 255, 255, 0.92)',
-              padding: '4px 6px',
-              borderRadius: '3px',
+              backgroundColor: pageMode === 'translated' ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.92)',
+              padding: `${layout.paddingY}px ${layout.paddingX}px`,
+              borderRadius: '4px',
               pointerEvents: 'none',
               zIndex: 10,
-              lineHeight: layout.lineHeight,
-              boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+              lineHeight: `${layout.lineHeight}px`,
+              boxShadow: '0 1px 3px rgba(15, 23, 42, 0.08)',
+              border: '1px solid rgba(148, 163, 184, 0.12)',
               overflow: 'hidden',
               whiteSpace: 'pre-wrap',
               wordBreak: 'break-word',
+              overflowWrap: 'anywhere',
+              hyphens: 'auto',
               fontWeight: block.type === 'title' || block.type === 'subtitle' ? 600 : 400,
             }}
           >
@@ -932,6 +1027,7 @@ export default function PDFViewer({
   onAnnotationDelete,
   onAnnotationUpdate,
   jumpToBlock,
+  translationDisplayMode = 'overlay',
 }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const scrollReleaseTimerRef = useRef<number | null>(null)
@@ -1002,7 +1098,7 @@ export default function PDFViewer({
     if (!container) return
 
     const handleScroll = () => {
-      const pageElements = container.querySelectorAll('.pdf-page')
+      const pageElements = container.querySelectorAll('.pdf-page-spread')
       const containerRect = container.getBoundingClientRect()
       const containerCenter = containerRect.top + containerRect.height / 2
 
@@ -1081,18 +1177,40 @@ export default function PDFViewer({
     >
       <div className="pdf-pages-container flex flex-col items-center py-4">
         {pages.map((page, index) => (
-          <PDFPage
+          <div
             key={`page-${index + 1}`}
-            page={page}
-            scale={scale}
-            documentId={documentId}
-            blocks={blocks}
-            showTranslation={showTranslation}
-            annotations={annotationsByPage.get(index + 1) || []}
-            onAnnotationAdd={onAnnotationAdd}
-            onAnnotationDelete={onAnnotationDelete}
-            onAnnotationUpdate={onAnnotationUpdate}
-          />
+            data-page-number={index + 1}
+            className={`pdf-page-spread mb-4 ${showTranslation && translationDisplayMode === 'parallel' ? 'flex items-start gap-6' : ''}`}
+          >
+            <PDFPage
+              page={page}
+              scale={scale}
+              documentId={documentId}
+              blocks={blocks}
+              showTranslation={showTranslation && translationDisplayMode === 'overlay'}
+              pageMode="source"
+              showTextLayer
+              interactive
+              annotations={annotationsByPage.get(index + 1) || []}
+              onAnnotationAdd={onAnnotationAdd}
+              onAnnotationDelete={onAnnotationDelete}
+              onAnnotationUpdate={onAnnotationUpdate}
+            />
+
+            {showTranslation && translationDisplayMode === 'parallel' && (
+              <PDFPage
+                page={page}
+                scale={scale}
+                documentId={documentId}
+                blocks={blocks}
+                showTranslation
+                pageMode="translated"
+                showTextLayer={false}
+                interactive={false}
+                annotations={[]}
+              />
+            )}
+          </div>
         ))}
       </div>
 

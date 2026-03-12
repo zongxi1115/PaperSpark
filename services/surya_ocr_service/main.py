@@ -33,6 +33,7 @@ TEXTUAL_LABELS = {
     "Code",
     "Table",
     "Form",
+    "Picture",
 }
 
 JOB_ROOT = Path("out") / "surya_jobs"
@@ -301,7 +302,17 @@ def normalize_pages(layout_data: dict[str, Any], ocr_data: dict[str, Any], docum
         page_text_parts: list[str] = []
         page_counter: Counter[str] = Counter()
 
-        for region in sorted(raw_layout_page.get("bboxes", []), key=lambda item: int(item.get("position", 0))):
+        region_outputs: list[LayoutRegion] = []
+        ordered_regions = raw_layout_page.get("bboxes", [])
+        assignment_regions = sorted(
+            ordered_regions,
+            key=lambda item: (
+                1 if str(item.get("label", "Unknown")) == "Picture" else 0,
+                int(item.get("position", 0)),
+            ),
+        )
+
+        for region in assignment_regions:
             region_bbox = [float(v) for v in region.get("bbox", [])]
             matched: list[dict[str, Any]] = []
             unmatched: list[dict[str, Any]] = []
@@ -317,7 +328,7 @@ def normalize_pages(layout_data: dict[str, Any], ocr_data: dict[str, Any], docum
             region_text = "\n".join(line["text"] for line in matched_lines).strip()
             label = str(region.get("label", "Unknown"))
 
-            layout_regions.append(
+            region_outputs.append(
                 LayoutRegion(
                     label=label,
                     confidence=region.get("confidence"),
@@ -332,8 +343,11 @@ def normalize_pages(layout_data: dict[str, Any], ocr_data: dict[str, Any], docum
             page_counter[label] += 1
             structure_counter[label] += 1
 
-            if region_text and label in TEXTUAL_LABELS:
-                page_text_parts.append(region_text)
+        layout_regions = sorted(region_outputs, key=lambda region: region.position)
+
+        for region in layout_regions:
+            if region.text and region.label in TEXTUAL_LABELS:
+                page_text_parts.append(region.text)
 
         if remaining_lines:
             unassigned_lines = [build_ocr_line(line) for line in remaining_lines if str(line.get("text", "")).strip()]

@@ -1,3 +1,6 @@
 fastapi
 uvicorn
 surya-ocr
+chromadb
+openai
+httpx

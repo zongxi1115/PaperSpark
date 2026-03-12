@@ -11,7 +11,7 @@ import type {
 
 export const maxDuration = 120
 
-const MAX_CONCURRENT_REQUESTS = 4
+const MAX_CONCURRENT_REQUESTS = 8
 
 type ParagraphBlock = TranslationBlockPayload & {
   order: number
@@ -125,11 +125,17 @@ export async function POST(req: NextRequest) {
     const translatedMap = new Map<string, string>()
     let completed = 0
     let nextIndex = 0
+    let isClosed = false
 
     const stream = new ReadableStream({
       async start(controller) {
         const send = (event: TranslationStreamEvent) => {
-          controller.enqueue(encoder.encode(encodeSSE(event)))
+          if (isClosed) return
+          try {
+            controller.enqueue(encoder.encode(encodeSSE(event)))
+          } catch {
+            // Controller already closed, ignore
+          }
         }
 
         const translateOneBlock = async (index: number) => {
@@ -256,6 +262,7 @@ export async function POST(req: NextRequest) {
             type: 'complete',
             data: { total, progress: total },
           })
+          isClosed = true
           controller.close()
         } catch (error) {
           console.error('Translate stream error:', error)
@@ -265,6 +272,7 @@ export async function POST(req: NextRequest) {
               error: error instanceof Error ? error.message : '处理失败',
             },
           })
+          isClosed = true
           controller.close()
         }
       },

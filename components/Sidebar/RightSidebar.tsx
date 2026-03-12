@@ -3,12 +3,12 @@ import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Tooltip } from '@heroui/react'
 import { KnowledgePanel } from '@/components/Knowledge/KnowledgePanel'
-import { ThoughtNotesPanel } from '@/components/Thought/ThoughtNotesPanel'
+import { AssetsPanel } from '@/components/Assets/AssetsPanel'
 import { AgentSettingsPanel } from '@/components/Agent/AgentSettingsPanel'
 import { AssistantChatPanel } from '@/components/Assistant/AssistantChatPanel'
 import { LiteratureSearchPanel } from '@/components/Search/LiteratureSearchPanel'
 
-type SidebarTab = 'assistant' | 'search' | 'knowledge' | 'notes' | 'agents' | 'read'
+type SidebarTab = 'assistant' | 'search' | 'knowledge' | 'assets' | 'agents' | 'read'
 
 interface SidebarItem {
   id: SidebarTab
@@ -33,9 +33,9 @@ const sidebarItems: SidebarItem[] = [
     icon: <KnowledgeIcon />,
   },
   {
-    id: 'notes',
-    label: '随记想法',
-    icon: <NotesIcon />,
+    id: 'assets',
+    label: '资产库',
+    icon: <AssetsIcon />,
   },
   {
     id: 'agents',
@@ -123,7 +123,7 @@ export function RightSidebar() {
               {activeTab === 'assistant' && <AssistantChatPanel />}
               {activeTab === 'knowledge' && <KnowledgePanel />}
               {activeTab === 'search' && <LiteratureSearchPanel />}
-              {activeTab === 'notes' && <ThoughtNotesPanel />}
+              {activeTab === 'assets' && <AssetsPanel />}
               {activeTab === 'agents' && <AgentSettingsPanel />}
               {activeTab === 'read' && <PlaceholderPanel title="知识库精读" desc="功能开发中..." />}
             </div>
@@ -271,14 +271,12 @@ function KnowledgeIcon() {
   )
 }
 
-function NotesIcon() {
+function AssetsIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <polyline points="14,2 14,8 20,8" />
-      <line x1="16" y1="13" x2="8" y2="13" />
-      <line x1="16" y1="17" x2="8" y2="17" />
-      <line x1="10" y1="9" x2="8" y2="9" />
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+      <polyline points="3.27,6.96 12,12.01 20.73,6.96" />
+      <line x1="12" y1="22.08" x2="12" y2="12" />
     </svg>
   )
 }

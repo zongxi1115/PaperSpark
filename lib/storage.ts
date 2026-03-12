@@ -1,4 +1,4 @@
-import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote } from './types'
+import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote, AssetType, AssetItem } from './types'
 import { defaultSettings } from './types'
 
 const DOCUMENTS_KEY = 'paper_reader_documents'
@@ -401,4 +401,116 @@ export function updateAssistantNote(id: string, content: string): void {
 
 export function deleteAssistantNote(id: string): void {
   saveAssistantNotes(getAssistantNotes().filter(n => n.id !== id))
+}
+
+// ============ 资产库存储 ============
+
+const ASSET_TYPES_KEY = 'paper_reader_asset_types'
+const ASSETS_KEY = 'paper_reader_assets'
+
+// 预设资产类型
+export const DEFAULT_ASSET_TYPES: AssetType[] = [
+  {
+    id: 'material',
+    name: '素材',
+    icon: 'solar:document-bold',
+    color: '#3b82f6',
+    description: '收集的资料、素材',
+    isPreset: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+  {
+    id: 'note',
+    name: '随记',
+    icon: 'solar:pen-bold',
+    color: '#10b981',
+    description: '随笔、想法记录',
+    isPreset: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
+]
+
+// 资产类型管理
+export function getAssetTypes(): AssetType[] {
+  if (!isBrowser()) return DEFAULT_ASSET_TYPES
+  try {
+    const raw = localStorage.getItem(ASSET_TYPES_KEY)
+    if (!raw) {
+      saveAssetTypes(DEFAULT_ASSET_TYPES)
+      return DEFAULT_ASSET_TYPES
+    }
+    return JSON.parse(raw) as AssetType[]
+  } catch {
+    return DEFAULT_ASSET_TYPES
+  }
+}
+
+export function saveAssetTypes(types: AssetType[]): void {
+  if (!isBrowser()) return
+  localStorage.setItem(ASSET_TYPES_KEY, JSON.stringify(types))
+}
+
+export function getAssetType(id: string): AssetType | null {
+  return getAssetTypes().find(t => t.id === id) ?? null
+}
+
+export function saveAssetType(type: AssetType): void {
+  const types = getAssetTypes()
+  const idx = types.findIndex(t => t.id === type.id)
+  if (idx >= 0) {
+    types[idx] = type
+  } else {
+    types.push(type)
+  }
+  saveAssetTypes(types)
+}
+
+export function deleteAssetType(id: string): void {
+  const types = getAssetTypes()
+  const type = types.find(t => t.id === id)
+  // 不允许删除预设类型
+  if (type?.isPreset) return
+  saveAssetTypes(types.filter(t => t.id !== id))
+}
+
+// 资产项管理
+export function getAssets(): AssetItem[] {
+  if (!isBrowser()) return []
+  try {
+    const raw = localStorage.getItem(ASSETS_KEY)
+    if (!raw) return []
+    return JSON.parse(raw) as AssetItem[]
+  } catch {
+    return []
+  }
+}
+
+export function saveAssets(assets: AssetItem[]): void {
+  if (!isBrowser()) return
+  localStorage.setItem(ASSETS_KEY, JSON.stringify(assets))
+}
+
+export function getAsset(id: string): AssetItem | null {
+  return getAssets().find(a => a.id === id) ?? null
+}
+
+export function saveAsset(asset: AssetItem): void {
+  const assets = getAssets()
+  const idx = assets.findIndex(a => a.id === asset.id)
+  if (idx >= 0) {
+    assets[idx] = asset
+  } else {
+    assets.unshift(asset)
+  }
+  saveAssets(assets)
+}
+
+export function deleteAsset(id: string): void {
+  saveAssets(getAssets().filter(a => a.id !== id))
+}
+
+export function getAssetsByType(typeId: string): AssetItem[] {
+  return getAssets().filter(a => a.typeId === typeId)
 }

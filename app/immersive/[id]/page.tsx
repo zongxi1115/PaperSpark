@@ -4,23 +4,35 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Button, Tooltip, Skeleton, Progress, Chip } from '@heroui/react'
 import { Icon } from '@iconify/react'
-import { getKnowledgeItem, getSettings, getSelectedSmallModel } from '@/lib/storage'
+import { getKnowledgeItem, getSettings, getSelectedSmallModel, updateKnowledgeItem } from '@/lib/storage'
 import {
   getPDFFile,
   savePDFFile,
   getPDFDocumentByKnowledgeId,
   savePDFDocument,
+  updatePDFDocument,
   getPDFPagesByDocumentId,
   savePDFPages,
   getTranslation,
+  deleteTranslation,
   getAnnotationsByDocumentId,
-  saveAnnotation,
   deleteAnnotation,
+  updateAnnotation,
+  getFullTextByKnowledgeId,
 } from '@/lib/pdfCache'
 import PDFViewer from '@/components/PDF/PDFViewer'
-import { parsePDF } from '@/lib/pdfParser'
+import AIGuidePanel from '@/components/Guide/AIGuidePanel'
 import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
+import { parsePDFWithSurya } from '@/lib/suryaParser'
+
+function attachPageMetrics(blocks: TextBlock[], pageWidth: number, pageHeight: number) {
+  return blocks.map(block => ({
+    ...block,
+    sourcePageWidth: block.sourcePageWidth || pageWidth,
+    sourcePageHeight: block.sourcePageHeight || pageHeight,
+  }))
+}
 
 export default function ImmersiveReaderPage() {
   const params = useParams()
@@ -34,20 +46,29 @@ export default function ImmersiveReaderPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [scale, setScale] = useState(1.2)
-  const [sidebarTab, setSidebarTab] = useState<'info' | 'translate' | 'notes'>('info')
+  const [sidebarTab, setSidebarTab] = useState<'info' | 'translate' | 'notes' | 'guide'>('guide')
+  const [sidebarWidth, setSidebarWidth] = useState(288) // 288px = 72 * 4
 
   // PDF 数据
   const [blocks, setBlocks] = useState<TextBlock[]>([])
   const [translatedBlocks, setTranslatedBlocks] = useState<Map<string, string>>(new Map())
+  const [fullText, setFullText] = useState<string>('')
+
+  // 跳转控制
+  const [jumpToBlock, setJumpToBlock] = useState<{ blockId: string; pageNum: number } | null>(null)
 
   // 翻译状态
   const [translating, setTranslating] = useState(false)
   const [translationProgress, setTranslationProgress] = useState({ current: 0, total: 0 })
   const [showTranslation, setShowTranslation] = useState(false)
   const [hasTranslation, setHasTranslation] = useState(false)
+  const [structureParsing, setStructureParsing] = useState(false)
+  const [suryaReady, setSuryaReady] = useState(false)
 
   // 批注
   const [annotations, setAnnotations] = useState<PDFAnnotation[]>([])
+  const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null)
+  const [editingNoteText, setEditingNoteText] = useState('')
 
   // 元数据
   const [metadata, setMetadata] = useState<{
@@ -56,8 +77,11 @@ export default function ImmersiveReaderPage() {
     abstract: string
     year: string
     journal: string
+    references?: string[]
+    keywords?: string[]
   } | null>(null)
   const [metadataLoading, setMetadataLoading] = useState(true)
+  const [abstractExpanded, setAbstractExpanded] = useState(false)
 
   const processedRef = useRef(false)
 
@@ -130,21 +154,53 @@ export default function ImmersiveReaderPage() {
     if (processedRef.current) return
     processedRef.current = true
 
+    const item = getKnowledgeItem(knowledgeId)
+    if (!item) return
+
+    const anns = await getAnnotationsByDocumentId(knowledgeId)
+    setAnnotations(anns)
+
     // 检查已有缓存
     const existingDoc = await getPDFDocumentByKnowledgeId(knowledgeId)
+    const existingPages = await getPDFPagesByDocumentId(knowledgeId)
+    const hasCompletedSuryaCache =
+      existingDoc?.parser === 'surya' &&
+      existingDoc?.parseStatus === 'completed' &&
+      existingPages.length > 0
+    setSuryaReady(hasCompletedSuryaCache)
+
     if (existingDoc) {
-      const translation = await getTranslation(knowledgeId)
-      if (translation) {
-        setHasTranslation(true)
-        const transMap = new Map(translation.blocks.map(b => [b.blockId, b.translated]))
-        setTranslatedBlocks(transMap)
+      if (existingDoc.parser === 'surya') {
+        const translation = await getTranslation(knowledgeId)
+        if (translation) {
+          setHasTranslation(true)
+          const transMap = new Map(translation.blocks.map(b => [b.blockId, b.translated]))
+          setTranslatedBlocks(transMap)
+        } else {
+          setHasTranslation(false)
+          setTranslatedBlocks(new Map())
+        }
+      } else {
+        setHasTranslation(false)
+        setTranslatedBlocks(new Map())
       }
 
-      const pages = await getPDFPagesByDocumentId(knowledgeId)
-      if (pages.length > 0) {
-        setTotalPages(pages.length)
-        const allBlocks = pages.flatMap(p => p.blocks)
+      if (existingPages.length > 0) {
+        setTotalPages(existingPages.length)
+        const allBlocks = existingPages.flatMap(p => attachPageMetrics(p.blocks, p.width, p.height))
         setBlocks(allBlocks)
+      }
+
+      // 加载全文内容
+      if (existingDoc.fullText) {
+        setFullText(existingDoc.fullText)
+      } else if (existingPages.length > 0) {
+        // 如果没有缓存的全文，从页面拼接
+        const text = existingPages
+          .sort((a, b) => a.pageNum - b.pageNum)
+          .map(p => p.fullText || p.blocks.map(b => b.text).join('\n'))
+          .join('\n\n')
+        setFullText(text)
       }
 
       setMetadata({
@@ -153,73 +209,150 @@ export default function ImmersiveReaderPage() {
         abstract: existingDoc.metadata.abstract,
         year: existingDoc.metadata.year,
         journal: existingDoc.metadata.journal,
+        references: existingDoc.metadata.references || [],
+        keywords: existingDoc.metadata.keywords || [],
       })
       setMetadataLoading(false)
+    } else {
+      setMetadata({
+        title: item.title,
+        authors: item.authors,
+        abstract: item.abstract || '',
+        year: item.year || '',
+        journal: item.journal || '',
+        references: [],
+        keywords: [],
+      })
+    }
 
-      // 加载批注
-      const anns = await getAnnotationsByDocumentId(knowledgeId)
-      setAnnotations(anns)
+    if (hasCompletedSuryaCache) {
       return
     }
 
-    setMetadataLoading(true)
-
+    setStructureParsing(true)
+    setMetadataLoading(!existingDoc)
     try {
-      const item = getKnowledgeItem(knowledgeId)
-      if (!item) return
-
       const cachedFile = await getPDFFile(knowledgeId)
       if (!cachedFile) {
         setMetadataLoading(false)
         return
       }
 
-      const arrayBuffer = await cachedFile.blob.arrayBuffer()
+      const fallbackMetadata = {
+        title: existingDoc?.metadata.title || item.title,
+        authors: existingDoc?.metadata.authors?.length ? existingDoc.metadata.authors : item.authors,
+        abstract: existingDoc?.metadata.abstract || item.abstract || '',
+        year: existingDoc?.metadata.year || item.year || '',
+        journal: existingDoc?.metadata.journal || item.journal || '',
+        keywords: existingDoc?.metadata.keywords || [],
+        references: existingDoc?.metadata.references || [],
+      }
 
-      const result = await parsePDF(arrayBuffer, knowledgeId)
+      const now = new Date().toISOString()
+      if (existingDoc) {
+        await updatePDFDocument(knowledgeId, {
+          parser: 'surya',
+          parseStatus: 'processing',
+          parseError: '',
+        })
+      } else {
+        await savePDFDocument({
+          id: knowledgeId,
+          knowledgeItemId: knowledgeId,
+          fileName: cachedFile.fileName,
+          pageCount: existingPages.length,
+          metadata: fallbackMetadata,
+          parser: 'surya',
+          parseStatus: 'processing',
+          parsedAt: now,
+          updatedAt: now,
+        })
+      }
+
+      const result = await parsePDFWithSurya({
+        documentId: knowledgeId,
+        fileBlob: cachedFile.blob,
+        fileName: cachedFile.fileName,
+        keepOutputs: false,
+      })
 
       setTotalPages(result.pages.length)
-      const allBlocks = result.pages.flatMap(p => p.blocks)
+      const allBlocks = result.pages.flatMap(p => attachPageMetrics(p.blocks, p.width, p.height))
       setBlocks(allBlocks)
+      setSuryaReady(true)
+
+      if (existingDoc?.parser !== 'surya') {
+        await deleteTranslation(knowledgeId)
+        setHasTranslation(false)
+        setTranslatedBlocks(new Map())
+      }
+
+      const mergedMetadata = {
+        title: result.metadata.title || item.title,
+        authors: result.metadata.authors?.length ? result.metadata.authors : item.authors,
+        abstract: result.metadata.abstract || item.abstract || '',
+        year: result.metadata.year || item.year || '',
+        journal: result.metadata.journal || item.journal || '',
+        keywords: result.metadata.keywords || [],
+        references: result.metadata.references || [],
+      }
+      const parsedAt = new Date().toISOString()
 
       await savePDFDocument({
         id: knowledgeId,
         knowledgeItemId: knowledgeId,
         fileName: cachedFile.fileName,
         pageCount: result.pages.length,
-        metadata: {
-          title: result.metadata.title || item.title,
-          authors: result.metadata.authors?.length ? result.metadata.authors : item.authors,
-          abstract: result.metadata.abstract || item.abstract || '',
-          year: result.metadata.year || item.year || '',
-          journal: result.metadata.journal || item.journal || '',
-          keywords: result.metadata.keywords || [],
-          references: result.metadata.references || [],
-        },
-        parsedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        metadata: mergedMetadata,
+        parser: 'surya',
+        parseStatus: 'completed',
+        parseError: '',
+        fullText: result.fullText,
+        structureCounts: result.structureCounts,
+        parsedAt,
+        updatedAt: parsedAt,
       })
 
+      // 设置全文内容
+      if (result.fullText) {
+        setFullText(result.fullText)
+      }
+
       setMetadata({
-        title: result.metadata.title || item.title,
-        authors: result.metadata.authors?.length ? result.metadata.authors : item.authors,
-        abstract: result.metadata.abstract || item.abstract || '',
-        year: result.metadata.year || item.year || '',
-        journal: result.metadata.journal || item.journal || '',
+        title: mergedMetadata.title,
+        authors: mergedMetadata.authors,
+        abstract: mergedMetadata.abstract,
+        year: mergedMetadata.year,
+        journal: mergedMetadata.journal,
+        references: mergedMetadata.references,
+        keywords: mergedMetadata.keywords,
       })
 
       await savePDFPages(result.pages)
+      updateKnowledgeItem(knowledgeId, {
+        hasImmersiveCache: true,
+        immersiveCacheAt: parsedAt,
+        extractedMetadata: mergedMetadata,
+      })
       setMetadataLoading(false)
 
     } catch (err) {
       console.error('Process PDF error:', err)
+      setSuryaReady(false)
+      await updatePDFDocument(knowledgeId, {
+        parser: 'surya',
+        parseStatus: 'failed',
+        parseError: err instanceof Error ? err.message : 'Surya 解析失败',
+      })
       setMetadataLoading(false)
+    } finally {
+      setStructureParsing(false)
     }
   }, [knowledgeId])
 
   // 流式翻译
   const startStreamingTranslation = useCallback(async () => {
-    if (translating || blocks.length === 0) return
+    if (translating || structureParsing || !suryaReady || blocks.length === 0) return
 
     setTranslating(true)
     setHasTranslation(false)
@@ -319,19 +452,46 @@ export default function ImmersiveReaderPage() {
     } finally {
       setTranslating(false)
     }
-  }, [translating, blocks, knowledgeId])
+  }, [translating, structureParsing, suryaReady, blocks, knowledgeId])
 
-  // 添加批注
-  const handleAnnotationAdd = useCallback(async (annotation: PDFAnnotation) => {
-    const newAnnotation = { ...annotation, documentId: knowledgeId }
-    await saveAnnotation(newAnnotation)
-    setAnnotations(prev => [...prev, newAnnotation])
-  }, [knowledgeId])
+  // 添加批注（PDFViewer 已经保存，这里只更新状态）
+  const handleAnnotationAdd = useCallback((annotation: PDFAnnotation) => {
+    setAnnotations(prev => [...prev, annotation])
+  }, [])
 
   // 删除批注
   const handleAnnotationDelete = useCallback(async (id: string) => {
     await deleteAnnotation(id)
     setAnnotations(prev => prev.filter(a => a.id !== id))
+    if (editingAnnotationId === id) setEditingAnnotationId(null)
+  }, [editingAnnotationId])
+
+  // 更新批注笔记
+  const handleAnnotationNoteUpdate = useCallback(async (id: string, content: string) => {
+    const type = content.trim() ? 'note' : 'highlight'
+    await updateAnnotation(id, { content, type })
+    setAnnotations(prev => prev.map(a =>
+      a.id === id
+        ? { ...a, content, type, updatedAt: new Date().toISOString() }
+        : a
+    ))
+    setEditingAnnotationId(null)
+  }, [])
+
+  const handleAnnotationUpdate = useCallback((annotation: PDFAnnotation) => {
+    setAnnotations(prev => prev.map(item => (
+      item.id === annotation.id
+        ? {
+            ...item,
+            ...annotation,
+            createdAt: item.createdAt,
+          }
+        : item
+    )))
+  }, [])
+
+  const handleAnnotationJump = useCallback((pageNum: number) => {
+    setCurrentPage(pageNum)
   }, [])
 
   // 更新 blocks 的翻译
@@ -339,6 +499,7 @@ export default function ImmersiveReaderPage() {
     ...b,
     translated: translatedBlocks.get(b.id),
   }))
+  const canTranslate = suryaReady && !structureParsing && blocks.length > 0
 
   useEffect(() => {
     loadPDF()
@@ -426,6 +587,21 @@ export default function ImmersiveReaderPage() {
           </Button>
         </Tooltip>
 
+        <div className="w-6 h-px bg-[#444] my-2" />
+
+        <Tooltip content="AI导读" placement="right">
+          <Button
+            isIconOnly
+            size="sm"
+            variant={sidebarTab === 'guide' ? 'solid' : 'light'}
+            color={sidebarTab === 'guide' ? 'primary' : 'default'}
+            className={sidebarTab === 'guide' ? '' : 'text-gray-400 hover:text-white'}
+            onPress={() => setSidebarTab('guide')}
+          >
+            <Icon icon="mdi:robot-outline" className="text-xl" />
+          </Button>
+        </Tooltip>
+
         <div className="flex-1" />
 
         {/* 翻译状态 */}
@@ -440,6 +616,12 @@ export default function ImmersiveReaderPage() {
           </Tooltip>
         )}
 
+        {structureParsing && (
+          <Tooltip content="正在解析原文结构" placement="right">
+            <Icon icon="mdi:file-search-outline" className="text-xl text-amber-400 animate-pulse" />
+          </Tooltip>
+        )}
+
         {hasTranslation && !translating && (
           <Tooltip content="翻译已完成" placement="right">
             <Icon icon="mdi:check-circle" className="text-xl text-green-500" />
@@ -448,7 +630,38 @@ export default function ImmersiveReaderPage() {
       </div>
 
       {/* 左侧面板 */}
-      <div className="w-72 bg-[#252525] border-r border-[#333] flex flex-col overflow-hidden">
+      <div 
+        className="bg-[#252525] border-r border-[#333] flex flex-col overflow-hidden relative"
+        style={{ width: sidebarWidth }}
+      >
+        {/* 拖动调整宽度手柄 */}
+        <div
+          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 active:bg-blue-500 transition-colors z-10"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            const startX = e.clientX
+            const startWidth = sidebarWidth
+
+            const handleMouseMove = (moveEvent: MouseEvent) => {
+              const delta = moveEvent.clientX - startX
+              const newWidth = Math.max(200, Math.min(500, startWidth + delta))
+              setSidebarWidth(newWidth)
+            }
+
+            const handleMouseUp = () => {
+              document.removeEventListener('mousemove', handleMouseMove)
+              document.removeEventListener('mouseup', handleMouseUp)
+              document.body.style.cursor = ''
+              document.body.style.userSelect = ''
+            }
+
+            document.body.style.cursor = 'col-resize'
+            document.body.style.userSelect = 'none'
+            document.addEventListener('mousemove', handleMouseMove)
+            document.addEventListener('mouseup', handleMouseUp)
+          }}
+        />
+
         {/* 文档信息 */}
         {sidebarTab === 'info' && (
           <div className="flex-1 overflow-auto p-4">
@@ -486,11 +699,85 @@ export default function ImmersiveReaderPage() {
 
                 {metadata?.abstract && (
                   <div className="mb-4">
-                    <label className="text-xs text-gray-500 block mb-1">摘要</label>
-                    <p className="text-xs text-gray-400 leading-relaxed">{metadata.abstract}</p>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs text-gray-500">摘要</label>
+                      {metadata.abstract.length > 150 && (
+                        <button
+                          className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                          onClick={() => setAbstractExpanded(!abstractExpanded)}
+                        >
+                          {abstractExpanded ? '收起' : '展开'}
+                        </button>
+                      )}
+                    </div>
+                    <p 
+                      className={`text-xs text-gray-400 leading-relaxed ${!abstractExpanded ? 'line-clamp-5' : ''}`}
+                    >
+                      {metadata.abstract}
+                    </p>
+                  </div>
+                )}
+
+                {/* References */}
+                {metadata?.references && metadata.references.length > 0 && (
+                  <div className="mb-4">
+                    <label className="text-xs text-gray-500 block mb-2">
+                      参考文献 ({metadata.references.length})
+                    </label>
+                    <div className="space-y-2 max-h-64 overflow-auto">
+                      {metadata.references.map((ref, idx) => {
+                        // 解析链接 (DOI, URL, arXiv 等)
+                        const doiMatch = ref.match(/10\.\d{4,}\/[^\s]+/gi)
+                        const urlMatch = ref.match(/https?:\/\/[^\s]+/gi)
+                        const arxivMatch = ref.match(/arXiv:\s*(\d+\.\d+)/i)
+                        
+                        const links: { type: string; url: string }[] = []
+                        if (doiMatch) {
+                          links.push({ type: 'DOI', url: `https://doi.org/${doiMatch[0]}` })
+                        }
+                        if (urlMatch) {
+                          links.push({ type: 'Link', url: urlMatch[0] })
+                        }
+                        if (arxivMatch) {
+                          links.push({ type: 'arXiv', url: `https://arxiv.org/abs/${arxivMatch[1]}` })
+                        }
+
+                        return (
+                          <div 
+                            key={idx} 
+                            className="p-2 bg-[#1a1a1a] rounded-lg text-xs text-gray-400 leading-relaxed hover:bg-[#222] transition-colors"
+                          >
+                            <p className="mb-1">{ref}</p>
+                            {links.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                {links.map((link, linkIdx) => (
+                                  <a
+                                    key={linkIdx}
+                                    href={link.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Icon icon="mdi:open-in-new" className="text-[10px]" />
+                                    <span>{link.type}</span>
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </>
+            )}
+
+            {structureParsing && (
+              <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+                <p className="text-xs text-amber-300">正在使用 Surya 解析整篇原文结构，完成后会覆盖本地块缓存。</p>
+              </div>
             )}
           </div>
         )}
@@ -531,14 +818,20 @@ export default function ImmersiveReaderPage() {
             {!translating && !hasTranslation && (
               <div className="flex flex-col items-center justify-center py-8 text-gray-500">
                 <Icon icon="mdi:translate" className="text-3xl mb-2" />
-                <p className="text-sm">尚未翻译</p>
+                <p className="text-sm">
+                  {structureParsing
+                    ? '正在等待结构解析完成'
+                    : suryaReady
+                      ? '尚未翻译'
+                      : '结构缓存尚未就绪'}
+                </p>
                 <Button
                   size="sm"
                   color="primary"
                   variant="flat"
                   className="mt-2"
                   onPress={startStreamingTranslation}
-                  isDisabled={blocks.length === 0}
+                  isDisabled={!canTranslate}
                 >
                   开始翻译
                 </Button>
@@ -571,46 +864,163 @@ export default function ImmersiveReaderPage() {
 
         {/* 批注 */}
         {sidebarTab === 'notes' && (
-          <div className="flex-1 overflow-auto p-4">
-            <h3 className="text-sm font-medium text-gray-300 mb-3">批注 ({annotations.length})</h3>
+          <div className="flex-1 overflow-auto p-3">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h3 className="text-sm font-medium text-gray-300">
+                批注
+                {annotations.length > 0 && (
+                  <span className="ml-1.5 text-[10px] bg-[#333] text-gray-400 rounded-full px-1.5 py-0.5">
+                    {annotations.length}
+                  </span>
+                )}
+              </h3>
+              {annotations.filter(a => a.type === 'note').length > 0 && (
+                <span className="text-[10px] text-blue-400 flex items-center gap-0.5">
+                  <Icon icon="mdi:note-text-outline" className="text-xs" />
+                  {annotations.filter(a => a.type === 'note').length} 条笔记
+                </span>
+              )}
+            </div>
 
             {annotations.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-gray-500">
-                <Icon icon="mdi:comment-text-outline" className="text-3xl mb-2" />
-                <p className="text-sm">暂无批注</p>
-                <p className="text-xs mt-1 text-gray-600">选中文本后点击颜色添加高亮</p>
+              <div className="flex flex-col items-center justify-center py-10 text-gray-500 px-4">
+                <Icon icon="mdi:comment-text-outline" className="text-4xl mb-3 text-gray-600" />
+                <p className="text-sm text-center">暂无批注</p>
+                <p className="text-xs mt-1.5 text-gray-600 text-center leading-relaxed">
+                  选中 PDF 文本后点击颜色添加高亮，或在空白处双击直接创建文本批注
+                </p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {annotations.map(ann => (
                   <div
                     key={ann.id}
-                    className="p-2 bg-[#1a1a1a] rounded group"
+                    className="bg-[#1a1a1a] rounded-xl overflow-hidden group border border-transparent hover:border-[#333] transition-colors"
                   >
-                    <div className="flex items-start gap-2">
-                      <div
-                        className="w-3 h-3 rounded-full mt-1 flex-shrink-0"
-                        style={{ backgroundColor: HIGHLIGHT_COLORS[ann.color].border }}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-gray-300 line-clamp-3">{ann.selectedText}</p>
-                        <p className="text-[10px] text-gray-600 mt-1">第 {ann.pageNum} 页</p>
+                    {/* 头部：页码 + 类型标记 + 删除 */}
+                    <div
+                      className="flex items-center justify-between px-3 py-1.5"
+                      style={{ borderLeft: `3px solid ${HIGHLIGHT_COLORS[ann.color].border}` }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-[10px] font-medium cursor-pointer hover:text-blue-400 transition-colors"
+                          style={{ color: HIGHLIGHT_COLORS[ann.color].border }}
+                          onClick={() => handleAnnotationJump(ann.pageNum)}
+                          title="跳转到该页"
+                        >
+                          第 {ann.pageNum} 页
+                        </span>
+                        {ann.type === 'note' && (
+                          <span className="flex items-center gap-0.5 text-[10px] text-blue-400">
+                            <Icon icon="mdi:note-text-outline" className="text-[10px]" />
+                            笔记
+                          </span>
+                        )}
                       </div>
                       <Button
                         isIconOnly
                         size="sm"
                         variant="light"
-                        className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 min-w-6 h-6"
+                        className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 min-w-5 h-5"
                         onPress={() => handleAnnotationDelete(ann.id)}
                       >
-                        <Icon icon="mdi:delete-outline" className="text-sm" />
+                        <Icon icon="mdi:delete-outline" className="text-xs" />
                       </Button>
                     </div>
+
+                    {/* 选中文本引用 */}
+                    <div className="px-3 pt-2 pb-1">
+                      <p
+                        className="text-xs text-gray-400 italic leading-relaxed line-clamp-3 pl-2 border-l-2 cursor-pointer hover:text-gray-300 transition-colors"
+                        style={{ borderColor: HIGHLIGHT_COLORS[ann.color].border + '60' }}
+                        onClick={() => handleAnnotationJump(ann.pageNum)}
+                      >
+                        {ann.selectedText || '空白处批注'}
+                      </p>
+                    </div>
+
+                    {/* 笔记内容 / 编辑区 */}
+                    {editingAnnotationId === ann.id ? (
+                      <div className="px-3 pb-3 pt-1">
+                        <textarea
+                          className="w-full bg-[#252535] text-gray-200 text-xs rounded-lg px-2.5 py-2 resize-none focus:outline-none border border-gray-600 focus:border-blue-500 placeholder-gray-600"
+                          rows={3}
+                          value={editingNoteText}
+                          onChange={e => setEditingNoteText(e.target.value)}
+                          placeholder="写下你的想法..."
+                          autoFocus
+                        />
+                        <div className="flex gap-2 mt-1.5 justify-end">
+                          <Button
+                            size="sm"
+                            variant="light"
+                            className="text-gray-500 h-6 min-w-0 px-2 text-xs"
+                            onPress={() => setEditingAnnotationId(null)}
+                          >
+                            取消
+                          </Button>
+                          <Button
+                            size="sm"
+                            color="primary"
+                            className="h-6 min-w-0 px-2.5 text-xs"
+                            onPress={() => handleAnnotationNoteUpdate(ann.id, editingNoteText)}
+                          >
+                            保存
+                          </Button>
+                        </div>
+                      </div>
+                    ) : ann.content ? (
+                      <div
+                        className="mx-3 mb-3 mt-1 rounded-lg bg-[#252535] border border-blue-900/30 px-2.5 py-2 cursor-pointer hover:border-blue-700/50 transition-colors group/note"
+                        onClick={() => {
+                          setEditingAnnotationId(ann.id)
+                          setEditingNoteText(ann.content || '')
+                        }}
+                        title="点击编辑笔记"
+                      >
+                        <div className="flex items-start gap-1.5">
+                          <Icon icon="mdi:note-text-outline" className="text-blue-400 text-xs mt-0.5 shrink-0" />
+                          <p className="text-xs text-gray-300 leading-relaxed flex-1">{ann.content}</p>
+                          <Icon icon="mdi:pencil-outline" className="text-gray-600 group-hover/note:text-gray-400 text-xs shrink-0 mt-0.5 transition-colors" />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="px-3 pb-2.5">
+                        <button
+                          className="text-[11px] text-gray-600 hover:text-blue-400 flex items-center gap-1 transition-colors"
+                          onClick={() => {
+                            setEditingAnnotationId(ann.id)
+                            setEditingNoteText('')
+                          }}
+                        >
+                          <Icon icon="mdi:plus-circle-outline" className="text-xs" />
+                          添加笔记
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </div>
+        )}
+
+        {/* AI导读 */}
+        {sidebarTab === 'guide' && (
+          <AIGuidePanel
+            documentId={knowledgeId}
+            knowledgeItemId={knowledgeId}
+            blocks={blocks}
+            fullText={fullText}
+            modelConfig={getSelectedSmallModel(getSettings())}
+            onBlockClick={(blockId, pageNum) => {
+              if (pageNum) {
+                setCurrentPage(pageNum)
+                setJumpToBlock({ blockId, pageNum })
+              }
+            }}
+          />
         )}
       </div>
 
@@ -678,7 +1088,7 @@ export default function ImmersiveReaderPage() {
               color="primary"
               variant="flat"
               onPress={startStreamingTranslation}
-              isDisabled={blocks.length === 0}
+              isDisabled={!canTranslate}
             >
               翻译文档
             </Button>
@@ -688,6 +1098,13 @@ export default function ImmersiveReaderPage() {
             <div className="flex items-center gap-2 text-xs text-gray-400">
               <Icon icon="mdi:sync" className="animate-spin" />
               <span>{translationProgress.current}/{translationProgress.total}</span>
+            </div>
+          )}
+
+          {structureParsing && (
+            <div className="flex items-center gap-2 text-xs text-amber-300">
+              <Icon icon="mdi:file-search-outline" className="animate-pulse" />
+              <span>Surya 结构解析中</span>
             </div>
           )}
 
@@ -714,6 +1131,8 @@ export default function ImmersiveReaderPage() {
               annotations={annotations}
               onAnnotationAdd={handleAnnotationAdd}
               onAnnotationDelete={handleAnnotationDelete}
+              onAnnotationUpdate={handleAnnotationUpdate}
+              jumpToBlock={jumpToBlock}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500">

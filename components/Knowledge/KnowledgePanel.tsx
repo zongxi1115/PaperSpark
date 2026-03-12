@@ -132,141 +132,6 @@ export function KnowledgePanel() {
     }
   }, [zoteroUserId, zoteroApiKey, onZoteroOpen])
 
-  // 上传文件
-  const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setLoading(true)
-    try {
-      const formData = new FormData()
-      formData.append('file', file)
-
-      const res = await fetch('/api/knowledge/upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!res.ok) throw new Error('Upload failed')
-      
-      const data = await res.json()
-      const settings = getSettings()
-      const largeModelConfig = getSelectedLargeModel(settings)
-      
-      // 提取元数据
-      const metaRes = await fetch('/api/knowledge/summary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: data.content,
-          fileName: data.fileName,
-          fileType: data.fileType,
-          modelConfig: largeModelConfig,
-          itemType: 'metadata',
-        }),
-      })
-
-      let metadata = { title: file.name, authors: [] as string[], abstract: '', year: '', journal: '' }
-      if (metaRes.ok) {
-        metadata = await metaRes.json()
-      }
-
-      const now = new Date().toISOString()
-      const newItem: KnowledgeItem = {
-        id: generateId(),
-        title: metadata.title || file.name,
-        authors: metadata.authors,
-        abstract: metadata.abstract || '',
-        year: metadata.year || '',
-        journal: metadata.journal || '',
-        sourceType: 'upload',
-        fileName: file.name,
-        fileType: data.fileType,
-        fileSize: data.fileSize,
-        createdAt: now,
-        updatedAt: now,
-      }
-
-      addKnowledgeItem(newItem)
-      setItems(getKnowledgeItems())
-      addToast({ title: '文件上传成功', color: 'success' })
-    } catch (error) {
-      console.error('Upload error:', error)
-      addToast({ title: '上传失败', color: 'danger' })
-    } finally {
-      setLoading(false)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''
-      }
-    }
-  }, [])
-
-  // URL 导入
-  const handleUrlImport = useCallback(async () => {
-    if (!importUrl.trim()) return
-
-    setLoading(true)
-    try {
-      const formData = new FormData()
-      formData.append('url', importUrl)
-
-      const res = await fetch('/api/knowledge/upload', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!res.ok) throw new Error('Import failed')
-      
-      const data = await res.json()
-      const settings = getSettings()
-      const largeModelConfig = getSelectedLargeModel(settings)
-      
-      const metaRes = await fetch('/api/knowledge/summary', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          content: data.content,
-          fileName: data.fileName,
-          fileType: data.fileType,
-          modelConfig: largeModelConfig,
-          itemType: 'metadata',
-        }),
-      })
-
-      let metadata = { title: data.fileName, authors: [] as string[], abstract: '', year: '', journal: '' }
-      if (metaRes.ok) {
-        metadata = await metaRes.json()
-      }
-
-      const now = new Date().toISOString()
-      const newItem: KnowledgeItem = {
-        id: generateId(),
-        title: metadata.title || data.fileName,
-        authors: metadata.authors,
-        abstract: metadata.abstract || '',
-        year: metadata.year || '',
-        journal: metadata.journal || '',
-        url: importUrl,
-        sourceType: 'url',
-        fileName: data.fileName,
-        fileType: 'pdf',
-        createdAt: now,
-        updatedAt: now,
-      }
-
-      addKnowledgeItem(newItem)
-      setItems(getKnowledgeItems())
-      onImportClose()
-      setImportUrl('')
-      addToast({ title: 'URL 导入成功', color: 'success' })
-    } catch (error) {
-      console.error('URL import error:', error)
-      addToast({ title: 'URL 导入失败', color: 'danger' })
-    } finally {
-      setLoading(false)
-    }
-  }, [importUrl, onImportClose])
-
   // 点击条目显示详情
   const handleItemClick = useCallback((item: KnowledgeItem) => {
     setSelectedItem(item)
@@ -371,6 +236,100 @@ export function KnowledgePanel() {
     window.dispatchEvent(event)
   }, [])
 
+  // 导入弹窗状态
+  const [importTab, setImportTab] = useState<'upload' | 'url'>('upload')
+  const [importTitle, setImportTitle] = useState('')
+  const [importAbstract, setImportAbstract] = useState('')
+  const [importYear, setImportYear] = useState('')
+  const [importAuthors, setImportAuthors] = useState('')
+  const [importJournal, setImportJournal] = useState('')
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+
+  // 重置导入表单
+  const resetImportForm = useCallback(() => {
+    setImportTab('upload')
+    setImportTitle('')
+    setImportAbstract('')
+    setImportYear('')
+    setImportAuthors('')
+    setImportJournal('')
+    setPendingFile(null)
+    setImportUrl('')
+  }, [])
+
+  // 处理文件选择
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setPendingFile(file)
+      // 默认标题使用文件名（去除扩展名）
+      const fileName = file.name.replace(/\.[^/.]+$/, '')
+      setImportTitle(fileName)
+    }
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }, [])
+
+  // 提交导入
+  const handleImportSubmit = useCallback(async () => {
+    if (importTab === 'upload' && !pendingFile) {
+      addToast({ title: '请选择文件', color: 'warning' })
+      return
+    }
+    if (importTab === 'url' && !importUrl.trim()) {
+      addToast({ title: '请输入 URL', color: 'warning' })
+      return
+    }
+
+    setLoading(true)
+    try {
+      let data: { content: string; fileName: string; fileType: string; fileSize?: number }
+
+      if (importTab === 'upload' && pendingFile) {
+        const formData = new FormData()
+        formData.append('file', pendingFile)
+        const res = await fetch('/api/knowledge/upload', { method: 'POST', body: formData })
+        if (!res.ok) throw new Error('Upload failed')
+        data = await res.json()
+      } else {
+        const formData = new FormData()
+        formData.append('url', importUrl)
+        const res = await fetch('/api/knowledge/upload', { method: 'POST', body: formData })
+        if (!res.ok) throw new Error('Import failed')
+        data = await res.json()
+      }
+
+      const now = new Date().toISOString()
+      const newItem: KnowledgeItem = {
+        id: generateId(),
+        title: importTitle || data.fileName,
+        authors: importAuthors ? importAuthors.split(',').map(a => a.trim()).filter(Boolean) : [],
+        abstract: importAbstract || '',
+        year: importYear || '',
+        journal: importJournal || '',
+        sourceType: importTab === 'url' ? 'url' : 'upload',
+        fileName: data.fileName,
+        fileType: data.fileType,
+        fileSize: data.fileSize,
+        url: importTab === 'url' ? importUrl : undefined,
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      addKnowledgeItem(newItem)
+      setItems(getKnowledgeItems())
+      onImportClose()
+      resetImportForm()
+      addToast({ title: '导入成功', color: 'success' })
+    } catch (error) {
+      console.error('Import error:', error)
+      addToast({ title: '导入失败', color: 'danger' })
+    } finally {
+      setLoading(false)
+    }
+  }, [importTab, pendingFile, importUrl, importTitle, importAbstract, importYear, importAuthors, importJournal, onImportClose, resetImportForm])
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       {/* 头部操作区 */}
@@ -381,16 +340,11 @@ export function KnowledgePanel() {
             type="file"
             accept=".pdf,.doc,.docx"
             style={{ display: 'none' }}
-            onChange={handleFileUpload}
+            onChange={handleFileSelect}
           />
-          <Tooltip content="上传 PDF/Word 文件">
-            <Button size="sm" variant="flat" color="primary" onPress={() => fileInputRef.current?.click()}>
-              <UploadIcon /> 上传
-            </Button>
-          </Tooltip>
-          <Tooltip content="从 URL 导入 PDF">
-            <Button size="sm" variant="flat" onPress={onImportOpen}>
-              <LinkIcon /> URL
+          <Tooltip content="上传文件或从 URL 导入">
+            <Button size="sm" variant="flat" color="primary" onPress={onImportOpen}>
+              <ImportIcon /> 导入
             </Button>
           </Tooltip>
         </div>
@@ -836,25 +790,150 @@ export function KnowledgePanel() {
         </ModalContent>
       </Modal>
 
-      {/* URL 导入弹窗 */}
-      <Modal isOpen={isImportOpen} onClose={onImportClose}>
+      {/* 导入弹窗 */}
+      <Modal isOpen={isImportOpen} onClose={() => { onImportClose(); resetImportForm(); }} size="lg">
         <ModalContent>
-          <ModalHeader>从 URL 导入</ModalHeader>
+          <ModalHeader>导入文献</ModalHeader>
           <ModalBody>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 8 }}>
-              输入 PDF 文件的直接下载链接
+            {/* Tab 切换 */}
+            <div style={{ display: 'flex', gap: 4, marginBottom: 16 }}>
+              <Button
+                size="sm"
+                variant={importTab === 'upload' ? 'solid' : 'flat'}
+                color={importTab === 'upload' ? 'primary' : 'default'}
+                onPress={() => setImportTab('upload')}
+              >
+                <UploadIcon /> 上传文件
+              </Button>
+              <Button
+                size="sm"
+                variant={importTab === 'url' ? 'solid' : 'flat'}
+                color={importTab === 'url' ? 'primary' : 'default'}
+                onPress={() => setImportTab('url')}
+              >
+                <LinkIcon /> URL 导入
+              </Button>
+            </div>
+
+            {/* 上传区域 */}
+            {importTab === 'upload' && (
+              <div style={{ marginBottom: 16 }}>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.doc,.docx"
+                  style={{ display: 'none' }}
+                  onChange={handleFileSelect}
+                />
+                <div
+                  onClick={() => fileInputRef.current?.click()}
+                  style={{
+                    border: '2px dashed var(--border-color)',
+                    borderRadius: 8,
+                    padding: '24px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    transition: 'border-color 0.2s',
+                    background: 'var(--bg-secondary)',
+                  }}
+                >
+                  {pendingFile ? (
+                    <div>
+                      <p style={{ fontSize: 14, color: 'var(--text-primary)', marginBottom: 4 }}>
+                        {pendingFile.name}
+                      </p>
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        {(pendingFile.size / 1024).toFixed(1)} KB
+                      </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <p style={{ fontSize: 14, color: 'var(--text-muted)', marginBottom: 4 }}>
+                        点击选择文件
+                      </p>
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                        支持 PDF、DOC、DOCX 格式
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* URL 输入 */}
+            {importTab === 'url' && (
+              <div style={{ marginBottom: 16 }}>
+                <Input
+                  label="PDF 链接"
+                  placeholder="https://example.com/paper.pdf"
+                  value={importUrl}
+                  onValueChange={setImportUrl}
+                  size="sm"
+                  variant="bordered"
+                />
+              </div>
+            )}
+
+            <Divider style={{ margin: '16px 0' }} />
+
+            {/* 元数据表单 */}
+            <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12 }}>
+              文献信息（可选）
             </p>
-            <Input
-              placeholder="https://example.com/paper.pdf"
-              value={importUrl}
-              onValueChange={setImportUrl}
-              size="sm"
-              variant="bordered"
-            />
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <Input
+                label="标题"
+                placeholder={importTab === 'upload' ? '默认使用文件名' : '请输入标题'}
+                value={importTitle}
+                onValueChange={setImportTitle}
+                size="sm"
+                variant="bordered"
+              />
+              
+              <Input
+                label="作者"
+                placeholder="多个作者用逗号分隔"
+                value={importAuthors}
+                onValueChange={setImportAuthors}
+                size="sm"
+                variant="bordered"
+              />
+
+              <div style={{ display: 'flex', gap: 12 }}>
+                <Input
+                  label="年份"
+                  placeholder="如 2024"
+                  value={importYear}
+                  onValueChange={setImportYear}
+                  size="sm"
+                  variant="bordered"
+                  style={{ flex: 1 }}
+                />
+                <Input
+                  label="期刊/会议"
+                  placeholder="如 Nature"
+                  value={importJournal}
+                  onValueChange={setImportJournal}
+                  size="sm"
+                  variant="bordered"
+                  style={{ flex: 2 }}
+                />
+              </div>
+
+              <Input
+                label="摘要"
+                placeholder="文献摘要（可选）"
+                value={importAbstract}
+                onValueChange={setImportAbstract}
+                size="sm"
+                variant="bordered"
+              />
+            </div>
           </ModalBody>
           <ModalFooter>
-            <Button variant="light" onPress={onImportClose}>取消</Button>
-            <Button color="primary" onPress={handleUrlImport} isLoading={loading}>
+            <Button variant="light" onPress={() => { onImportClose(); resetImportForm(); }}>取消</Button>
+            <Button color="primary" onPress={handleImportSubmit} isLoading={loading}>
               导入
             </Button>
           </ModalFooter>
@@ -871,6 +950,16 @@ function UploadIcon() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="17,8 12,3 7,8" />
       <line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  )
+}
+
+function ImportIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 3v12" />
+      <path d="m8 11 4 4 4-4" />
+      <path d="M8 5H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-4" />
     </svg>
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
 import Dexie, { type EntityTable } from 'dexie'
-import type { PDFDocumentCache, PDFPageCache, TranslationCache, TextBlock, PDFAnnotation } from './types'
+import type { PDFDocumentCache, PDFPageCache, TranslationCache, TextBlock, PDFAnnotation, GuideCache } from './types'
 
 // PDF 文件缓存（存储原始 PDF blob）
 interface PDFFileCache {
@@ -19,15 +19,17 @@ const db = new Dexie('PaperReaderPDF') as Dexie & {
   pages: EntityTable<PDFPageCache, 'id'>
   translations: EntityTable<TranslationCache, 'id'>
   annotations: EntityTable<PDFAnnotation, 'id'>
+  guides: EntityTable<GuideCache, 'id'>
 }
 
 // 初始化数据库
-db.version(3).stores({
+db.version(4).stores({
   files: 'id, cachedAt',
   documents: 'id, knowledgeItemId, parsedAt',
   pages: 'id, documentId, pageNum',
   translations: 'id, documentId, translatedAt',
   annotations: 'id, documentId, pageNum, createdAt',
+  guides: 'id, documentId, knowledgeItemId, generatedAt',
 })
 
 // ============ PDF 文件缓存操作 ============
@@ -74,6 +76,13 @@ export async function deletePDFFile(id: string): Promise<void> {
  */
 export async function savePDFDocument(doc: PDFDocumentCache): Promise<void> {
   await db.documents.put(doc)
+}
+
+export async function updatePDFDocument(id: string, updates: Partial<PDFDocumentCache>): Promise<void> {
+  await db.documents.update(id, {
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  })
 }
 
 /**
@@ -268,6 +277,142 @@ export async function deleteAnnotation(id: string): Promise<void> {
  */
 export async function deleteAnnotationsByDocumentId(documentId: string): Promise<void> {
   await db.annotations.where('documentId').equals(documentId).delete()
+}
+
+// ============ 全文内容输出 ============
+
+/**
+ * 获取文档的全文内容
+ * 优先从文档缓存的 fullText 字段获取，否则拼接所有页面的 fullText
+ */
+export async function getFullTextByKnowledgeId(knowledgeItemId: string): Promise<string | null> {
+  const doc = await getPDFDocumentByKnowledgeId(knowledgeItemId)
+  if (!doc) return null
+
+  // 优先使用文档级别的 fullText
+  if (doc.fullText && doc.fullText.trim()) {
+    return doc.fullText
+  }
+
+  // 否则拼接所有页面的 fullText
+  const pages = await getPDFPagesByDocumentId(doc.id)
+  if (pages.length === 0) return null
+
+  return pages
+    .sort((a, b) => a.pageNum - b.pageNum)
+    .map(p => p.fullText || p.blocks.map(b => b.text).join('\n'))
+    .join('\n\n')
+}
+
+/**
+ * 获取文档的所有文本块（按页码排序）
+ */
+export async function getAllBlocksByKnowledgeId(knowledgeItemId: string): Promise<TextBlock[]> {
+  const doc = await getPDFDocumentByKnowledgeId(knowledgeItemId)
+  if (!doc) return []
+
+  const pages = await getPDFPagesByDocumentId(doc.id)
+  if (pages.length === 0) return []
+
+  return pages
+    .sort((a, b) => a.pageNum - b.pageNum)
+    .flatMap(p => p.blocks)
+}
+
+/**
+ * 获取文档的结构化内容（按段落分组）
+ */
+export async function getStructuredContentByKnowledgeId(knowledgeItemId: string): Promise<{
+  fullText: string
+  blocks: TextBlock[]
+  structure: {
+    title: string
+    sections: { id: string; title: string; blockIds: string[] }[]
+  }
+} | null> {
+  const doc = await getPDFDocumentByKnowledgeId(knowledgeItemId)
+  if (!doc) return null
+
+  const pages = await getPDFPagesByDocumentId(doc.id)
+  if (pages.length === 0) return null
+
+  const sortedPages = pages.sort((a, b) => a.pageNum - b.pageNum)
+  const allBlocks = sortedPages.flatMap(p => p.blocks)
+  const fullText = doc.fullText || sortedPages
+    .map(p => p.fullText || p.blocks.map(b => b.text).join('\n'))
+    .join('\n\n')
+
+  // 简单的结构提取：基于标题类型的块
+  const sections: { id: string; title: string; blockIds: string[] }[] = []
+  let currentSection: { id: string; title: string; blockIds: string[] } | null = null
+
+  for (const block of allBlocks) {
+    if (block.type === 'title' || block.type === 'subtitle') {
+      if (currentSection) {
+        sections.push(currentSection)
+      }
+      currentSection = {
+        id: block.id,
+        title: block.text.slice(0, 100),
+        blockIds: [block.id]
+      }
+    } else if (currentSection) {
+      currentSection.blockIds.push(block.id)
+    }
+  }
+
+  if (currentSection) {
+    sections.push(currentSection)
+  }
+
+  return {
+    fullText,
+    blocks: allBlocks,
+    structure: {
+      title: doc.metadata.title || '未知标题',
+      sections
+    }
+  }
+}
+
+// ============ AI导读缓存操作 ============
+
+/**
+ * 保存 AI导读 缓存
+ */
+export async function saveGuide(guide: GuideCache): Promise<void> {
+  await db.guides.put(guide)
+}
+
+/**
+ * 获取 AI导读 缓存
+ */
+export async function getGuide(documentId: string): Promise<GuideCache | undefined> {
+  return await db.guides.where('documentId').equals(documentId).first()
+}
+
+/**
+ * 根据知识库条目 ID 获取 AI导读 缓存
+ */
+export async function getGuideByKnowledgeId(knowledgeItemId: string): Promise<GuideCache | undefined> {
+  return await db.guides.where('knowledgeItemId').equals(knowledgeItemId).first()
+}
+
+/**
+ * 更新 AI导读 缓存
+ */
+export async function updateGuide(id: string, updates: Partial<GuideCache>): Promise<void> {
+  await db.guides.update(id, {
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+/**
+ * 删除 AI导读 缓存
+ */
+export async function deleteGuide(documentId: string): Promise<void> {
+  await db.guides.where('documentId').equals(documentId).delete()
 }
 
 export { db }

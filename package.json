@@ -5,6 +5,7 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "next dev",
+    "dev:turbo": "next dev --turbo",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
@@ -24,11 +25,14 @@
     "@blocknote/xl-ai": "^0.47.1",
     "@heroui/react": "^2.8.10",
     "@iconify/react": "^6.0.2",
+    "@xyflow/react": "^12.10.1",
     "ai": "^6.0.116",
+    "chromadb": "^3.3.3",
     "dexie": "^4.3.0",
     "framer-motion": "^12.35.2",
     "mathlive": "^0.108.3",
     "next": "^15.3.0",
+    "openai": "^6.27.0",
     "pdfjs-dist": "^5.5.207",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

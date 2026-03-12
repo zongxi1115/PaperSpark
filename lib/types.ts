@@ -1,9 +1,23 @@
+// 文章作者类型
+export interface ArticleAuthor {
+  id: string
+  name: string
+  affiliation: string // 单位
+  email: string
+}
+
 export interface AppDocument {
   id: string
-  title: string
+  title: string // 文档标题（列表显示用）
   content: unknown[]
   createdAt: string
   updatedAt: string
+  // 文章元数据
+  articleTitle?: string // 文章标题
+  articleAuthors?: ArticleAuthor[] // 作者列表
+  articleAbstract?: string // 摘要
+  articleKeywords?: string[] // 关键词
+  articleDate?: string // 文章日期
 }
 
 export interface ModelConfig {
@@ -168,6 +182,53 @@ export interface KnowledgeState {
   zoteroConfig: ZoteroConfig | null
 }
 
+// ============ 资产库相关类型 ============
+
+// 预设资产类型
+export const PRESET_ASSET_TYPES = [
+  { id: 'material', name: '素材', icon: 'solar:document-bold', color: '#3b82f6', description: '收集的资料、素材' },
+  { id: 'note', name: '随记', icon: 'solar:pen-bold', color: '#10b981', description: '随笔、想法记录' },
+] as const
+
+// 资产类型定义（用户可自定义扩展）
+export interface AssetType {
+  id: string
+  name: string
+  icon: string // emoji 或图标名
+  color: string // 主题色
+  description?: string
+  customFields?: AssetField[] // 自定义字段
+  isPreset?: boolean // 是否为预设类型
+  createdAt: string
+  updatedAt: string
+}
+
+// 自定义字段定义
+export interface AssetField {
+  id: string
+  name: string
+  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'tags'
+  required?: boolean
+  options?: string[] // select 类型的选项
+  placeholder?: string
+}
+
+// 资产项
+export interface AssetItem {
+  id: string
+  title: string
+  typeId: string // 关联的资产类型 ID
+  summary?: string // AI 生成的概述
+  content: unknown[] // BlockNote 内容
+  // 自定义字段值
+  fieldValues?: Record<string, string | string[] | number>
+  // 标签
+  tags?: string[]
+  createdAt: string
+  updatedAt: string
+  aiProcessedAt?: string // AI 处理时间
+}
+
 // 随记想法类型
 export interface Thought {
   id: string
@@ -257,7 +318,16 @@ export interface TextBlock {
   style: TextStyle
   pageNum: number
   itemIds: string[] // 包含的原始 TextItem id
+  sourceLabel?: string
+  confidence?: number
+  lineCount?: number
+  order?: number
+  sourcePageWidth?: number
+  sourcePageHeight?: number
 }
+
+export type PDFParserSource = 'pdfjs' | 'surya'
+export type PDFParseStatus = 'processing' | 'completed' | 'failed'
 
 // PDF 页面缓存
 export interface PDFPageCache {
@@ -267,6 +337,7 @@ export interface PDFPageCache {
   width: number
   height: number
   blocks: TextBlock[]
+  fullText?: string
   createdAt: string
   updatedAt: string
 }
@@ -289,6 +360,11 @@ export interface PDFDocumentCache {
   fileName: string
   pageCount: number
   metadata: PDFMetadata
+  parser?: PDFParserSource
+  parseStatus?: PDFParseStatus
+  parseError?: string
+  fullText?: string
+  structureCounts?: Record<string, number>
   parsedAt: string
   updatedAt: string
 }
@@ -331,11 +407,11 @@ export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple'
 
 // 高亮颜色映射
 export const HIGHLIGHT_COLORS: Record<HighlightColor, { bg: string; border: string }> = {
-  yellow: { bg: 'rgba(255, 235, 59, 0.4)', border: 'rgba(255, 193, 7, 0.8)' },
-  green: { bg: 'rgba(76, 175, 80, 0.3)', border: 'rgba(76, 175, 80, 0.8)' },
-  blue: { bg: 'rgba(33, 150, 243, 0.3)', border: 'rgba(33, 150, 243, 0.8)' },
-  pink: { bg: 'rgba(233, 30, 99, 0.25)', border: 'rgba(233, 30, 99, 0.8)' },
-  purple: { bg: 'rgba(156, 39, 176, 0.3)', border: 'rgba(156, 39, 176, 0.8)' },
+  yellow: { bg: 'rgba(255, 235, 59, 0.18)', border: 'rgba(245, 158, 11, 0.62)' },
+  green: { bg: 'rgba(76, 175, 80, 0.16)', border: 'rgba(34, 197, 94, 0.58)' },
+  blue: { bg: 'rgba(33, 150, 243, 0.14)', border: 'rgba(59, 130, 246, 0.6)' },
+  pink: { bg: 'rgba(233, 30, 99, 0.12)', border: 'rgba(236, 72, 153, 0.58)' },
+  purple: { bg: 'rgba(156, 39, 176, 0.14)', border: 'rgba(168, 85, 247, 0.58)' },
 }
 
 // 批注类型
@@ -375,4 +451,124 @@ export interface TranslationStreamEvent {
     error?: string
     done?: boolean
   }
+}
+
+// ============ AI导读相关类型 ============
+
+// 思维导图节点类型
+export type MindMapNodeType = 'root' | 'section' | 'paragraph'
+
+// 思维导图节点（树形结构）
+export interface MindMapNode {
+  id: string
+  type: MindMapNodeType
+  label: string
+  blockId?: string // 关联的文本块ID（用于跳转）
+  pageNum?: number // 页码
+  children?: MindMapNode[]
+}
+
+// React Flow 节点数据
+export interface FlowNodeData {
+  label: string
+  blockId?: string
+  pageNum?: number
+  type: MindMapNodeType
+}
+
+// AI导读概要
+export interface AIGuideSummary {
+  background: string // 研究背景
+  methods: string // 核心方法
+  conclusions: string // 主要结论
+  keyPoints: string[] // 关键要点列表
+}
+
+// 段落关键要点
+export interface BlockKeyPoints {
+  blockId: string
+  text: string // 原文片段
+  keyPoints: string[] // 3-5个关键要点
+  pageNum: number
+}
+
+// AI导读完整数据
+export interface AIGuideData {
+  summary: AIGuideSummary
+  structure: MindMapNode[]
+  blockKeyPoints: BlockKeyPoints[]
+}
+
+// AI导读缓存
+export interface GuideCache {
+  id: string // `${documentId}_guide`
+  documentId: string
+  knowledgeItemId: string
+  summary: AIGuideSummary
+  structure: MindMapNode[]
+  blockKeyPoints: BlockKeyPoints[]
+  modelUsed: string
+  generatedAt: string
+  updatedAt: string
+}
+
+// AI导读请求类型
+export type AIGuideAction = 'summary' | 'structure' | 'keypoints' | 'all'
+
+// AI导读请求体
+export interface AIGuideRequest {
+  documentId: string
+  knowledgeItemId: string
+  blocks: TextBlock[]
+  fullText?: string
+  modelConfig: ModelConfig
+  action: AIGuideAction
+}
+
+// AI导读响应
+export interface AIGuideResponse {
+  success: boolean
+  summary?: AIGuideSummary
+  structure?: MindMapNode[]
+  blockKeyPoints?: BlockKeyPoints[]
+  error?: string
+}
+
+// ============ RAG 向量存储相关类型 ============
+
+// 向量文档
+export interface VectorDocument {
+  id: string
+  documentId: string
+  blockId: string
+  text: string
+  embedding?: number[]
+  metadata: {
+    pageNum: number
+    type: TextBlockType
+    bbox: BoundingBox
+  }
+}
+
+// RAG 搜索请求
+export interface RAGSearchRequest {
+  documentId: string
+  query: string
+  topK?: number
+}
+
+// RAG 搜索结果
+export interface RAGSearchResult {
+  blockId: string
+  text: string
+  score: number
+  pageNum: number
+  type: TextBlockType
+}
+
+// RAG 嵌入请求
+export interface RAGEmbedRequest {
+  documentId: string
+  blocks: TextBlock[]
+  modelConfig: ModelConfig
 }

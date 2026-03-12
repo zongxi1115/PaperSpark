@@ -1,8 +1,9 @@
 'use client'
 
+import { Popover, PopoverContent, PopoverTrigger } from '@heroui/react'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { TextBlock, PDFAnnotation, HIGHLIGHT_COLORS, HighlightColor } from '@/lib/types'
-import { saveAnnotation } from '@/lib/pdfCache'
+import { saveAnnotation, updateAnnotation } from '@/lib/pdfCache'
 
 // PDF.js 类型定义
 interface PDFDocumentProxy {
@@ -112,6 +113,122 @@ interface PDFViewerProps {
   annotations?: PDFAnnotation[]
   onAnnotationAdd?: (annotation: PDFAnnotation) => void
   onAnnotationDelete?: (id: string) => void
+  onAnnotationUpdate?: (annotation: PDFAnnotation) => void
+  jumpToBlock?: { blockId: string; pageNum: number } | null
+}
+
+interface TranslationLayout {
+  left: number
+  top: number
+  width: number
+  height: number
+  fontSize: number
+  lineHeight: number
+}
+
+let translationMeasureContext: CanvasRenderingContext2D | null = null
+
+function getTranslationMeasureContext() {
+  if (translationMeasureContext || typeof document === 'undefined') {
+    return translationMeasureContext
+  }
+
+  const canvas = document.createElement('canvas')
+  translationMeasureContext = canvas.getContext('2d')
+  return translationMeasureContext
+}
+
+function wrapTextToWidth(text: string, width: number, fontSize: number, fontFamily: string) {
+  const context = getTranslationMeasureContext()
+  if (!context || width <= 0) {
+    return text.split(/\n+/).filter(Boolean)
+  }
+
+  context.font = `${fontSize}px ${fontFamily}`
+  const paragraphs = text.split(/\n+/).filter(Boolean)
+  const lines: string[] = []
+
+  paragraphs.forEach(paragraph => {
+    let current = ''
+    for (const char of Array.from(paragraph)) {
+      const candidate = `${current}${char}`
+      if (current && context.measureText(candidate).width > width) {
+        lines.push(current)
+        current = char.trim() ? char : ''
+      } else {
+        current = candidate
+      }
+    }
+
+    if (current.trim()) {
+      lines.push(current)
+    }
+  })
+
+  return lines.length > 0 ? lines : [text]
+}
+
+function buildTranslationLayout(block: TextBlock, scale: number, viewport: PDFViewport): TranslationLayout {
+  const paddingX = 6
+  const paddingY = 4
+  const xScale = block.sourcePageWidth
+    ? viewport.width / block.sourcePageWidth
+    : scale
+  const yScale = block.sourcePageHeight
+    ? viewport.height / block.sourcePageHeight
+    : scale
+  const unitScale = Math.min(xScale, yScale)
+  const left = block.bbox.x * xScale
+  const top = block.bbox.y * yScale
+  const width = Math.max(
+    48,
+    Math.min(block.bbox.width * xScale, viewport.width - left - 8),
+  )
+  const height = Math.max(
+    20,
+    Math.min(block.bbox.height * yScale, viewport.height - top - 8),
+  )
+  const contentWidth = Math.max(24, width - paddingX * 2)
+  const contentHeight = Math.max(12, height - paddingY * 2)
+  const fontFamily = block.style.fontFamily || 'serif'
+  const preferredFontSize = Math.max(
+    10,
+    Math.min(block.style.fontSize * unitScale * 0.82, contentHeight),
+  )
+  const minFontSize = Math.max(8, Math.min(12, preferredFontSize))
+  let low = minFontSize
+  let high = preferredFontSize
+  let bestFontSize = minFontSize
+  let bestLineHeight = minFontSize * 1.45
+
+  for (let i = 0; i < 7; i++) {
+    const candidateFontSize = (low + high) / 2
+    const candidateLineHeight = candidateFontSize * 1.45
+    const wrappedLines = wrapTextToWidth(
+      block.translated || '',
+      contentWidth,
+      candidateFontSize,
+      fontFamily,
+    )
+    const totalHeight = wrappedLines.length * candidateLineHeight
+
+    if (totalHeight <= contentHeight) {
+      bestFontSize = candidateFontSize
+      bestLineHeight = candidateLineHeight
+      low = candidateFontSize
+    } else {
+      high = candidateFontSize
+    }
+  }
+
+  return {
+    left,
+    top,
+    width,
+    height,
+    fontSize: bestFontSize,
+    lineHeight: bestLineHeight / bestFontSize,
+  }
 }
 
 // 单个页面组件
@@ -123,6 +240,8 @@ function PDFPage({
   showTranslation,
   annotations,
   onAnnotationAdd,
+  onAnnotationDelete,
+  onAnnotationUpdate,
 }: {
   page: PDFPageProxy
   scale: number
@@ -131,15 +250,28 @@ function PDFPage({
   showTranslation?: boolean
   annotations?: PDFAnnotation[]
   onAnnotationAdd?: (annotation: PDFAnnotation) => void
+  onAnnotationDelete?: (id: string) => void
+  onAnnotationUpdate?: (annotation: PDFAnnotation) => void
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
-  const highlightLayerRef = useRef<HTMLDivElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const [rendered, setRendered] = useState(false)
   const [selection, setSelection] = useState<{ text: string; rects: DOMRect[] } | null>(null)
   const [showHighlightMenu, setShowHighlightMenu] = useState(false)
   const [highlightPosition, setHighlightPosition] = useState({ x: 0, y: 0 })
+  const [noteMenuOpen, setNoteMenuOpen] = useState(false)
+  const [noteText, setNoteText] = useState('')
+  const [noteSelectedColor, setNoteSelectedColor] = useState<HighlightColor>('yellow')
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null)
+  const [freeNoteDraft, setFreeNoteDraft] = useState<{
+    annotationId?: string
+    x: number
+    y: number
+    rect: { x: number; y: number; width: number; height: number }
+  } | null>(null)
+  const freeNoteDismissRef = useRef(false)
 
   // 获取设备像素比
   const pixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
@@ -159,7 +291,6 @@ function PDFPage({
       const context = canvas.getContext('2d')
       if (!context) return
       const textLayer = textLayerRef.current
-      const highlightLayer = highlightLayerRef.current
       const outputScale = pixelRatio || 1
       const pdfjs = await getPdfjs()
 
@@ -174,12 +305,6 @@ function PDFPage({
       textLayer.style.width = `${viewport.width}px`
       textLayer.style.height = `${viewport.height}px`
       textLayer.style.setProperty('--scale-factor', `${scale}`)
-
-      if (highlightLayer) {
-        highlightLayer.replaceChildren()
-        highlightLayer.style.width = `${viewport.width}px`
-        highlightLayer.style.height = `${viewport.height}px`
-      }
 
       canvasRenderTask = page.render({
         canvasContext: context,
@@ -216,76 +341,73 @@ function PDFPage({
     }
   }, [page, scale, pixelRatio])
 
-  // 渲染高亮
-  useEffect(() => {
-    if (!highlightLayerRef.current) return
-
-    const highlightLayer = highlightLayerRef.current
-    highlightLayer.replaceChildren()
-    if (!annotations?.length) return
-
-    annotations.forEach(ann => {
-      ann.rects.forEach(rect => {
-        const div = document.createElement('div')
-        div.className = 'highlight-rect'
-        div.style.cssText = `
-          position: absolute;
-          left: ${rect.x * scale}px;
-          top: ${rect.y * scale}px;
-          width: ${rect.width * scale}px;
-          height: ${rect.height * scale}px;
-          background-color: ${HIGHLIGHT_COLORS[ann.color].bg};
-          border-left: 3px solid ${HIGHLIGHT_COLORS[ann.color].border};
-          pointer-events: none;
-        `
-        div.dataset.annotationId = ann.id
-        highlightLayer.appendChild(div)
-      })
-    })
-  }, [annotations, scale])
-
   // 文本选择处理
   const handleMouseUp = useCallback((e: React.MouseEvent) => {
-    const selected = window.getSelection()
-    if (!selected || selected.isCollapsed) {
-      setSelection(null)
-      setShowHighlightMenu(false)
-      return
-    }
+    // 点击菜单内部时不触发
+    if (menuRef.current?.contains(e.target as Node)) return
 
-    const text = selected.toString().trim()
-    if (!text) {
-      setSelection(null)
-      setShowHighlightMenu(false)
-      return
-    }
+    window.requestAnimationFrame(() => {
+      const selected = window.getSelection()
+      if (!selected || selected.isCollapsed) {
+        setSelection(null)
+        setShowHighlightMenu(false)
+        setNoteMenuOpen(false)
+        setNoteText('')
+        return
+      }
 
-    const range = selected.getRangeAt(0)
-    const rects = Array.from(range.getClientRects())
+      const text = selected.toString().trim()
+      if (!text) {
+        setSelection(null)
+        setShowHighlightMenu(false)
+        setNoteMenuOpen(false)
+        setNoteText('')
+        return
+      }
 
-    if (rects.length > 0 && containerRef.current) {
-      const containerRect = containerRef.current.getBoundingClientRect()
-      setSelection({ text, rects })
-      setHighlightPosition({
-        x: rects[0].left - containerRect.left + rects[0].width / 2,
-        y: rects[0].top - containerRect.top - 40,
-      })
-      setShowHighlightMenu(true)
-    }
+      const range = selected.getRangeAt(0)
+      const rects = Array.from(range.getClientRects())
+
+      if (rects.length > 0 && containerRef.current) {
+        const containerRect = containerRef.current.getBoundingClientRect()
+        const anchorRect = rects[rects.length - 1]
+        const nextX = Math.min(
+          Math.max(anchorRect.right - containerRect.left + 10, 8),
+          Math.max(containerRef.current.clientWidth - 210, 8),
+        )
+        const nextY = Math.min(
+          Math.max(anchorRect.top - containerRect.top - 6, 8),
+          Math.max(containerRef.current.clientHeight - 52, 8),
+        )
+
+        setSelection({ text, rects })
+        setFreeNoteDraft(null)
+        setHighlightPosition({
+          x: nextX,
+          y: nextY,
+        })
+        setShowHighlightMenu(true)
+      }
+    })
   }, [])
 
-  // 添加高亮
-  const handleAddHighlight = useCallback(async (color: HighlightColor) => {
-    if (!selection || !canvasRef.current) return
-
+  // 从选区计算坐标
+  const buildRectsFromSelection = useCallback(() => {
+    if (!selection || !canvasRef.current) return null
     const viewportRect = canvasRef.current.getBoundingClientRect()
-
-    const rects = selection.rects.map(rect => ({
+    return selection.rects.map(rect => ({
       x: (rect.left - viewportRect.left) / scale,
       y: (rect.top - viewportRect.top) / scale,
       width: rect.width / scale,
       height: rect.height / scale,
     }))
+  }, [selection, scale])
+
+  // 添加高亮
+  const handleAddHighlight = useCallback(async (color: HighlightColor) => {
+    if (!selection || !canvasRef.current) return
+    const rects = buildRectsFromSelection()
+    if (!rects) return
 
     const annotation: PDFAnnotation = {
       id: `ann_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
@@ -304,11 +426,165 @@ function PDFPage({
     await saveAnnotation(annotation)
     onAnnotationAdd?.(annotation)
     setShowHighlightMenu(false)
+    setNoteMenuOpen(false)
+    setNoteText('')
+    setFreeNoteDraft(null)
     setSelection(null)
     window.getSelection()?.removeAllRanges()
-  }, [selection, page.pageNumber, scale, documentId, onAnnotationAdd])
+  }, [selection, page.pageNumber, documentId, onAnnotationAdd, buildRectsFromSelection])
+
+  // 添加笔记（带高亮 + 文字内容）
+  const handleAddNote = useCallback(async () => {
+    if (!selection || !canvasRef.current) return
+    const rects = buildRectsFromSelection()
+    if (!rects) return
+
+    const annotation: PDFAnnotation = {
+      id: `ann_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      documentId: documentId || '',
+      type: 'note',
+      pageNum: page.pageNumber,
+      selectedText: selection.text,
+      startOffset: 0,
+      endOffset: selection.text.length,
+      rects,
+      color: noteSelectedColor,
+      content: noteText,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    await saveAnnotation(annotation)
+    onAnnotationAdd?.(annotation)
+    setShowHighlightMenu(false)
+    setNoteMenuOpen(false)
+    setNoteText('')
+    setNoteSelectedColor('yellow')
+    setFreeNoteDraft(null)
+    setSelection(null)
+    window.getSelection()?.removeAllRanges()
+  }, [selection, page.pageNumber, documentId, onAnnotationAdd, buildRectsFromSelection, noteText, noteSelectedColor])
+
+  const resetFreeNoteDraft = useCallback(() => {
+    setFreeNoteDraft(null)
+    setNoteText('')
+    setNoteSelectedColor('yellow')
+    freeNoteDismissRef.current = false
+  }, [])
+
+  const handleAddFreeNote = useCallback(async () => {
+    if (!freeNoteDraft || !canvasRef.current || !noteText.trim()) return
+
+    if (freeNoteDraft.annotationId) {
+      const existingAnnotation = annotations?.find(annotation => annotation.id === freeNoteDraft.annotationId)
+      const updatedAnnotation: PDFAnnotation = {
+        id: freeNoteDraft.annotationId,
+        documentId: documentId || '',
+        type: 'note',
+        pageNum: page.pageNumber,
+        selectedText: '',
+        startOffset: 0,
+        endOffset: 0,
+        rects: [freeNoteDraft.rect],
+        color: noteSelectedColor,
+        content: noteText,
+        createdAt: existingAnnotation?.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+
+      await updateAnnotation(freeNoteDraft.annotationId, {
+        color: noteSelectedColor,
+        content: noteText,
+        rects: [freeNoteDraft.rect],
+      })
+      onAnnotationUpdate?.(updatedAnnotation)
+      resetFreeNoteDraft()
+      return
+    }
+
+    const annotation: PDFAnnotation = {
+      id: `ann_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      documentId: documentId || '',
+      type: 'note',
+      pageNum: page.pageNumber,
+      selectedText: '',
+      startOffset: 0,
+      endOffset: 0,
+      rects: [freeNoteDraft.rect],
+      color: noteSelectedColor,
+      content: noteText,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    await saveAnnotation(annotation)
+    onAnnotationAdd?.(annotation)
+    resetFreeNoteDraft()
+  }, [annotations, documentId, freeNoteDraft, noteSelectedColor, noteText, onAnnotationAdd, onAnnotationUpdate, page.pageNumber, resetFreeNoteDraft])
+
+  const handleEditFreeNote = useCallback((annotation: PDFAnnotation) => {
+    const rect = annotation.rects[0]
+    if (!rect || !containerRef.current) return
+
+    setActiveNoteId(null)
+    setShowHighlightMenu(false)
+    setSelection(null)
+    setNoteMenuOpen(false)
+    setNoteText(annotation.content || '')
+    setNoteSelectedColor(annotation.color)
+    setFreeNoteDraft({
+      annotationId: annotation.id,
+      x: rect.x * scale,
+      y: rect.y * scale,
+      rect,
+    })
+  }, [scale])
+
+  const handleDeleteFreeNote = useCallback(() => {
+    if (!freeNoteDraft?.annotationId) {
+      resetFreeNoteDraft()
+      return
+    }
+
+    onAnnotationDelete?.(freeNoteDraft.annotationId)
+    resetFreeNoteDraft()
+  }, [freeNoteDraft?.annotationId, onAnnotationDelete, resetFreeNoteDraft])
+
+  const handleBlankAreaDoubleClick = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    if (menuRef.current?.contains(event.target as Node)) return
+    if (selection) return
+    if (window.getSelection()?.toString().trim()) return
+
+    const target = event.target as HTMLElement
+    if (target.closest('[data-annotation-hit="true"]')) return
+    if (target.tagName.toLowerCase() === 'span' && target.closest('.pdf-text-layer')) return
+
+    if (!containerRef.current) return
+
+    const containerRect = containerRef.current.getBoundingClientRect()
+    const clickX = event.clientX - containerRect.left
+    const clickY = event.clientY - containerRect.top
+
+    setActiveNoteId(null)
+    setShowHighlightMenu(false)
+    setNoteMenuOpen(false)
+    setSelection(null)
+    setNoteText('')
+    setFreeNoteDraft({
+      x: Math.min(Math.max(clickX, 8), Math.max(containerRef.current.clientWidth - 248, 8)),
+      y: Math.min(Math.max(clickY, 8), Math.max(containerRef.current.clientHeight - 156, 8)),
+      rect: {
+        x: Math.max(clickX / scale, 0),
+        y: Math.max(clickY / scale, 0),
+        width: 236 / scale,
+        height: 148 / scale,
+      },
+    })
+  }, [scale, selection])
 
   const viewport = page.getViewport({ scale })
+  const activeNoteAnnotation = annotations?.find(annotation => annotation.id === activeNoteId && annotation.content)
+  const activeNoteAnchorRect = activeNoteAnnotation?.rects[0]
 
   // 渲染翻译覆盖层
   const pageBlocks = blocks?.filter(b => b.pageNum === page.pageNumber && b.translated && showTranslation) || []
@@ -317,64 +593,318 @@ function PDFPage({
     <div
       ref={containerRef}
       className="pdf-page relative bg-white shadow-lg mb-4"
+      data-page-number={page.pageNumber}
       style={{ width: viewport.width, height: viewport.height }}
       onMouseUp={handleMouseUp}
+      onDoubleClick={handleBlankAreaDoubleClick}
     >
       <canvas ref={canvasRef} className="pdf-canvas block" />
-      
-      <div
-        ref={highlightLayerRef}
-        className="absolute inset-0 overflow-hidden pointer-events-none z-[1]"
-      />
 
       <div
         ref={textLayerRef}
-        className="pdf-text-layer absolute inset-0 overflow-hidden select-text z-[2]"
+        className="pdf-text-layer absolute inset-0 overflow-hidden select-text z-2"
       />
 
-      {/* 翻译覆盖层 */}
-      {pageBlocks.map(block => (
-        <div
-          key={block.id}
-          className="translation-overlay"
-          style={{
-            position: 'absolute',
-            left: block.bbox.x * scale,
-            top: block.bbox.y * scale,
-            width: Math.min(block.bbox.width * scale, viewport.width - block.bbox.x * scale - 20),
-            fontSize: `${block.style.fontSize * scale * 0.85}px`,
-            color: '#1a1a1a',
-            backgroundColor: 'rgba(255, 255, 255, 0.92)',
-            padding: '3px 6px',
-            borderRadius: '2px',
-            pointerEvents: 'none',
-            zIndex: 10,
-            lineHeight: 1.5,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-          }}
-        >
-          {block.translated}
-        </div>
-      ))}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none z-3">
+        {annotations?.map(annotation => (
+          annotation.rects.map((rect, rectIndex) => {
+            const isNote = annotation.type === 'note' && Boolean(annotation.content)
+            const isPointNote = isNote && !annotation.selectedText
+            return (
+              isPointNote ? (
+                <div
+                  key={`${annotation.id}-${rectIndex}`}
+                  data-annotation-hit="true"
+                  className="absolute pointer-events-auto"
+                  style={{
+                    left: rect.x * scale,
+                    top: rect.y * scale,
+                    width: rect.width * scale,
+                    minHeight: rect.height * scale,
+                  }}
+                  title="双击编辑文本批注"
+                  onDoubleClick={event => {
+                    event.preventDefault()
+                    event.stopPropagation()
+                    handleEditFreeNote(annotation)
+                  }}
+                >
+                  <div
+                    className="text-xs leading-relaxed whitespace-pre-wrap wrap-break-word"
+                    style={{
+                      color: HIGHLIGHT_COLORS[annotation.color].border,
+                      textShadow: '0 1px 2px rgba(255,255,255,0.8)',
+                    }}
+                  >
+                    {annotation.content}
+                  </div>
+                </div>
+              ) : (
+                <button
+                  key={`${annotation.id}-${rectIndex}`}
+                  type="button"
+                  data-annotation-hit="true"
+                  className={`absolute rounded-sm transition-opacity ${isNote ? 'pointer-events-auto cursor-pointer hover:opacity-90' : 'pointer-events-none'}`}
+                  style={{
+                    left: rect.x * scale,
+                    top: rect.y * scale,
+                    width: rect.width * scale,
+                    height: rect.height * scale,
+                    backgroundColor: HIGHLIGHT_COLORS[annotation.color].bg,
+                    borderRadius: 3,
+                    boxShadow: `inset 0 0 0 1px ${HIGHLIGHT_COLORS[annotation.color].border}`,
+                  }}
+                  title={isNote ? '点击查看批注' : undefined}
+                  onClick={event => {
+                    if (isNote) {
+                      event.preventDefault()
+                      event.stopPropagation()
+                      setActiveNoteId(current => current === annotation.id ? null : annotation.id)
+                    }
+                  }}
+                />
+              )
+            )
+          })
+        ))}
 
-      {/* 高亮菜单 */}
+        {activeNoteAnnotation && activeNoteAnchorRect && (
+          <Popover
+            isOpen
+            placement="top"
+            showArrow
+            offset={12}
+            onOpenChange={open => {
+              if (!open) {
+                setActiveNoteId(null)
+              }
+            }}
+          >
+            <PopoverTrigger>
+              <button
+                type="button"
+                aria-label="annotation-note-anchor"
+                className="absolute opacity-0 pointer-events-none"
+                style={{
+                  left: activeNoteAnchorRect.x * scale,
+                  top: activeNoteAnchorRect.y * scale,
+                  width: Math.max(activeNoteAnchorRect.width * scale, 1),
+                  height: Math.max(activeNoteAnchorRect.height * scale, 1),
+                }}
+              />
+            </PopoverTrigger>
+            <PopoverContent className="max-w-72 bg-[#161a23] border border-[#2b3242] px-3 py-2">
+              <div className="space-y-1.5">
+                <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                  <span
+                    className="inline-block h-2.5 w-2.5 rounded-full"
+                    style={{ backgroundColor: HIGHLIGHT_COLORS[activeNoteAnnotation.color].border }}
+                  />
+                  <span>第 {activeNoteAnnotation.pageNum} 页批注</span>
+                </div>
+                <p className="text-xs leading-relaxed text-gray-200">
+                  {activeNoteAnnotation.content}
+                </p>
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
+      </div>
+
+      {/* 翻译覆盖层 */}
+      {pageBlocks.map(block => {
+        const layout = buildTranslationLayout(block, scale, viewport)
+
+        return (
+          <div
+            key={block.id}
+            className="translation-overlay"
+            style={{
+              position: 'absolute',
+              left: layout.left,
+              top: layout.top,
+              width: layout.width,
+              height: layout.height,
+              fontSize: `${layout.fontSize}px`,
+              color: '#1a1a1a',
+              backgroundColor: 'rgba(255, 255, 255, 0.92)',
+              padding: '4px 6px',
+              borderRadius: '3px',
+              pointerEvents: 'none',
+              zIndex: 10,
+              lineHeight: layout.lineHeight,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+              overflow: 'hidden',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontWeight: block.type === 'title' || block.type === 'subtitle' ? 600 : 400,
+            }}
+          >
+            {block.translated}
+          </div>
+        )
+      })}
+
+      {/* 高亮 & 笔记菜单 */}
       {showHighlightMenu && selection && (
         <div
-          className="highlight-menu absolute bg-gray-800 rounded-lg shadow-xl flex items-center gap-1 p-1 z-50"
+          ref={menuRef}
+          className="highlight-menu absolute bg-[#1e1e2e] border border-gray-700 rounded-xl shadow-2xl p-2 z-50"
           style={{
             left: highlightPosition.x,
             top: highlightPosition.y,
-            transform: 'translateX(-50%)',
+            minWidth: '190px',
+            maxWidth: '260px',
           }}
         >
-          {(['yellow', 'green', 'blue', 'pink', 'purple'] as HighlightColor[]).map(color => (
+          {/* 快速高亮颜色行 */}
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] text-gray-500 mr-1">高亮</span>
+            {(['yellow', 'green', 'blue', 'pink', 'purple'] as HighlightColor[]).map(color => (
+              <button
+                key={color}
+                className="w-5 h-5 rounded-full border-2 border-transparent hover:border-white hover:scale-110 transition-all"
+                style={{ backgroundColor: HIGHLIGHT_COLORS[color].border }}
+                onMouseDown={e => e.preventDefault()}
+                onClick={() => handleAddHighlight(color)}
+                title={`高亮 (${color})`}
+              />
+            ))}
+            <div className="w-px h-4 bg-gray-600 mx-1" />
             <button
-              key={color}
-              className="w-6 h-6 rounded-full border-2 border-white hover:scale-110 transition-transform"
-              style={{ backgroundColor: HIGHLIGHT_COLORS[color].border }}
-              onClick={() => handleAddHighlight(color)}
-            />
-          ))}
+              className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs transition-colors ${
+                noteMenuOpen
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-700'
+              }`}
+              onMouseDown={e => e.preventDefault()}
+              onClick={() => setNoteMenuOpen(v => !v)}
+              title="添加笔记"
+            >
+              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
+                <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+              </svg>
+            </button>
+          </div>
+
+          {/* 笔记输入区 */}
+          {noteMenuOpen && (
+            <div className="mt-2 border-t border-gray-700 pt-2">
+              <p className="text-[10px] text-gray-500 mb-1.5 line-clamp-2">
+                &ldquo;{selection.text.slice(0, 80)}{selection.text.length > 80 ? '…' : ''}&rdquo;
+              </p>
+              <textarea
+                className="w-full bg-[#2a2a3e] text-gray-100 text-xs rounded-lg px-2.5 py-2 resize-none focus:outline-none border border-gray-600 focus:border-blue-500 placeholder-gray-600"
+                rows={3}
+                placeholder="写下你的想法..."
+                value={noteText}
+                onChange={e => setNoteText(e.target.value)}
+                autoFocus
+              />
+              <div className="flex items-center gap-1 mt-1.5">
+                <div className="flex gap-1">
+                  {(['yellow', 'green', 'blue', 'pink', 'purple'] as HighlightColor[]).map(color => (
+                    <button
+                      key={color}
+                      className={`w-4 h-4 rounded-full transition-all ${
+                        noteSelectedColor === color
+                          ? 'ring-2 ring-white ring-offset-1 ring-offset-[#1e1e2e] scale-110'
+                          : 'opacity-60 hover:opacity-100'
+                      }`}
+                      style={{ backgroundColor: HIGHLIGHT_COLORS[color].border }}
+                      onMouseDown={e => e.preventDefault()}
+                      title={color}
+                      onClick={() => setNoteSelectedColor(color)}
+                    />
+                  ))}
+                </div>
+                <div className="flex-1" />
+                <button
+                  className="text-[11px] text-gray-400 hover:text-gray-200 px-2 py-0.5 rounded transition-colors"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={() => { setNoteMenuOpen(false); setNoteText('') }}
+                >
+                  取消
+                </button>
+                <button
+                  className="text-[11px] bg-blue-600 hover:bg-blue-500 text-white rounded px-2.5 py-0.5 transition-colors"
+                  onMouseDown={e => e.preventDefault()}
+                  onClick={handleAddNote}
+                >
+                  保存
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {freeNoteDraft && (
+        <div
+          ref={menuRef}
+          className="absolute z-50 rounded-xl border border-gray-300 bg-white shadow-xl"
+          style={{
+            left: freeNoteDraft.x,
+            top: freeNoteDraft.y,
+            width: freeNoteDraft.rect.width * scale,
+            minHeight: freeNoteDraft.rect.height * scale,
+          }}
+        >
+          <div className="flex items-center justify-between gap-2 border-b border-gray-200 px-2 py-1.5">
+            <div className="flex gap-1">
+              {(['yellow', 'green', 'blue', 'pink', 'purple'] as HighlightColor[]).map(color => (
+                <button
+                  key={color}
+                  className={`w-4 h-4 rounded-full transition-all ${
+                    noteSelectedColor === color
+                      ? 'ring-2 ring-white ring-offset-1 ring-offset-[#1e1e2e] scale-110'
+                      : 'opacity-60 hover:opacity-100'
+                  }`}
+                  style={{ backgroundColor: HIGHLIGHT_COLORS[color].border }}
+                  onMouseDown={e => e.preventDefault()}
+                  title={color}
+                  onClick={() => setNoteSelectedColor(color)}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              className="flex h-5 w-5 items-center justify-center rounded text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+              onMouseDown={e => {
+                e.preventDefault()
+                freeNoteDismissRef.current = true
+              }}
+              onClick={handleDeleteFreeNote}
+              title={freeNoteDraft.annotationId ? '删除' : '关闭'}
+            >
+              <svg viewBox="0 0 24 24" className="h-3.5 w-3.5 fill-current">
+                <path d="M18.3 5.71 12 12l6.3 6.29-1.41 1.41L10.59 13.41 4.29 19.7 2.88 18.29 9.17 12 2.88 5.71 4.29 4.29l6.3 6.3 6.29-6.3z" />
+              </svg>
+            </button>
+          </div>
+
+          <textarea
+            className="w-full resize-none border-0 bg-transparent px-3 py-2 text-sm leading-relaxed outline-none placeholder:text-gray-300"
+            rows={5}
+            placeholder="输入批注..."
+            value={noteText}
+            onChange={e => setNoteText(e.target.value)}
+            style={{ color: HIGHLIGHT_COLORS[noteSelectedColor].border }}
+            autoFocus
+            onBlur={() => {
+              if (freeNoteDismissRef.current) {
+                freeNoteDismissRef.current = false
+                return
+              }
+
+              if (noteText.trim()) {
+                void handleAddFreeNote()
+                return
+              }
+
+              resetFreeNoteDraft()
+            }}
+          />
         </div>
       )}
 
@@ -400,11 +930,42 @@ export default function PDFViewer({
   annotations = [],
   onAnnotationAdd,
   onAnnotationDelete,
+  onAnnotationUpdate,
+  jumpToBlock,
 }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const scrollReleaseTimerRef = useRef<number | null>(null)
+  const suppressPageSyncRef = useRef(false)
   const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null)
   const [pages, setPages] = useState<PDFPageProxy[]>([])
   const [visiblePage, setVisiblePage] = useState(1)
+
+  const releasePageSync = useCallback(() => {
+    if (scrollReleaseTimerRef.current !== null) {
+      window.clearTimeout(scrollReleaseTimerRef.current)
+    }
+
+    scrollReleaseTimerRef.current = window.setTimeout(() => {
+      suppressPageSyncRef.current = false
+    }, 140)
+  }, [])
+
+  const scrollToPage = useCallback((pageNum: number, behavior: ScrollBehavior = 'auto') => {
+    const container = containerRef.current
+    if (!container) return false
+
+    const pageEl = container.querySelector(`[data-page-number="${pageNum}"]`) as HTMLElement | null
+    if (!pageEl) return false
+
+    suppressPageSyncRef.current = true
+    container.scrollTo({
+      top: Math.max(pageEl.offsetTop - 16, 0),
+      behavior,
+    })
+    setVisiblePage(pageNum)
+    releasePageSync()
+    return true
+  }, [releasePageSync])
 
   // 加载 PDF
   useEffect(() => {
@@ -459,7 +1020,9 @@ export default function PDFViewer({
       })
 
       setVisiblePage(closestPage)
-      onPageChange?.(closestPage)
+      if (!suppressPageSyncRef.current) {
+        onPageChange?.(closestPage)
+      }
     }
 
     container.addEventListener('scroll', handleScroll)
@@ -468,13 +1031,39 @@ export default function PDFViewer({
 
   // 滚动到指定页
   useEffect(() => {
-    if (currentPage && containerRef.current) {
-      const pageEl = containerRef.current.querySelector(`.pdf-page:nth-child(${currentPage})`)
-      if (pageEl) {
-        pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (currentPage && pages.length > 0 && currentPage !== visiblePage) {
+      scrollToPage(currentPage, 'auto')
+    }
+  }, [currentPage, pages.length, scrollToPage, visiblePage])
+
+  // 跳转到指定文本块
+  useEffect(() => {
+    if (jumpToBlock && containerRef.current) {
+      const { blockId, pageNum } = jumpToBlock
+      const container = containerRef.current
+      const pageEl = container.querySelector(`[data-page-number="${pageNum}"]`)
+      if (pageEl && scrollToPage(pageNum, 'auto')) {
+        // 然后尝试高亮文本块
+        setTimeout(() => {
+          const blockEl = pageEl.querySelector(`[data-block-id="${blockId}"]`)
+          if (blockEl) {
+            blockEl.scrollIntoView({ block: 'center' })
+            // 添加临时高亮效果
+            blockEl.classList.add('block-highlight')
+            setTimeout(() => blockEl.classList.remove('block-highlight'), 2000)
+          }
+        }, 300)
       }
     }
-  }, [currentPage])
+  }, [jumpToBlock, scrollToPage])
+
+  useEffect(() => {
+    return () => {
+      if (scrollReleaseTimerRef.current !== null) {
+        window.clearTimeout(scrollReleaseTimerRef.current)
+      }
+    }
+  }, [])
 
   // 按页面分组的批注
   const annotationsByPage = new Map<number, PDFAnnotation[]>()
@@ -501,6 +1090,8 @@ export default function PDFViewer({
             showTranslation={showTranslation}
             annotations={annotationsByPage.get(index + 1) || []}
             onAnnotationAdd={onAnnotationAdd}
+            onAnnotationDelete={onAnnotationDelete}
+            onAnnotationUpdate={onAnnotationUpdate}
           />
         ))}
       </div>

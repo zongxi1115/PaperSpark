@@ -783,6 +783,7 @@ export function LiteratureSearchPanel() {
               onSkip={() => {
                 setQuestions([])
                 setAnswers({})
+                void startSearch()
               }}
               reduceMotion={reduceMotion}
             />

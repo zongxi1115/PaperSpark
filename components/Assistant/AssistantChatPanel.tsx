@@ -4,8 +4,9 @@ import { Button, Tooltip, Switch, Chip, Select, SelectItem, Dropdown, DropdownTr
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { readDocument, type DocumentReadResult } from './tools/ReadDocumentTool'
-import { EditDocumentTool, type EditDocumentRequest } from './tools/EditDocumentTool'
+import { EditDocumentTool, applyEditOperations, acceptInsertionChanges, rejectInsertionChanges, type EditDocumentRequest, type EditStatus } from './tools/EditDocumentTool'
 import { getEditor } from '@/lib/editorContext'
+import { AIExtension } from '@blocknote/xl-ai'
 import { 
   getAgents, 
   getSettings, 
@@ -49,6 +50,9 @@ export function AssistantChatPanel() {
   const [showNotesList, setShowNotesList] = useState(false)
   const [docContext, setDocContext] = useState<DocumentReadResult | null>(null)
   const [useDocContext, setUseDocContext] = useState(false)
+  // edit tool state: key = `${msgId}:${blockIdx}`
+  const [editStates, setEditStates] = useState<Record<string, { status: EditStatus; progress: string; error: string }>>({})
+  const editAbortRefs = useRef<Record<string, AbortController>>({})
 
   const { isOpen: isNoteModalOpen, onOpen: onNoteModalOpen, onClose: onNoteModalClose } = useDisclosure()
   
@@ -828,6 +832,9 @@ export function AssistantChatPanel() {
       setCurrentConversation(finalConv)
       setMentions([])
 
+      // Auto-trigger edit_document blocks in the last assistant message
+      triggerEditBlocks(assistantMessage.id, assistantMessage.content)
+
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         if (currentConversation) {
@@ -842,6 +849,46 @@ export function AssistantChatPanel() {
       abortControllerRef.current = null
     }
   }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates])
+
+  // Parse all edit_document JSON blocks from message content
+  const parseEditBlocks = useCallback((content: string): EditDocumentRequest[] => {
+    const results: EditDocumentRequest[] = []
+    const regex = /```edit_document\s*([\s\S]*?)```/g
+    let match
+    while ((match = regex.exec(content)) !== null) {
+      try {
+        const req = JSON.parse(match[1].trim()) as EditDocumentRequest
+        if (req.operations) results.push(req)
+      } catch { /* skip invalid */ }
+    }
+    return results
+  }, [])
+
+  // Auto-run edit blocks from a completed assistant message
+  const triggerEditBlocks = useCallback((msgId: string, content: string) => {
+    const blocks = parseEditBlocks(content)
+    if (blocks.length === 0) return
+
+    blocks.forEach((req, idx) => {
+      const key = `${msgId}:${idx}`
+      const abort = new AbortController()
+      editAbortRefs.current[key] = abort
+
+      setEditStates(prev => ({ ...prev, [key]: { status: 'running', progress: '准备中…', error: '' } }))
+
+      applyEditOperations(
+        req,
+        (msg) => setEditStates(prev => ({ ...prev, [key]: { ...prev[key], progress: msg } })),
+        abort.signal,
+      ).then(result => {
+        if (result.success) {
+          setEditStates(prev => ({ ...prev, [key]: { status: 'reviewing', progress: '', error: '' } }))
+        } else {
+          setEditStates(prev => ({ ...prev, [key]: { status: 'error', progress: '', error: result.error || '操作失败' } }))
+        }
+      })
+    })
+  }, [parseEditBlocks])
 
   // 停止生成
   const handleStop = () => {
@@ -1172,7 +1219,51 @@ export function AssistantChatPanel() {
                             if (isBlock && lang === 'edit_document') {
                               try {
                                 const req: EditDocumentRequest = JSON.parse(String(children).trim())
-                                return <EditDocumentTool request={req} />
+                                // find which index this block is in the message
+                                const allBlocks = parseEditBlocks(message.content)
+                                const blockIdx = allBlocks.findIndex(b => JSON.stringify(b) === JSON.stringify(req))
+                                const key = `${message.id}:${blockIdx >= 0 ? blockIdx : 0}`
+                                const state = editStates[key] ?? { status: 'idle' as EditStatus, progress: '', error: '' }
+
+                                const handleAccept = () => {
+                                  try {
+                                    const editor = getEditor()
+                                    // 先尝试 AIExtension，再用手动移除标记
+                                    const ext = editor?.getExtension(AIExtension)
+                                    if (ext) {
+                                      try { ext.acceptChanges() } catch { /* ignore */ }
+                                    }
+                                    acceptInsertionChanges()
+                                  } catch {
+                                    // ignore errors
+                                  }
+                                  setEditStates(prev => ({ ...prev, [key]: { status: 'accepted', progress: '', error: '' } }))
+                                }
+                                const handleReject = () => {
+                                  try {
+                                    const editor = getEditor()
+                                    const ext = editor?.getExtension(AIExtension)
+                                    if (ext) {
+                                      try { ext.rejectChanges() } catch { /* ignore */ }
+                                    }
+                                    // 手动删除带 insertionMark 的块
+                                    rejectInsertionChanges()
+                                  } catch (e) {
+                                    console.warn('Reject changes failed:', e)
+                                  }
+                                  setEditStates(prev => ({ ...prev, [key]: { status: 'rejected', progress: '', error: '' } }))
+                                }
+
+                                return (
+                                  <EditDocumentTool
+                                    request={req}
+                                    status={state.status}
+                                    progress={state.progress}
+                                    error={state.error}
+                                    onAccept={handleAccept}
+                                    onReject={handleReject}
+                                  />
+                                )
                               } catch {
                                 // fall through to normal code block
                               }

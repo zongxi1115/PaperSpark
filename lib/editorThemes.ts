@@ -19,7 +19,7 @@ export const EDITOR_THEMES: EditorThemeConfig[] = [
     name: '默认',
     description: '简洁现代无衬线，清晰易读',
     fontFamily:
-      '"Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", sans-serif',
+      '"Inter", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", "Roboto", sans-serif',
     borderRadius: 6,
   },
   {

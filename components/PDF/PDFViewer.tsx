@@ -114,6 +114,7 @@ interface PDFViewerProps {
   onAnnotationAdd?: (annotation: PDFAnnotation) => void
   onAnnotationDelete?: (id: string) => void
   onAnnotationUpdate?: (annotation: PDFAnnotation) => void
+  onAskSelection?: (selection: { text: string; pageNum: number; blockId?: string }) => void
   jumpToBlock?: { blockId: string; pageNum: number } | null
   focusTarget?: GuideFocusTarget | null
   translationDisplayMode?: 'overlay' | 'parallel'
@@ -329,6 +330,7 @@ function PDFPage({
   onAnnotationAdd,
   onAnnotationDelete,
   onAnnotationUpdate,
+  onAskSelection,
   focusTarget,
 }: {
   page: PDFPageProxy
@@ -343,6 +345,7 @@ function PDFPage({
   onAnnotationAdd?: (annotation: PDFAnnotation) => void
   onAnnotationDelete?: (id: string) => void
   onAnnotationUpdate?: (annotation: PDFAnnotation) => void
+  onAskSelection?: (selection: { text: string; pageNum: number; blockId?: string }) => void
   focusTarget?: GuideFocusTarget | null
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -372,6 +375,33 @@ function PDFPage({
 
     return blocks.find(block => block.id === focusTarget.blockId) || null
   }, [blocks, focusTarget, page.pageNumber])
+
+  const pageBlocks = useMemo(
+    () => blocks?.filter(block => block.pageNum === page.pageNumber) || [],
+    [blocks, page.pageNumber]
+  )
+
+  const findBestMatchingBlockId = useCallback((rects: Array<{ x: number; y: number; width: number; height: number }>) => {
+    if (!pageBlocks.length || rects.length === 0) return undefined
+
+    let bestBlockId: string | undefined
+    let bestScore = -1
+
+    pageBlocks.forEach(block => {
+      const score = rects.reduce((sum, rect) => {
+        const overlapWidth = Math.max(0, Math.min(rect.x + rect.width, block.bbox.x + block.bbox.width) - Math.max(rect.x, block.bbox.x))
+        const overlapHeight = Math.max(0, Math.min(rect.y + rect.height, block.bbox.y + block.bbox.height) - Math.max(rect.y, block.bbox.y))
+        return sum + overlapWidth * overlapHeight
+      }, 0)
+
+      if (score > bestScore) {
+        bestScore = score
+        bestBlockId = block.id
+      }
+    })
+
+    return bestBlockId
+  }, [pageBlocks])
 
   // 获取设备像素比
   const pixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
@@ -508,6 +538,24 @@ function PDFPage({
       height: rect.height / scale,
     }))
   }, [selection, scale])
+
+  const handleAskSelection = useCallback(() => {
+    if (!selection || !onAskSelection) return
+    const rects = buildRectsFromSelection()
+    if (!rects) return
+
+    onAskSelection({
+      text: selection.text,
+      pageNum: page.pageNumber,
+      blockId: findBestMatchingBlockId(rects),
+    })
+
+    setShowHighlightMenu(false)
+    setNoteMenuOpen(false)
+    setSelection(null)
+    setNoteText('')
+    window.getSelection()?.removeAllRanges()
+  }, [buildRectsFromSelection, findBestMatchingBlockId, onAskSelection, page.pageNumber, selection])
 
   // 添加高亮
   const handleAddHighlight = useCallback(async (color: HighlightColor) => {
@@ -694,14 +742,14 @@ function PDFPage({
   const activeNoteAnchorRect = activeNoteAnnotation?.rects[0]
 
   // 渲染翻译覆盖层
-  const pageBlocks = blocks?.filter(
+  const translatedPageBlocks = blocks?.filter(
     b => b.pageNum === page.pageNumber
       && b.translated
       && showTranslation
       && b.sourceLabel !== 'Picture',
   ) || []
   const translationLayouts = showTranslation
-    ? pageBlocks.map(block => ({
+    ? translatedPageBlocks.map(block => ({
       block,
       layout: buildTranslationLayout(block, scale, viewport),
     }))
@@ -946,6 +994,15 @@ function PDFPage({
                 <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
               </svg>
             </button>
+            <div className="w-px h-4 bg-gray-600 mx-1" />
+            <button
+              className="rounded-lg px-2 py-1 text-[11px] text-sky-300 transition-colors hover:bg-sky-500/15 hover:text-sky-200"
+              onMouseDown={e => e.preventDefault()}
+              onClick={handleAskSelection}
+              title="基于选中文本提问"
+            >
+              问 AI
+            </button>
           </div>
 
           {/* 笔记输入区 */}
@@ -1092,6 +1149,7 @@ export default function PDFViewer({
   onAnnotationAdd,
   onAnnotationDelete,
   onAnnotationUpdate,
+  onAskSelection,
   jumpToBlock,
   focusTarget,
   translationDisplayMode = 'overlay',
@@ -1262,6 +1320,7 @@ export default function PDFViewer({
               onAnnotationAdd={onAnnotationAdd}
               onAnnotationDelete={onAnnotationDelete}
               onAnnotationUpdate={onAnnotationUpdate}
+              onAskSelection={onAskSelection}
               focusTarget={focusTarget}
             />
 

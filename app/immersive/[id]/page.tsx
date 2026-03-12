@@ -23,6 +23,7 @@ import {
 } from '@/lib/pdfCache'
 import PDFViewer from '@/components/PDF/PDFViewer'
 import AIGuidePanel from '@/components/Guide/AIGuidePanel'
+import ImmersiveChatPanel from '@/components/Assistant/ImmersiveChatPanel'
 import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload, GuideFocusTarget } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
 import { parsePDFWithSurya } from '@/lib/suryaParser'
@@ -146,7 +147,7 @@ export default function ImmersiveReaderPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [scale, setScale] = useState(1.2)
-  const [sidebarTab, setSidebarTab] = useState<'info' | 'translate' | 'notes' | 'guide'>('guide')
+  const [sidebarTab, setSidebarTab] = useState<'info' | 'translate' | 'notes' | 'guide' | 'qa'>('guide')
   const [sidebarWidth, setSidebarWidth] = useState(288) // 288px = 72 * 4
 
   // PDF 数据
@@ -157,6 +158,12 @@ export default function ImmersiveReaderPage() {
   // 跳转控制
   const [jumpToBlock, setJumpToBlock] = useState<{ blockId: string; pageNum: number } | null>(null)
   const [focusedGuideTarget, setFocusedGuideTarget] = useState<GuideFocusTarget | null>(null)
+  const [selectionQuestionContext, setSelectionQuestionContext] = useState<{
+    id: string
+    text: string
+    pageNum: number
+    blockId?: string
+  } | null>(null)
 
   // 翻译状态
   const [translating, setTranslating] = useState(false)
@@ -794,6 +801,19 @@ export default function ImmersiveReaderPage() {
           </Button>
         </Tooltip>
 
+        <Tooltip content="AI问答" placement="right">
+          <Button
+            isIconOnly
+            size="sm"
+            variant={sidebarTab === 'qa' ? 'solid' : 'light'}
+            color={sidebarTab === 'qa' ? 'primary' : 'default'}
+            className={sidebarTab === 'qa' ? '' : 'text-gray-400 hover:text-white'}
+            onPress={() => setSidebarTab('qa')}
+          >
+            <Icon icon="mdi:chat-processing-outline" className="text-xl" />
+          </Button>
+        </Tooltip>
+
         <div className="flex-1" />
 
         {/* 翻译状态 */}
@@ -1230,10 +1250,25 @@ export default function ImmersiveReaderPage() {
             modelConfig={getSelectedSmallModel(getSettings())}
             onBlockClick={(target) => {
               if (target.pageNum) {
+                setSidebarTab('guide')
                 setCurrentPage(target.pageNum)
                 setJumpToBlock({ blockId: target.blockId, pageNum: target.pageNum })
                 setFocusedGuideTarget(target)
               }
+            }}
+          />
+        )}
+
+        {sidebarTab === 'qa' && (
+          <ImmersiveChatPanel
+            knowledgeItemId={knowledgeId}
+            title={metadata?.title || documentTitle}
+            blocks={blocks}
+            selectionContext={selectionQuestionContext}
+            onCitationClick={(target) => {
+              setCurrentPage(target.pageNum)
+              setJumpToBlock({ blockId: target.blockId, pageNum: target.pageNum })
+              setFocusedGuideTarget(target)
             }}
           />
         )}
@@ -1379,6 +1414,23 @@ export default function ImmersiveReaderPage() {
               onAnnotationAdd={handleAnnotationAdd}
               onAnnotationDelete={handleAnnotationDelete}
               onAnnotationUpdate={handleAnnotationUpdate}
+              onAskSelection={(selection) => {
+                setSelectionQuestionContext({
+                  id: `${Date.now()}`,
+                  text: selection.text,
+                  pageNum: selection.pageNum,
+                  blockId: selection.blockId,
+                })
+                setSidebarTab('qa')
+                if (selection.blockId) {
+                  setFocusedGuideTarget({
+                    blockId: selection.blockId,
+                    pageNum: selection.pageNum,
+                    title: '当前选中段落',
+                    note: selection.text,
+                  })
+                }
+              }}
               jumpToBlock={jumpToBlock}
               focusTarget={focusedGuideTarget}
             />

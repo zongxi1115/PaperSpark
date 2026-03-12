@@ -280,6 +280,7 @@ export interface AssistantCitation {
   excerpt: string
   sourceKind: 'overview' | 'fulltext' | 'asset'
   score: number
+  blockId?: string
   pageNum?: number
   year?: string
   journal?: string

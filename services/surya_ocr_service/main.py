@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import html
 import json
+import os
 import re
 import shutil
 import subprocess
 import tempfile
+import threading
+import uuid
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 
@@ -27,12 +33,13 @@ TEXTUAL_LABELS = {
     "Form",
 }
 
+JOB_ROOT = Path("out") / "surya_jobs"
+JOB_ROOT.mkdir(parents=True, exist_ok=True)
 
-class OCRLine(BaseModel):
-    text: str
-    confidence: float | None = None
-    bbox: list[float]
-    polygon: list[list[float]]
+MAX_WORKERS = max(1, int(os.environ.get("SURYA_MAX_WORKERS", "1")))
+JOB_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="surya-job")
+JOB_LOCK = threading.Lock()
+JOBS: dict[str, dict[str, Any]] = {}
 
 
 class LayoutRegion(BaseModel):
@@ -43,7 +50,6 @@ class LayoutRegion(BaseModel):
     polygon: list[list[float]]
     line_count: int
     text: str
-    lines: list[OCRLine]
 
 
 class ParsedPage(BaseModel):
@@ -52,7 +58,6 @@ class ParsedPage(BaseModel):
     full_text: str
     structure_counts: dict[str, int]
     layout_regions: list[LayoutRegion]
-    unassigned_lines: list[OCRLine]
 
 
 class ParseResponse(BaseModel):
@@ -64,10 +69,39 @@ class ParseResponse(BaseModel):
     artifacts: dict[str, str] | None = None
 
 
+class JobSubmissionResponse(BaseModel):
+    success: bool = True
+    job_id: str
+    status: str
+    stage: str
+    created_at: str
+    updated_at: str
+
+
+class JobStatusResponse(BaseModel):
+    success: bool = True
+    job_id: str
+    status: str
+    stage: str
+    created_at: str
+    updated_at: str
+    file_name: str
+    output_name: str | None = None
+    page_range: str | None = None
+    error: str | None = None
+    page_count: int | None = None
+    full_text_length: int | None = None
+    result_available: bool = False
+
+
+class JobResultResponse(JobStatusResponse):
+    parsed: ParseResponse | None = None
+
+
 app = FastAPI(
     title="Surya OCR Service",
-    version="0.1.0",
-    description="Parse PDF layout and OCR text with Surya, then return normalized structure and full text.",
+    version="0.2.0",
+    description="Queue PDF layout and OCR parsing jobs with Surya and return compact structured results.",
 )
 
 app.add_middleware(
@@ -76,6 +110,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def ensure_cli(name: str) -> str:
@@ -91,8 +129,86 @@ def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def model_to_dict(model: BaseModel) -> dict[str, Any]:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
 def result_json_path(output_dir: Path, input_path: Path) -> Path:
     return output_dir / input_path.stem / "results.json"
+
+
+def job_dir(job_id: str) -> Path:
+    return JOB_ROOT / job_id
+
+
+def job_manifest_path(job_id: str) -> Path:
+    return job_dir(job_id) / "job.json"
+
+
+def job_result_path(job_id: str) -> Path:
+    return job_dir(job_id) / "result.json"
+
+
+def persist_job_record(job_id: str, record: dict[str, Any]) -> None:
+    directory = job_dir(job_id)
+    directory.mkdir(parents=True, exist_ok=True)
+    job_manifest_path(job_id).write_text(
+        json.dumps(record, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def load_job_record(job_id: str) -> dict[str, Any] | None:
+    manifest = job_manifest_path(job_id)
+    if not manifest.exists():
+        return None
+    return json.loads(manifest.read_text(encoding="utf-8"))
+
+
+def get_job_record(job_id: str) -> dict[str, Any] | None:
+    with JOB_LOCK:
+        record = JOBS.get(job_id)
+        if record:
+            return dict(record)
+
+        disk_record = load_job_record(job_id)
+        if not disk_record:
+            return None
+
+        JOBS[job_id] = disk_record
+        return dict(disk_record)
+
+
+def update_job_record(job_id: str, **updates: Any) -> dict[str, Any]:
+    with JOB_LOCK:
+        record = JOBS.get(job_id) or load_job_record(job_id)
+        if not record:
+            raise KeyError(job_id)
+
+        record.update(updates)
+        record["updated_at"] = utc_now_iso()
+        JOBS[job_id] = record
+        persist_job_record(job_id, record)
+        return dict(record)
+
+
+def build_job_status(record: dict[str, Any]) -> JobStatusResponse:
+    return JobStatusResponse(
+        job_id=record["job_id"],
+        status=record["status"],
+        stage=record.get("stage", record["status"]),
+        created_at=record["created_at"],
+        updated_at=record["updated_at"],
+        file_name=record["file_name"],
+        output_name=record.get("output_name"),
+        page_range=record.get("page_range"),
+        error=record.get("error"),
+        page_count=record.get("page_count"),
+        full_text_length=record.get("full_text_length"),
+        result_available=job_result_path(record["job_id"]).exists(),
+    )
 
 
 def bbox_area(bbox: list[float]) -> float:
@@ -134,17 +250,17 @@ def sort_lines(lines: list[dict[str, Any]]) -> list[dict[str, Any]]:
     )
 
 
-def build_ocr_line(line: dict[str, Any]) -> OCRLine:
+def build_ocr_line(line: dict[str, Any]) -> dict[str, Any]:
     text = html.unescape(str(line.get("text", "")).strip())
     text = re.sub(r"</?b>", "", text)
     text = re.sub(r"</?i>", "", text)
 
-    return OCRLine(
-        text=text.strip(),
-        confidence=line.get("confidence"),
-        bbox=[float(v) for v in line.get("bbox", [])],
-        polygon=[[float(point[0]), float(point[1])] for point in line.get("polygon", [])],
-    )
+    return {
+        "text": text.strip(),
+        "confidence": line.get("confidence"),
+        "bbox": [float(v) for v in line.get("bbox", [])],
+        "polygon": [[float(point[0]), float(point[1])] for point in line.get("polygon", [])],
+    }
 
 
 def normalize_pages(layout_data: dict[str, Any], ocr_data: dict[str, Any], document_name: str) -> ParseResponse:
@@ -179,7 +295,7 @@ def normalize_pages(layout_data: dict[str, Any], ocr_data: dict[str, Any], docum
 
             remaining_lines = unmatched
             matched_lines = [build_ocr_line(line) for line in matched if str(line.get("text", "")).strip()]
-            region_text = "\n".join(line.text for line in matched_lines).strip()
+            region_text = "\n".join(line["text"] for line in matched_lines).strip()
             label = str(region.get("label", "Unknown"))
 
             layout_regions.append(
@@ -191,7 +307,6 @@ def normalize_pages(layout_data: dict[str, Any], ocr_data: dict[str, Any], docum
                     polygon=[[float(point[0]), float(point[1])] for point in region.get("polygon", [])],
                     line_count=len(matched_lines),
                     text=region_text,
-                    lines=matched_lines,
                 )
             )
 
@@ -201,11 +316,12 @@ def normalize_pages(layout_data: dict[str, Any], ocr_data: dict[str, Any], docum
             if region_text and label in TEXTUAL_LABELS:
                 page_text_parts.append(region_text)
 
-        unassigned_lines = [build_ocr_line(line) for line in remaining_lines if str(line.get("text", "")).strip()]
-        if unassigned_lines:
-            page_text_parts.extend(line.text for line in unassigned_lines)
-            page_counter["UnassignedText"] += len(unassigned_lines)
-            structure_counter["UnassignedText"] += len(unassigned_lines)
+        if remaining_lines:
+            unassigned_lines = [build_ocr_line(line) for line in remaining_lines if str(line.get("text", "")).strip()]
+            page_text_parts.extend(line["text"] for line in unassigned_lines if line["text"])
+            if unassigned_lines:
+                page_counter["UnassignedText"] += len(unassigned_lines)
+                structure_counter["UnassignedText"] += len(unassigned_lines)
 
         page_full_text = "\n\n".join(part for part in page_text_parts if part).strip()
         if page_full_text:
@@ -218,7 +334,6 @@ def normalize_pages(layout_data: dict[str, Any], ocr_data: dict[str, Any], docum
                 full_text=page_full_text,
                 structure_counts=dict(page_counter),
                 layout_regions=layout_regions,
-                unassigned_lines=unassigned_lines,
             )
         )
 
@@ -244,7 +359,84 @@ def run_surya_command(command: list[str], cwd: Path) -> None:
         )
     except subprocess.CalledProcessError as exc:
         stderr = exc.stderr.strip() or exc.stdout.strip() or "Surya command failed"
-        raise HTTPException(status_code=500, detail=stderr) from exc
+        raise RuntimeError(stderr) from exc
+
+
+def persist_raw_outputs(job_record: dict[str, Any], layout_json: Path, ocr_json: Path) -> dict[str, str]:
+    target_name = job_record.get("output_name") or Path(job_record["file_name"]).stem
+    persisted_dir = Path("out") / "surya_service" / target_name
+    persisted_dir.mkdir(parents=True, exist_ok=True)
+    layout_target = persisted_dir / "layout.results.json"
+    ocr_target = persisted_dir / "ocr.results.json"
+    shutil.copy2(layout_json, layout_target)
+    shutil.copy2(ocr_json, ocr_target)
+    return {
+        "layout_json": str(layout_target.resolve()),
+        "ocr_json": str(ocr_target.resolve()),
+    }
+
+
+def process_job(job_id: str) -> None:
+    job_record = get_job_record(job_id)
+    if not job_record:
+        return
+
+    try:
+        ensure_cli("surya_layout")
+        ensure_cli("surya_ocr")
+
+        update_job_record(job_id, status="processing", stage="layout", error=None)
+        input_path = Path(job_record["input_path"])
+
+        with tempfile.TemporaryDirectory(prefix=f"surya_job_{job_id}_") as temp_dir:
+            work_dir = Path(temp_dir)
+            layout_output_dir = work_dir / "layout_out"
+            ocr_output_dir = work_dir / "ocr_out"
+
+            layout_cmd = ["surya_layout", str(input_path), "--output_dir", str(layout_output_dir)]
+            ocr_cmd = ["surya_ocr", str(input_path), "--output_dir", str(ocr_output_dir)]
+            page_range = job_record.get("page_range")
+            if page_range:
+                layout_cmd.extend(["--page_range", page_range])
+                ocr_cmd.extend(["--page_range", page_range])
+
+            run_surya_command(layout_cmd, work_dir)
+            update_job_record(job_id, status="processing", stage="ocr")
+            run_surya_command(ocr_cmd, work_dir)
+            update_job_record(job_id, status="processing", stage="normalize")
+
+            layout_json = result_json_path(layout_output_dir, input_path)
+            ocr_json = result_json_path(ocr_output_dir, input_path)
+            layout_data = load_json(layout_json)
+            ocr_data = load_json(ocr_json)
+            parsed = normalize_pages(layout_data, ocr_data, input_path.stem)
+
+            if job_record.get("keep_outputs"):
+                parsed.artifacts = persist_raw_outputs(job_record, layout_json, ocr_json)
+
+            update_job_record(job_id, status="processing", stage="persisting")
+            result_path = job_result_path(job_id)
+            result_path.write_text(
+                json.dumps(model_to_dict(parsed), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+
+        update_job_record(
+            job_id,
+            status="completed",
+            stage="completed",
+            error=None,
+            page_count=parsed.page_count,
+            full_text_length=len(parsed.full_text),
+            result_path=str(result_path.resolve()),
+        )
+    except Exception as exc:
+        update_job_record(
+            job_id,
+            status="failed",
+            stage="failed",
+            error=str(exc),
+        )
 
 
 @app.get("/health")
@@ -253,55 +445,91 @@ def health() -> dict[str, Any]:
         "ok": True,
         "surya_layout": bool(shutil.which("surya_layout")),
         "surya_ocr": bool(shutil.which("surya_ocr")),
+        "max_workers": MAX_WORKERS,
+        "job_root": str(JOB_ROOT.resolve()),
     }
 
 
-@app.post("/parse", response_model=ParseResponse)
-async def parse_pdf(
+@app.post("/jobs", response_model=JobSubmissionResponse)
+async def create_job(
     file: UploadFile = File(...),
     page_range: str | None = Form(default=None),
     keep_outputs: bool = Form(default=False),
     output_name: str | None = Form(default=None),
-) -> ParseResponse:
+) -> JobSubmissionResponse:
     ensure_cli("surya_layout")
     ensure_cli("surya_ocr")
 
+    job_id = uuid.uuid4().hex
+    directory = job_dir(job_id)
+    directory.mkdir(parents=True, exist_ok=True)
+
     suffix = Path(file.filename or "document.pdf").suffix or ".pdf"
-    document_name = Path(file.filename or "document.pdf").stem
+    input_path = directory / f"input{suffix}"
+    input_path.write_bytes(await file.read())
 
-    with tempfile.TemporaryDirectory(prefix="surya_service_") as temp_dir:
-        work_dir = Path(temp_dir)
-        input_path = work_dir / f"input{suffix}"
-        input_path.write_bytes(await file.read())
+    timestamp = utc_now_iso()
+    record = {
+        "job_id": job_id,
+        "status": "queued",
+        "stage": "queued",
+        "created_at": timestamp,
+        "updated_at": timestamp,
+        "file_name": file.filename or "document.pdf",
+        "output_name": output_name,
+        "page_range": page_range,
+        "keep_outputs": keep_outputs,
+        "input_path": str(input_path.resolve()),
+        "error": None,
+        "page_count": None,
+        "full_text_length": None,
+    }
 
-        layout_output_dir = work_dir / "layout_out"
-        ocr_output_dir = work_dir / "ocr_out"
+    with JOB_LOCK:
+        JOBS[job_id] = record
+        persist_job_record(job_id, record)
 
-        layout_cmd = ["surya_layout", str(input_path), "--output_dir", str(layout_output_dir)]
-        ocr_cmd = ["surya_ocr", str(input_path), "--output_dir", str(ocr_output_dir)]
-        if page_range:
-            layout_cmd.extend(["--page_range", page_range])
-            ocr_cmd.extend(["--page_range", page_range])
+    JOB_EXECUTOR.submit(process_job, job_id)
+    return JobSubmissionResponse(
+        job_id=job_id,
+        status="queued",
+        stage="queued",
+        created_at=timestamp,
+        updated_at=timestamp,
+    )
 
-        run_surya_command(layout_cmd, work_dir)
-        run_surya_command(ocr_cmd, work_dir)
 
-        layout_json = result_json_path(layout_output_dir, input_path)
-        ocr_json = result_json_path(ocr_output_dir, input_path)
-        layout_data = load_json(layout_json)
-        ocr_data = load_json(ocr_json)
+@app.get("/jobs/{job_id}", response_model=JobStatusResponse)
+def get_job_status(job_id: str) -> JobStatusResponse:
+    record = get_job_record(job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return build_job_status(record)
 
-        parsed = normalize_pages(layout_data, ocr_data, input_path.stem)
 
-        if keep_outputs:
-            target_name = output_name or document_name
-            persisted_dir = Path("out") / "surya_service" / target_name
-            persisted_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(layout_json, persisted_dir / "layout.results.json")
-            shutil.copy2(ocr_json, persisted_dir / "ocr.results.json")
-            parsed.artifacts = {
-                "layout_json": str((persisted_dir / "layout.results.json").resolve()),
-                "ocr_json": str((persisted_dir / "ocr.results.json").resolve()),
-            }
+@app.get("/jobs/{job_id}/result", response_model=JobResultResponse)
+def get_job_result(job_id: str):
+    record = get_job_record(job_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Job not found")
 
-        return parsed
+    status_payload = build_job_status(record)
+    if record["status"] != "completed":
+        status_code = 500 if record["status"] == "failed" else 202
+        return JSONResponse(
+            status_code=status_code,
+            content=model_to_dict(JobResultResponse(
+                **model_to_dict(status_payload),
+                parsed=None,
+            )),
+        )
+
+    result_path = job_result_path(job_id)
+    if not result_path.exists():
+        raise HTTPException(status_code=500, detail="Result file missing")
+
+    parsed = ParseResponse(**json.loads(result_path.read_text(encoding="utf-8")))
+    return JobResultResponse(
+        **model_to_dict(status_payload),
+        parsed=parsed,
+    )

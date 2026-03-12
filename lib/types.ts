@@ -257,7 +257,14 @@ export interface TextBlock {
   style: TextStyle
   pageNum: number
   itemIds: string[] // 包含的原始 TextItem id
+  sourceLabel?: string
+  confidence?: number
+  lineCount?: number
+  order?: number
 }
+
+export type PDFParserSource = 'pdfjs' | 'surya'
+export type PDFParseStatus = 'processing' | 'completed' | 'failed'
 
 // PDF 页面缓存
 export interface PDFPageCache {
@@ -267,6 +274,7 @@ export interface PDFPageCache {
   width: number
   height: number
   blocks: TextBlock[]
+  fullText?: string
   createdAt: string
   updatedAt: string
 }
@@ -289,6 +297,11 @@ export interface PDFDocumentCache {
   fileName: string
   pageCount: number
   metadata: PDFMetadata
+  parser?: PDFParserSource
+  parseStatus?: PDFParseStatus
+  parseError?: string
+  fullText?: string
+  structureCounts?: Record<string, number>
   parsedAt: string
   updatedAt: string
 }

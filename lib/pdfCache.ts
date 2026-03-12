@@ -76,6 +76,13 @@ export async function savePDFDocument(doc: PDFDocumentCache): Promise<void> {
   await db.documents.put(doc)
 }
 
+export async function updatePDFDocument(id: string, updates: Partial<PDFDocumentCache>): Promise<void> {
+  await db.documents.update(id, {
+    ...updates,
+    updatedAt: new Date().toISOString(),
+  })
+}
+
 /**
  * 获取 PDF 文档缓存
  */

@@ -4,23 +4,25 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Button, Tooltip, Skeleton, Progress, Chip } from '@heroui/react'
 import { Icon } from '@iconify/react'
-import { getKnowledgeItem, getSettings, getSelectedSmallModel } from '@/lib/storage'
+import { getKnowledgeItem, getSettings, getSelectedSmallModel, updateKnowledgeItem } from '@/lib/storage'
 import {
   getPDFFile,
   savePDFFile,
   getPDFDocumentByKnowledgeId,
   savePDFDocument,
+  updatePDFDocument,
   getPDFPagesByDocumentId,
   savePDFPages,
   getTranslation,
+  deleteTranslation,
   getAnnotationsByDocumentId,
   saveAnnotation,
   deleteAnnotation,
 } from '@/lib/pdfCache'
 import PDFViewer from '@/components/PDF/PDFViewer'
-import { parsePDF } from '@/lib/pdfParser'
 import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
+import { parsePDFWithSurya } from '@/lib/suryaParser'
 
 export default function ImmersiveReaderPage() {
   const params = useParams()
@@ -45,6 +47,8 @@ export default function ImmersiveReaderPage() {
   const [translationProgress, setTranslationProgress] = useState({ current: 0, total: 0 })
   const [showTranslation, setShowTranslation] = useState(false)
   const [hasTranslation, setHasTranslation] = useState(false)
+  const [structureParsing, setStructureParsing] = useState(false)
+  const [suryaReady, setSuryaReady] = useState(false)
 
   // 批注
   const [annotations, setAnnotations] = useState<PDFAnnotation[]>([])
@@ -130,20 +134,40 @@ export default function ImmersiveReaderPage() {
     if (processedRef.current) return
     processedRef.current = true
 
+    const item = getKnowledgeItem(knowledgeId)
+    if (!item) return
+
+    const anns = await getAnnotationsByDocumentId(knowledgeId)
+    setAnnotations(anns)
+
     // 检查已有缓存
     const existingDoc = await getPDFDocumentByKnowledgeId(knowledgeId)
+    const existingPages = await getPDFPagesByDocumentId(knowledgeId)
+    const hasCompletedSuryaCache =
+      existingDoc?.parser === 'surya' &&
+      existingDoc?.parseStatus === 'completed' &&
+      existingPages.length > 0
+    setSuryaReady(hasCompletedSuryaCache)
+
     if (existingDoc) {
-      const translation = await getTranslation(knowledgeId)
-      if (translation) {
-        setHasTranslation(true)
-        const transMap = new Map(translation.blocks.map(b => [b.blockId, b.translated]))
-        setTranslatedBlocks(transMap)
+      if (existingDoc.parser === 'surya') {
+        const translation = await getTranslation(knowledgeId)
+        if (translation) {
+          setHasTranslation(true)
+          const transMap = new Map(translation.blocks.map(b => [b.blockId, b.translated]))
+          setTranslatedBlocks(transMap)
+        } else {
+          setHasTranslation(false)
+          setTranslatedBlocks(new Map())
+        }
+      } else {
+        setHasTranslation(false)
+        setTranslatedBlocks(new Map())
       }
 
-      const pages = await getPDFPagesByDocumentId(knowledgeId)
-      if (pages.length > 0) {
-        setTotalPages(pages.length)
-        const allBlocks = pages.flatMap(p => p.blocks)
+      if (existingPages.length > 0) {
+        setTotalPages(existingPages.length)
+        const allBlocks = existingPages.flatMap(p => p.blocks)
         setBlocks(allBlocks)
       }
 
@@ -155,71 +179,137 @@ export default function ImmersiveReaderPage() {
         journal: existingDoc.metadata.journal,
       })
       setMetadataLoading(false)
+    } else {
+      setMetadata({
+        title: item.title,
+        authors: item.authors,
+        abstract: item.abstract || '',
+        year: item.year || '',
+        journal: item.journal || '',
+      })
+    }
 
-      // 加载批注
-      const anns = await getAnnotationsByDocumentId(knowledgeId)
-      setAnnotations(anns)
+    if (hasCompletedSuryaCache) {
       return
     }
 
-    setMetadataLoading(true)
-
+    setStructureParsing(true)
+    setMetadataLoading(!existingDoc)
     try {
-      const item = getKnowledgeItem(knowledgeId)
-      if (!item) return
-
       const cachedFile = await getPDFFile(knowledgeId)
       if (!cachedFile) {
         setMetadataLoading(false)
         return
       }
 
-      const arrayBuffer = await cachedFile.blob.arrayBuffer()
+      const fallbackMetadata = {
+        title: existingDoc?.metadata.title || item.title,
+        authors: existingDoc?.metadata.authors?.length ? existingDoc.metadata.authors : item.authors,
+        abstract: existingDoc?.metadata.abstract || item.abstract || '',
+        year: existingDoc?.metadata.year || item.year || '',
+        journal: existingDoc?.metadata.journal || item.journal || '',
+        keywords: existingDoc?.metadata.keywords || [],
+        references: existingDoc?.metadata.references || [],
+      }
 
-      const result = await parsePDF(arrayBuffer, knowledgeId)
+      const now = new Date().toISOString()
+      if (existingDoc) {
+        await updatePDFDocument(knowledgeId, {
+          parser: 'surya',
+          parseStatus: 'processing',
+          parseError: '',
+        })
+      } else {
+        await savePDFDocument({
+          id: knowledgeId,
+          knowledgeItemId: knowledgeId,
+          fileName: cachedFile.fileName,
+          pageCount: existingPages.length,
+          metadata: fallbackMetadata,
+          parser: 'surya',
+          parseStatus: 'processing',
+          parsedAt: now,
+          updatedAt: now,
+        })
+      }
+
+      const result = await parsePDFWithSurya({
+        documentId: knowledgeId,
+        fileBlob: cachedFile.blob,
+        fileName: cachedFile.fileName,
+        keepOutputs: false,
+      })
 
       setTotalPages(result.pages.length)
       const allBlocks = result.pages.flatMap(p => p.blocks)
       setBlocks(allBlocks)
+      setSuryaReady(true)
+
+      if (existingDoc?.parser !== 'surya') {
+        await deleteTranslation(knowledgeId)
+        setHasTranslation(false)
+        setTranslatedBlocks(new Map())
+      }
+
+      const mergedMetadata = {
+        title: result.metadata.title || item.title,
+        authors: result.metadata.authors?.length ? result.metadata.authors : item.authors,
+        abstract: result.metadata.abstract || item.abstract || '',
+        year: result.metadata.year || item.year || '',
+        journal: result.metadata.journal || item.journal || '',
+        keywords: result.metadata.keywords || [],
+        references: result.metadata.references || [],
+      }
+      const parsedAt = new Date().toISOString()
 
       await savePDFDocument({
         id: knowledgeId,
         knowledgeItemId: knowledgeId,
         fileName: cachedFile.fileName,
         pageCount: result.pages.length,
-        metadata: {
-          title: result.metadata.title || item.title,
-          authors: result.metadata.authors?.length ? result.metadata.authors : item.authors,
-          abstract: result.metadata.abstract || item.abstract || '',
-          year: result.metadata.year || item.year || '',
-          journal: result.metadata.journal || item.journal || '',
-          keywords: result.metadata.keywords || [],
-          references: result.metadata.references || [],
-        },
-        parsedAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        metadata: mergedMetadata,
+        parser: 'surya',
+        parseStatus: 'completed',
+        parseError: '',
+        fullText: result.fullText,
+        structureCounts: result.structureCounts,
+        parsedAt,
+        updatedAt: parsedAt,
       })
 
       setMetadata({
-        title: result.metadata.title || item.title,
-        authors: result.metadata.authors?.length ? result.metadata.authors : item.authors,
-        abstract: result.metadata.abstract || item.abstract || '',
-        year: result.metadata.year || item.year || '',
-        journal: result.metadata.journal || item.journal || '',
+        title: mergedMetadata.title,
+        authors: mergedMetadata.authors,
+        abstract: mergedMetadata.abstract,
+        year: mergedMetadata.year,
+        journal: mergedMetadata.journal,
       })
 
       await savePDFPages(result.pages)
+      updateKnowledgeItem(knowledgeId, {
+        hasImmersiveCache: true,
+        immersiveCacheAt: parsedAt,
+        extractedMetadata: mergedMetadata,
+      })
       setMetadataLoading(false)
 
     } catch (err) {
       console.error('Process PDF error:', err)
+      setSuryaReady(false)
+      await updatePDFDocument(knowledgeId, {
+        parser: 'surya',
+        parseStatus: 'failed',
+        parseError: err instanceof Error ? err.message : 'Surya 解析失败',
+      })
       setMetadataLoading(false)
+    } finally {
+      setStructureParsing(false)
     }
   }, [knowledgeId])
 
   // 流式翻译
   const startStreamingTranslation = useCallback(async () => {
-    if (translating || blocks.length === 0) return
+    if (translating || structureParsing || !suryaReady || blocks.length === 0) return
 
     setTranslating(true)
     setHasTranslation(false)
@@ -319,7 +409,7 @@ export default function ImmersiveReaderPage() {
     } finally {
       setTranslating(false)
     }
-  }, [translating, blocks, knowledgeId])
+  }, [translating, structureParsing, suryaReady, blocks, knowledgeId])
 
   // 添加批注
   const handleAnnotationAdd = useCallback(async (annotation: PDFAnnotation) => {
@@ -339,6 +429,7 @@ export default function ImmersiveReaderPage() {
     ...b,
     translated: translatedBlocks.get(b.id),
   }))
+  const canTranslate = suryaReady && !structureParsing && blocks.length > 0
 
   useEffect(() => {
     loadPDF()
@@ -440,6 +531,12 @@ export default function ImmersiveReaderPage() {
           </Tooltip>
         )}
 
+        {structureParsing && (
+          <Tooltip content="正在解析原文结构" placement="right">
+            <Icon icon="mdi:file-search-outline" className="text-xl text-amber-400 animate-pulse" />
+          </Tooltip>
+        )}
+
         {hasTranslation && !translating && (
           <Tooltip content="翻译已完成" placement="right">
             <Icon icon="mdi:check-circle" className="text-xl text-green-500" />
@@ -492,6 +589,12 @@ export default function ImmersiveReaderPage() {
                 )}
               </>
             )}
+
+            {structureParsing && (
+              <div className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 p-3">
+                <p className="text-xs text-amber-300">正在使用 Surya 解析整篇原文结构，完成后会覆盖本地块缓存。</p>
+              </div>
+            )}
           </div>
         )}
 
@@ -531,14 +634,20 @@ export default function ImmersiveReaderPage() {
             {!translating && !hasTranslation && (
               <div className="flex flex-col items-center justify-center py-8 text-gray-500">
                 <Icon icon="mdi:translate" className="text-3xl mb-2" />
-                <p className="text-sm">尚未翻译</p>
+                <p className="text-sm">
+                  {structureParsing
+                    ? '正在等待结构解析完成'
+                    : suryaReady
+                      ? '尚未翻译'
+                      : '结构缓存尚未就绪'}
+                </p>
                 <Button
                   size="sm"
                   color="primary"
                   variant="flat"
                   className="mt-2"
                   onPress={startStreamingTranslation}
-                  isDisabled={blocks.length === 0}
+                  isDisabled={!canTranslate}
                 >
                   开始翻译
                 </Button>
@@ -678,7 +787,7 @@ export default function ImmersiveReaderPage() {
               color="primary"
               variant="flat"
               onPress={startStreamingTranslation}
-              isDisabled={blocks.length === 0}
+              isDisabled={!canTranslate}
             >
               翻译文档
             </Button>
@@ -688,6 +797,13 @@ export default function ImmersiveReaderPage() {
             <div className="flex items-center gap-2 text-xs text-gray-400">
               <Icon icon="mdi:sync" className="animate-spin" />
               <span>{translationProgress.current}/{translationProgress.total}</span>
+            </div>
+          )}
+
+          {structureParsing && (
+            <div className="flex items-center gap-2 text-xs text-amber-300">
+              <Icon icon="mdi:file-search-outline" className="animate-pulse" />
+              <span>Surya 结构解析中</span>
             </div>
           )}
 

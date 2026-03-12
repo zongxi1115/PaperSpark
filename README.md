@@ -144,12 +144,27 @@ paper_reader/
 - [ ] 观点冲突检测，标注知识库内相互矛盾的论述
 
 ### 🧩 其他增强
-- [ ] PDF 全文导入与解析
-- [ ] 文献引用格式一键生成（APA / MLA / GB/T 7714）
+- [x] PDF 全文导入与解析
+- [x] 文献引用格式一键生成（APA / MLA / GB/T 7714）
 - [ ] 写作进度统计与目标设定
 - [ ] 移动端适配
 
 > 💬 有新想法？欢迎提 [Issue](../../issues) 参与讨论！
+
+
+
+## 致谢
+感谢以下项目与资源的支持：
+- [Next.js](https://nextjs.org/) — 强大的 React 全栈框架
+- [BlockNote](https://www.blocknotejs.org/) — 灵活的富文本编辑器
+- [Vercel AI SDK](https://sdk.vercel.ai/) — 便捷的 AI 接口调用工具
+- [HeroUI](https://www.heroui.com/) — 美观的 React 组件库
+- [Framer Motion](https://www.framer.motion.com/) — 流畅的动画效果
+- [Tailwind CSS](https://tailwindcss.com/) — 高效的实用类 CSS 框架
+- [Zotero](https://www.zotero.org/) — 强大的文献管理工具
+- [surya-ocr](https://github.com/surya-ocr/surya) — 论文 OCR 解析服务
+
+
 
 ---
 

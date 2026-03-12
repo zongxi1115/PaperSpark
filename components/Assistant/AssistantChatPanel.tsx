@@ -1,6 +1,6 @@
 'use client'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Button, Tooltip, Switch, Chip, Select, SelectItem, Dropdown, DropdownTrigger, DropdownMenu, DropdownSection, DropdownItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure } from '@heroui/react'
+import { Button, Tooltip, Switch, Chip, Select, SelectItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure } from '@heroui/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { readDocument, type DocumentReadResult } from './tools/ReadDocumentTool'
@@ -13,6 +13,7 @@ import {
   getKnowledgeItems,
   getAssets,
   getAssetTypes,
+  saveAsset,
   getSelectedLargeModel,
   getConversations,
   saveConversation,
@@ -26,7 +27,7 @@ import { getVectorDocumentsByDocumentId } from '@/lib/pdfCache'
 import { getFullTextByKnowledgeId } from '@/lib/pdfCache'
 import { searchMyKnowledgeBase as runKnowledgeSearch } from '@/lib/assistantKnowledge'
 import { indexKnowledgeForRAG } from '@/lib/rag'
-import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote, AssistantToolEvent, AssistantCitation } from '@/lib/types'
+import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote, AssistantToolEvent, AssistantCitation, AssetItem } from '@/lib/types'
 
 export function AssistantChatPanel() {
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
@@ -79,10 +80,14 @@ export function AssistantChatPanel() {
   // 处理输入变化
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextValue = e.target.value
-    if (nextValue === '/' && !showSlashMenu && inputValue.length === 0) {
+    if ((nextValue === '/' || nextValue === '／') && !showSlashMenu && inputValue.trim().length === 0) {
       setShowSlashMenu(true)
       setInputValue('')
       return
+    }
+
+    if (showSlashMenu && nextValue.trim().length > 0) {
+      setShowSlashMenu(false)
     }
 
     const mentionMatch = nextValue.match(/(?:^|\s)@([^\s@]*)$/)
@@ -99,7 +104,7 @@ export function AssistantChatPanel() {
 
   // 处理输入框按键
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === '/' && !showSlashMenu && inputValue.length === 0) {
+    if ((e.key === '/' || e.key === '／') && !showSlashMenu && inputValue.trim().length === 0) {
       e.preventDefault()
       setShowSlashMenu(true)
       return
@@ -134,6 +139,49 @@ export function AssistantChatPanel() {
     setShowSlashMenu(false)
     inputRef.current?.focus()
   }, [agents])
+
+  const buildAssetContentBlocks = useCallback((text: string): unknown[] => {
+    const lines = text
+      .split(/\n+/)
+      .map(line => line.trim())
+      .filter(Boolean)
+      .slice(0, 200)
+
+    return lines.map(line => ({
+      type: 'paragraph',
+      content: [{ type: 'text', text: line, styles: {} }],
+    }))
+  }, [])
+
+  const handleAddToAssets = useCallback((message: AssistantMessage) => {
+    const assetTypes = getAssetTypes()
+    const preferredTypeId = assetTypes.some(t => t.id === 'note')
+      ? 'note'
+      : (assetTypes[0]?.id ?? 'note')
+
+    const firstLine = message.content
+      .split('\n')
+      .map(line => line.trim())
+      .find(Boolean)
+
+    const baseTitle = firstLine || '助手回答'
+    const title = baseTitle.length > 28 ? `${baseTitle.slice(0, 28)}…` : baseTitle
+    const now = new Date().toISOString()
+
+    const asset: AssetItem = {
+      id: generateId(),
+      title: `AI：${title}`,
+      typeId: preferredTypeId,
+      summary: message.content.trim().slice(0, 280),
+      content: buildAssetContentBlocks(message.content),
+      tags: ['assistant'],
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    saveAsset(asset)
+    addToast({ title: '已添加到资产库', color: 'success' })
+  }, [buildAssetContentBlocks])
 
   // 选择智能体
   const handleSelectAgent = (agent: Agent) => {
@@ -433,7 +481,7 @@ export function AssistantChatPanel() {
           excerpt: doc.text,
           score: doc.score,
           sourceKind: 'fulltext',
-          pageNum: doc.pageNum ?? undefined,
+          pageNum: doc.metadata?.pageNum ?? undefined,
           year: knowledge.year,
           journal: knowledge.journal,
           authors: knowledge.authors,
@@ -563,6 +611,11 @@ export function AssistantChatPanel() {
       updatedAt: new Date().toISOString(),
     }
     setCurrentConversation(newConv)
+    setInputValue('')
+    setMentions([])
+    setMentionQuery('')
+    setShowMentionMenu(false)
+    setShowSlashMenu(false)
     setShowHistory(false)
   }
 
@@ -1035,14 +1088,36 @@ export function AssistantChatPanel() {
         }}>
           {/* 模型选择器 + 历史按钮 */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Button
-              size="sm"
-              variant="flat"
-              onPress={() => setShowHistory(!showHistory)}
-              style={{ minWidth: 'auto' }}
-            >
-              {showHistory ? '隐藏' : '历史'}
-            </Button>
+            <Tooltip content={showHistory ? '隐藏历史对话' : '打开历史对话'}>
+              <Button
+                size="sm"
+                variant="flat"
+                onPress={() => setShowHistory(!showHistory)}
+                style={{ minWidth: 'auto' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
+                  <path d="M3 3v5h5" />
+                  <path d="M3.05 13a9 9 0 1 0 .5-4" />
+                  <path d="M12 7v6l4 2" />
+                </svg>
+                {showHistory ? '隐藏' : '历史'}
+              </Button>
+            </Tooltip>
+
+            <Tooltip content="新建对话">
+              <Button
+                size="sm"
+                variant="flat"
+                isIconOnly
+                onPress={handleNewConversation}
+                style={{ minWidth: 'auto' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+              </Button>
+            </Tooltip>
             <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 40 }}>模型：</span>
             <Select
               size="sm"
@@ -1379,6 +1454,39 @@ export function AssistantChatPanel() {
                       记笔记
                     </button>
                   )}
+
+                  {message.role === 'assistant' && (
+                    <button
+                      onClick={() => handleAddToAssets(message)}
+                      style={{
+                        background: 'var(--bg-secondary)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: 4,
+                        padding: '3px 8px',
+                        fontSize: 11,
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        transition: 'all 0.15s',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--accent-color)'
+                        e.currentTarget.style.color = 'var(--accent-color)'
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--border-color)'
+                        e.currentTarget.style.color = 'var(--text-muted)'
+                      }}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M12 5v14" />
+                        <path d="M5 12h14" />
+                      </svg>
+                      添加到资产库
+                    </button>
+                  )}
                 </div>
               </div>
             ))
@@ -1400,35 +1508,105 @@ export function AssistantChatPanel() {
           <div style={{
             position: 'relative',
           }}>
-            <Dropdown isOpen={showSlashMenu} onOpenChange={setShowSlashMenu} placement="top-start">
-              <DropdownTrigger>
+            {showSlashMenu && (
+              <div style={{
+                position: 'absolute',
+                left: 0,
+                right: 70,
+                bottom: 62,
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 8,
+                boxShadow: '0 12px 24px rgba(0, 0, 0, 0.12)',
+                padding: 6,
+                display: 'grid',
+                gap: 6,
+                zIndex: 30,
+              }}>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '2px 6px' }}>快捷引用</div>
                 <button
                   type="button"
-                  aria-hidden="true"
+                  onClick={() => handleSlashAction('command-knowledge')}
                   style={{
-                    position: 'absolute',
-                    left: 12,
-                    bottom: 56,
-                    width: 1,
-                    height: 1,
-                    opacity: 0,
-                    pointerEvents: 'none',
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    color: 'var(--text-primary)',
                   }}
-                />
-              </DropdownTrigger>
-              <DropdownMenu aria-label="快捷命令" onAction={handleSlashAction}>
-                <DropdownSection title="快捷引用" showDivider>
-                  <DropdownItem key="command-knowledge">{useKnowledge ? '关闭我的知识库检索' : '引用我的知识库'}</DropdownItem>
-                  <DropdownItem key="command-assets">{useAssets ? '关闭我的资产库引用' : '引用我的资产库'}</DropdownItem>
-                </DropdownSection>
-                <DropdownSection title="使用智能体">
-                  <DropdownItem key="agent:none">不使用智能体</DropdownItem>
-                  {agents.map(agent => (
-                    <DropdownItem key={`agent:${agent.id}`}>{agent.title}</DropdownItem>
-                  ))}
-                </DropdownSection>
-              </DropdownMenu>
-            </Dropdown>
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-secondary)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  {useKnowledge ? '关闭我的知识库检索' : '引用我的知识库'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleSlashAction('command-assets')}
+                  style={{
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    color: 'var(--text-primary)',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-secondary)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  {useAssets ? '关闭我的资产库引用' : '引用我的资产库'}
+                </button>
+
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '2px 6px', borderTop: '1px solid var(--border-color)', marginTop: 2 }}>使用智能体</div>
+                <button
+                  type="button"
+                  onClick={() => handleSlashAction('agent:none')}
+                  style={{
+                    textAlign: 'left',
+                    padding: '8px 10px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: 'transparent',
+                    cursor: 'pointer',
+                    fontSize: 12,
+                    color: 'var(--text-primary)',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-secondary)' }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                >
+                  不使用智能体
+                </button>
+
+                {agents.map(agent => (
+                  <button
+                    key={agent.id}
+                    type="button"
+                    onClick={() => handleSlashAction(`agent:${agent.id}`)}
+                    style={{
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      color: 'var(--text-primary)',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-secondary)' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {agent.title}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <div style={{
               background: 'var(--bg-secondary)',

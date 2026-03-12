@@ -1,16 +1,19 @@
-import { EditorPageContent } from '@/components/Editor/EditorPage'
-import { getSettings } from '@/lib/storage'
+'use client'
 
-// 动态导入三线表样式
-if (typeof window !== 'undefined' && getSettings().threeLineTable) {
-  console.log('三线表功能已启用')
-}
+import dynamic from 'next/dynamic'
+import { use } from 'react'
+
+// 动态导入编辑器组件，禁用 SSR 以避免 blocknote 的 window 访问错误
+const EditorPageContent = dynamic(
+  () => import('@/components/Editor/EditorPage').then(mod => mod.EditorPageContent),
+  { ssr: false }
+)
 
 interface Props {
   params: Promise<{ id: string }>
 }
 
-export default async function EditorRoute({ params }: Props) {
-  const { id } = await params
+export default function EditorRoute({ params }: Props) {
+  const { id } = use(params)
   return <EditorPageContent key={id} docId={id} />
 }

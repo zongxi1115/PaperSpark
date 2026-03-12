@@ -114,6 +114,113 @@ interface PDFViewerProps {
   onAnnotationDelete?: (id: string) => void
 }
 
+interface TranslationLayout {
+  left: number
+  top: number
+  width: number
+  height: number
+  fontSize: number
+  lineHeight: number
+}
+
+let translationMeasureContext: CanvasRenderingContext2D | null = null
+
+function getTranslationMeasureContext() {
+  if (translationMeasureContext || typeof document === 'undefined') {
+    return translationMeasureContext
+  }
+
+  const canvas = document.createElement('canvas')
+  translationMeasureContext = canvas.getContext('2d')
+  return translationMeasureContext
+}
+
+function wrapTextToWidth(text: string, width: number, fontSize: number, fontFamily: string) {
+  const context = getTranslationMeasureContext()
+  if (!context || width <= 0) {
+    return text.split(/\n+/).filter(Boolean)
+  }
+
+  context.font = `${fontSize}px ${fontFamily}`
+  const paragraphs = text.split(/\n+/).filter(Boolean)
+  const lines: string[] = []
+
+  paragraphs.forEach(paragraph => {
+    let current = ''
+    for (const char of Array.from(paragraph)) {
+      const candidate = `${current}${char}`
+      if (current && context.measureText(candidate).width > width) {
+        lines.push(current)
+        current = char.trim() ? char : ''
+      } else {
+        current = candidate
+      }
+    }
+
+    if (current.trim()) {
+      lines.push(current)
+    }
+  })
+
+  return lines.length > 0 ? lines : [text]
+}
+
+function buildTranslationLayout(block: TextBlock, scale: number, viewport: PDFViewport): TranslationLayout {
+  const paddingX = 6
+  const paddingY = 4
+  const left = block.bbox.x * scale
+  const top = block.bbox.y * scale
+  const width = Math.max(
+    48,
+    Math.min(block.bbox.width * scale, viewport.width - left - 8),
+  )
+  const height = Math.max(
+    20,
+    Math.min(block.bbox.height * scale, viewport.height - top - 8),
+  )
+  const contentWidth = Math.max(24, width - paddingX * 2)
+  const contentHeight = Math.max(12, height - paddingY * 2)
+  const fontFamily = block.style.fontFamily || 'serif'
+  const preferredFontSize = Math.max(
+    10,
+    Math.min(block.style.fontSize * scale * 0.82, contentHeight),
+  )
+  const minFontSize = Math.max(8, Math.min(12, preferredFontSize))
+  let low = minFontSize
+  let high = preferredFontSize
+  let bestFontSize = minFontSize
+  let bestLineHeight = minFontSize * 1.45
+
+  for (let i = 0; i < 7; i++) {
+    const candidateFontSize = (low + high) / 2
+    const candidateLineHeight = candidateFontSize * 1.45
+    const wrappedLines = wrapTextToWidth(
+      block.translated || '',
+      contentWidth,
+      candidateFontSize,
+      fontFamily,
+    )
+    const totalHeight = wrappedLines.length * candidateLineHeight
+
+    if (totalHeight <= contentHeight) {
+      bestFontSize = candidateFontSize
+      bestLineHeight = candidateLineHeight
+      low = candidateFontSize
+    } else {
+      high = candidateFontSize
+    }
+  }
+
+  return {
+    left,
+    top,
+    width,
+    height,
+    fontSize: bestFontSize,
+    lineHeight: bestLineHeight / bestFontSize,
+  }
+}
+
 // 单个页面组件
 function PDFPage({
   page,
@@ -333,29 +440,38 @@ function PDFPage({
       />
 
       {/* 翻译覆盖层 */}
-      {pageBlocks.map(block => (
-        <div
-          key={block.id}
-          className="translation-overlay"
-          style={{
-            position: 'absolute',
-            left: block.bbox.x * scale,
-            top: block.bbox.y * scale,
-            width: Math.min(block.bbox.width * scale, viewport.width - block.bbox.x * scale - 20),
-            fontSize: `${block.style.fontSize * scale * 0.85}px`,
-            color: '#1a1a1a',
-            backgroundColor: 'rgba(255, 255, 255, 0.92)',
-            padding: '3px 6px',
-            borderRadius: '2px',
-            pointerEvents: 'none',
-            zIndex: 10,
-            lineHeight: 1.5,
-            boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-          }}
-        >
-          {block.translated}
-        </div>
-      ))}
+      {pageBlocks.map(block => {
+        const layout = buildTranslationLayout(block, scale, viewport)
+
+        return (
+          <div
+            key={block.id}
+            className="translation-overlay"
+            style={{
+              position: 'absolute',
+              left: layout.left,
+              top: layout.top,
+              width: layout.width,
+              height: layout.height,
+              fontSize: `${layout.fontSize}px`,
+              color: '#1a1a1a',
+              backgroundColor: 'rgba(255, 255, 255, 0.92)',
+              padding: '4px 6px',
+              borderRadius: '3px',
+              pointerEvents: 'none',
+              zIndex: 10,
+              lineHeight: layout.lineHeight,
+              boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+              overflow: 'hidden',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+              fontWeight: block.type === 'title' || block.type === 'subtitle' ? 600 : 400,
+            }}
+          >
+            {block.translated}
+          </div>
+        )
+      })}
 
       {/* 高亮菜单 */}
       {showHighlightMenu && selection && (

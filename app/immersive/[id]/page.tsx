@@ -77,8 +77,11 @@ export default function ImmersiveReaderPage() {
     abstract: string
     year: string
     journal: string
+    references?: string[]
+    keywords?: string[]
   } | null>(null)
   const [metadataLoading, setMetadataLoading] = useState(true)
+  const [abstractExpanded, setAbstractExpanded] = useState(false)
 
   const processedRef = useRef(false)
 
@@ -206,6 +209,8 @@ export default function ImmersiveReaderPage() {
         abstract: existingDoc.metadata.abstract,
         year: existingDoc.metadata.year,
         journal: existingDoc.metadata.journal,
+        references: existingDoc.metadata.references || [],
+        keywords: existingDoc.metadata.keywords || [],
       })
       setMetadataLoading(false)
     } else {
@@ -215,6 +220,8 @@ export default function ImmersiveReaderPage() {
         abstract: item.abstract || '',
         year: item.year || '',
         journal: item.journal || '',
+        references: [],
+        keywords: [],
       })
     }
 
@@ -317,6 +324,8 @@ export default function ImmersiveReaderPage() {
         abstract: mergedMetadata.abstract,
         year: mergedMetadata.year,
         journal: mergedMetadata.journal,
+        references: mergedMetadata.references,
+        keywords: mergedMetadata.keywords,
       })
 
       await savePDFPages(result.pages)
@@ -467,6 +476,18 @@ export default function ImmersiveReaderPage() {
         : a
     ))
     setEditingAnnotationId(null)
+  }, [])
+
+  const handleAnnotationUpdate = useCallback((annotation: PDFAnnotation) => {
+    setAnnotations(prev => prev.map(item => (
+      item.id === annotation.id
+        ? {
+            ...item,
+            ...annotation,
+            createdAt: item.createdAt,
+          }
+        : item
+    )))
   }, [])
 
   const handleAnnotationJump = useCallback((pageNum: number) => {
@@ -678,8 +699,76 @@ export default function ImmersiveReaderPage() {
 
                 {metadata?.abstract && (
                   <div className="mb-4">
-                    <label className="text-xs text-gray-500 block mb-1">摘要</label>
-                    <p className="text-xs text-gray-400 leading-relaxed">{metadata.abstract}</p>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs text-gray-500">摘要</label>
+                      {metadata.abstract.length > 150 && (
+                        <button
+                          className="text-[10px] text-blue-400 hover:text-blue-300 transition-colors"
+                          onClick={() => setAbstractExpanded(!abstractExpanded)}
+                        >
+                          {abstractExpanded ? '收起' : '展开'}
+                        </button>
+                      )}
+                    </div>
+                    <p 
+                      className={`text-xs text-gray-400 leading-relaxed ${!abstractExpanded ? 'line-clamp-5' : ''}`}
+                    >
+                      {metadata.abstract}
+                    </p>
+                  </div>
+                )}
+
+                {/* References */}
+                {metadata?.references && metadata.references.length > 0 && (
+                  <div className="mb-4">
+                    <label className="text-xs text-gray-500 block mb-2">
+                      参考文献 ({metadata.references.length})
+                    </label>
+                    <div className="space-y-2 max-h-64 overflow-auto">
+                      {metadata.references.map((ref, idx) => {
+                        // 解析链接 (DOI, URL, arXiv 等)
+                        const doiMatch = ref.match(/10\.\d{4,}\/[^\s]+/gi)
+                        const urlMatch = ref.match(/https?:\/\/[^\s]+/gi)
+                        const arxivMatch = ref.match(/arXiv:\s*(\d+\.\d+)/i)
+                        
+                        const links: { type: string; url: string }[] = []
+                        if (doiMatch) {
+                          links.push({ type: 'DOI', url: `https://doi.org/${doiMatch[0]}` })
+                        }
+                        if (urlMatch) {
+                          links.push({ type: 'Link', url: urlMatch[0] })
+                        }
+                        if (arxivMatch) {
+                          links.push({ type: 'arXiv', url: `https://arxiv.org/abs/${arxivMatch[1]}` })
+                        }
+
+                        return (
+                          <div 
+                            key={idx} 
+                            className="p-2 bg-[#1a1a1a] rounded-lg text-xs text-gray-400 leading-relaxed hover:bg-[#222] transition-colors"
+                          >
+                            <p className="mb-1">{ref}</p>
+                            {links.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 mt-1.5">
+                                {links.map((link, linkIdx) => (
+                                  <a
+                                    key={linkIdx}
+                                    href={link.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-colors"
+                                    onClick={(e) => e.stopPropagation()}
+                                  >
+                                    <Icon icon="mdi:open-in-new" className="text-[10px]" />
+                                    <span>{link.type}</span>
+                                  </a>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </>
@@ -798,7 +887,7 @@ export default function ImmersiveReaderPage() {
                 <Icon icon="mdi:comment-text-outline" className="text-4xl mb-3 text-gray-600" />
                 <p className="text-sm text-center">暂无批注</p>
                 <p className="text-xs mt-1.5 text-gray-600 text-center leading-relaxed">
-                  选中 PDF 文本后点击颜色添加高亮，或点击 ✏️ 图标添加带笔记的高亮
+                  选中 PDF 文本后点击颜色添加高亮，或在空白处双击直接创建文本批注
                 </p>
               </div>
             ) : (
@@ -847,7 +936,7 @@ export default function ImmersiveReaderPage() {
                         style={{ borderColor: HIGHLIGHT_COLORS[ann.color].border + '60' }}
                         onClick={() => handleAnnotationJump(ann.pageNum)}
                       >
-                        {ann.selectedText}
+                        {ann.selectedText || '空白处批注'}
                       </p>
                     </div>
 
@@ -1042,6 +1131,7 @@ export default function ImmersiveReaderPage() {
               annotations={annotations}
               onAnnotationAdd={handleAnnotationAdd}
               onAnnotationDelete={handleAnnotationDelete}
+              onAnnotationUpdate={handleAnnotationUpdate}
               jumpToBlock={jumpToBlock}
             />
           ) : (

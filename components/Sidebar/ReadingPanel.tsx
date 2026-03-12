@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Button } from '@heroui/react'
-import { formatDate, getKnowledgeItems } from '@/lib/storage'
+import { Button, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, addToast } from '@heroui/react'
+import { formatDate, getKnowledgeItems, deleteKnowledgeItem } from '@/lib/storage'
+import { deleteKnowledgeItemCache } from '@/lib/pdfCache'
+import { deleteKnowledgeVectors } from '@/lib/rag'
 import type { KnowledgeItem } from '@/lib/types'
 
 function getRAGLabel(item: KnowledgeItem) {
@@ -39,6 +41,9 @@ function getReadableSource(item: KnowledgeItem) {
 export function ReadingPanel() {
   const router = useRouter()
   const [items, setItems] = useState<KnowledgeItem[]>([])
+  const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
+  const [itemToDelete, setItemToDelete] = useState<KnowledgeItem | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     const syncItems = () => setItems(getKnowledgeItems())
@@ -52,6 +57,35 @@ export function ReadingPanel() {
       window.removeEventListener('storage', syncItems)
     }
   }, [])
+
+  // 打开删除确认弹窗
+  const handleDeleteClick = (item: KnowledgeItem) => {
+    setItemToDelete(item)
+    onDeleteOpen()
+  }
+
+  // 确认删除
+  const handleConfirmDelete = async () => {
+    if (!itemToDelete) return
+
+    setDeleting(true)
+    try {
+      await deleteKnowledgeItemCache(itemToDelete.id)
+      await deleteKnowledgeVectors(itemToDelete.id)
+      deleteKnowledgeItem(itemToDelete.id)
+
+      setItems(getKnowledgeItems())
+      window.dispatchEvent(new CustomEvent('knowledge-items-updated'))
+      addToast({ title: '已删除', color: 'success' })
+      onDeleteClose()
+      setItemToDelete(null)
+    } catch (error) {
+      console.error('Delete error:', error)
+      addToast({ title: '删除失败', color: 'danger' })
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const readingItems = useMemo(() => {
     return items
@@ -163,18 +197,49 @@ export function ReadingPanel() {
               <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
                 {item.extractedMetadata?.journal || item.journal || '已完成结构化解析'}
               </div>
-              <Button
-                size="sm"
-                color="secondary"
-                variant="flat"
-                onPress={() => router.push(`/immersive/${item.id}`)}
-              >
-                继续精读
-              </Button>
+              <div style={{ display: 'flex', gap: 8 }} onClick={(e) => e.stopPropagation()}>
+                <Button
+                  size="sm"
+                  color="danger"
+                  variant="light"
+                  onPress={() => handleDeleteClick(item)}
+                >
+                  删除
+                </Button>
+                <Button
+                  size="sm"
+                  color="secondary"
+                  variant="flat"
+                  onPress={() => router.push(`/immersive/${item.id}`)}
+                >
+                  继续精读
+                </Button>
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {/* 删除确认弹窗 */}
+      <Modal isOpen={isDeleteOpen} onClose={onDeleteClose}>
+        <ModalContent>
+          <ModalHeader>确认删除</ModalHeader>
+          <ModalBody>
+            <p style={{ color: 'var(--text-secondary)' }}>
+              确定要删除文献 <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{itemToDelete?.title}</span> 吗？
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              此操作将删除文档本身、所有翻译缓存、批注和 RAG 索引数据，且无法恢复。
+            </p>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="light" onPress={onDeleteClose}>取消</Button>
+            <Button color="danger" onPress={handleConfirmDelete} isLoading={deleting}>
+              确认删除
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </div>
   )
 }

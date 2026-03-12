@@ -145,13 +145,6 @@ export function KnowledgePanel() {
     onDetailOpen()
   }, [onDetailOpen])
 
-  // 点击条目显示详情
-  const handleItemClick = useCallback((item: KnowledgeItem) => {
-    setSelectedItem(item)
-    setShowTranslated(true) // 默认显示中文翻译
-    onDetailOpen()
-  }, [onDetailOpen])
-
   // 打开删除确认弹窗
   const handleDeleteClick = useCallback((item: KnowledgeItem, e?: React.MouseEvent) => {
     e?.stopPropagation()
@@ -580,6 +573,15 @@ export function KnowledgePanel() {
                   >
                     插入引用
                   </DropdownItem>
+                  <DropdownItem
+                    key="delete"
+                    startContent={<TrashIconSmall />}
+                    className="text-danger"
+                    color="danger"
+                    onPress={() => handleDeleteClick(item)}
+                  >
+                    删除
+                  </DropdownItem>
                 </DropdownMenu>
               </Dropdown>
             </div>
@@ -832,7 +834,7 @@ export function KnowledgePanel() {
             )}
           </ModalBody>
           <ModalFooter>
-            <Button variant="light" color="danger" onPress={() => selectedItem && handleDelete(selectedItem.id)}>
+            <Button variant="light" color="danger" onPress={() => selectedItem && handleDeleteClick(selectedItem)}>
               删除
             </Button>
             {/* 沉浸式阅读按钮 - 只有有 PDF 时才显示 */}
@@ -853,6 +855,27 @@ export function KnowledgePanel() {
             </Button>
             <Button variant="light" onPress={onDetailClose}>
               关闭
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* 删除确认弹窗 */}
+      <Modal isOpen={isDeleteConfirmOpen} onClose={onDeleteConfirmClose}>
+        <ModalContent>
+          <ModalHeader>确认删除</ModalHeader>
+          <ModalBody>
+            <p style={{ color: 'var(--text-secondary)' }}>
+              确定要删除文献 <span style={{ fontWeight: 500, color: 'var(--text-primary)' }}>{itemToDelete?.title}</span> 吗？
+            </p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              此操作将删除文档本身、所有翻译缓存、批注和 RAG 索引数据，且无法恢复。
+            </p>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="light" onPress={onDeleteConfirmClose}>取消</Button>
+            <Button color="danger" onPress={handleConfirmDelete} isLoading={deleting}>
+              确认删除
             </Button>
           </ModalFooter>
         </ModalContent>

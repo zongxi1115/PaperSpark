@@ -142,6 +142,28 @@ export async function POST(req: Request) {
           fullSystemPrompt += `\n\n你还可以参考用户资产库中的材料。若资产库内容与问题直接相关，请优先结合这些材料回答；如果资产库不足，再说明不足。资产库材料如下：\n${assetContext}`
         }
 
+        // 如果 systemPrompt 中包含文档内容，说明用户开启了文档引用，告知 AI 可以编辑文档
+        if (systemPrompt && systemPrompt.includes('当前编辑器文档内容')) {
+          fullSystemPrompt += `\n\n你可以通过输出特殊代码块来编辑用户的文档。当用户要求你在文档中添加、修改内容时，输出如下格式的代码块（语言标识为 edit_document），内容为 JSON：
+\`\`\`edit_document
+{
+  "operations": [
+    {
+      "type": "insert",
+      "position": "after",
+      "blocks": [
+        { "type": "paragraph", "content": [{ "type": "text", "text": "要插入的内容", "styles": {} }] }
+      ]
+    }
+  ]
+}
+\`\`\`
+支持的 block type：paragraph、heading（props.level: 1-3）、bulletListItem、numberedListItem、codeBlock（props.language）。
+position 为 "after" 表示在文档末尾追加，"before" 表示在开头插入。
+如果要在特定块后插入，可以在 referenceId 字段填写目标块的 id（从文档内容中获取）。
+每次只输出一个 edit_document 代码块，不要输出多个。`
+        }
+
         const result = streamText({
           model: provider.chat(modelConfig.modelName),
           system: fullSystemPrompt,

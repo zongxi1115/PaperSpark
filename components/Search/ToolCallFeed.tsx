@@ -92,6 +92,87 @@ function ToolIcon({ type, size = 14 }: { type: string; size?: number }) {
   )
 }
 
+function LoadingDots({ reduceMotion }: { reduceMotion: boolean | null }) {
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginLeft: 2 }}>
+      {[0, 1, 2].map(i => (
+        <motion.span
+          key={i}
+          animate={!reduceMotion ? { opacity: [0.3, 1, 0.3] } : undefined}
+          transition={{
+            duration: 1,
+            repeat: Infinity,
+            delay: i * 0.15,
+            ease: 'easeInOut',
+          }}
+          style={{
+            width: 3,
+            height: 3,
+            borderRadius: '50%',
+            background: 'currentColor',
+          }}
+        />
+      ))}
+    </span>
+  )
+}
+
+function formatInputSummary(inputSummary: string): string {
+  try {
+    const parsed = JSON.parse(inputSummary)
+    const parts: string[] = []
+    
+    if (parsed.query) {
+      parts.push(`"${parsed.query}"`)
+    }
+    if (parsed.keyword) {
+      parts.push(`关键词: ${parsed.keyword}`)
+    }
+    if (parsed.concept) {
+      parts.push(`概念: ${parsed.concept}`)
+    }
+    if (parsed.workId) {
+      parts.push(`文献ID: ${parsed.workId.slice(0, 12)}...`)
+    }
+    if (parsed.authorId) {
+      parts.push(`作者ID: ${parsed.authorId.slice(0, 12)}...`)
+    }
+    if (parsed.direction) {
+      const dirMap: Record<string, string> = {
+        references: '参考文献',
+        citations: '引用文献',
+        related: '相关文献',
+      }
+      parts.push(`方向: ${dirMap[parsed.direction] || parsed.direction}`)
+    }
+    if (parsed.maxResults) {
+      parts.push(`上限: ${parsed.maxResults}`)
+    }
+    if (parsed.fromYear || parsed.toYear) {
+      const yearRange = [parsed.fromYear || '?', parsed.toYear || '?'].join('-')
+      parts.push(`年份: ${yearRange}`)
+    }
+    if (parsed.minCitations) {
+      parts.push(`引用≥${parsed.minCitations}`)
+    }
+    if (parsed.openAccessOnly) {
+      parts.push('仅开放获取')
+    }
+    
+    if (parts.length > 0) {
+      return parts.join(' · ')
+    }
+  } catch {
+    // 不是 JSON，直接返回原文
+  }
+  
+  // 截断过长的文本
+  if (inputSummary.length > 60) {
+    return inputSummary.slice(0, 58) + '...'
+  }
+  return inputSummary
+}
+
 interface ToolCallFeedItemProps {
   call: ToolCallEvent
   isLatest: boolean
@@ -101,6 +182,7 @@ interface ToolCallFeedItemProps {
 function ToolCallFeedItem({ call, isLatest, reduceMotion }: ToolCallFeedItemProps) {
   const config = TOOL_CONFIG[call.name] || { icon: 'default', label: call.name }
   const isRunning = call.status === 'running'
+  const formattedInput = formatInputSummary(call.inputSummary)
 
   return (
     <motion.div
@@ -184,25 +266,32 @@ function ToolCallFeedItem({ call, isLatest, reduceMotion }: ToolCallFeedItemProp
           <span style={{ fontVariantNumeric: 'tabular-nums', minWidth: 20 }}>
             {call.resultCount !== undefined ? (
               <OdometerNumber value={call.resultCount} />
-            ) : call.status === 'error' ? '失败' : isRunning ? '执行中' : '完成'}
+            ) : call.status === 'error' ? '失败' : isRunning ? (
+              <>
+                <span>执行中</span>
+                <LoadingDots reduceMotion={reduceMotion} />
+              </>
+            ) : '完成'}
           </span>
         </motion.div>
       </div>
       
-      <div
-        style={{
-          fontSize: 11,
-          color: 'rgba(15, 23, 42, 0.45)',
-          lineHeight: 1.4,
-          paddingLeft: 22,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-        title={call.inputSummary}
-      >
-        {call.inputSummary}
-      </div>
+      {formattedInput && (
+        <div
+          style={{
+            fontSize: 11,
+            color: 'rgba(15, 23, 42, 0.45)',
+            lineHeight: 1.4,
+            paddingLeft: 22,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={call.inputSummary}
+        >
+          {formattedInput}
+        </div>
+      )}
     </motion.div>
   )
 }

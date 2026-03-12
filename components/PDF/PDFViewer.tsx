@@ -295,6 +295,26 @@ function buildTranslationLayout(
   }
 }
 
+function buildBlockOverlayRect(
+  block: TextBlock,
+  scale: number,
+  viewport: PDFViewport,
+) {
+  const xScale = block.sourcePageWidth
+    ? viewport.width / block.sourcePageWidth
+    : scale
+  const yScale = block.sourcePageHeight
+    ? viewport.height / block.sourcePageHeight
+    : scale
+
+  return {
+    left: block.bbox.x * xScale,
+    top: block.bbox.y * yScale,
+    width: block.bbox.width * xScale,
+    height: block.bbox.height * yScale,
+  }
+}
+
 // 单个页面组件
 function PDFPage({
   page,
@@ -686,6 +706,9 @@ function PDFPage({
       layout: buildTranslationLayout(block, scale, viewport),
     }))
     : []
+  const focusedBlockRect = focusedBlock
+    ? buildBlockOverlayRect(focusedBlock, scale, viewport)
+    : null
 
   return (
     <div
@@ -851,14 +874,14 @@ function PDFPage({
         )
       })}
 
-      {focusedBlock && (
+      {focusedBlock && focusedBlockRect && (
         <div
           className="absolute pointer-events-none z-10"
           style={{
-            left: focusedBlock.bbox.x * scale,
-            top: focusedBlock.bbox.y * scale,
-            width: focusedBlock.bbox.width * scale,
-            height: focusedBlock.bbox.height * scale,
+            left: focusedBlockRect.left,
+            top: focusedBlockRect.top,
+            width: focusedBlockRect.width,
+            height: focusedBlockRect.height,
           }}
         >
           <div className="absolute inset-0 rounded-md border-2 border-sky-400/80 bg-sky-300/12 shadow-[0_0_0_4px_rgba(56,189,248,0.18)] animate-pulse" />
@@ -866,10 +889,10 @@ function PDFPage({
             <div
               className="absolute left-0 max-w-72 rounded-xl border border-sky-400/30 bg-[#0f172ae6] px-3 py-2 text-white shadow-xl"
               style={{
-                top: focusedBlock.bbox.y * scale > 96
+                top: focusedBlockRect.top > 96
                   ? -10
-                  : focusedBlock.bbox.height * scale + 10,
-                transform: focusedBlock.bbox.y * scale > 96 ? 'translateY(-100%)' : 'none',
+                  : focusedBlockRect.height + 10,
+                transform: focusedBlockRect.top > 96 ? 'translateY(-100%)' : 'none',
               }}
             >
               {focusTarget.title && (

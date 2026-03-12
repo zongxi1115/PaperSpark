@@ -358,67 +358,93 @@ export function LiteratureSearchPanel() {
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
-          {steps.map(step => (
-            <motion.div
-              key={step.id}
-              animate={step.status === 'in_progress' && !reduceMotion ? {
-                opacity: [0.7, 1, 0.7],
-              } : undefined}
-              transition={step.status === 'in_progress' ? {
-                duration: 1.6,
-                repeat: Infinity,
-                ease: 'easeInOut',
-              } : undefined}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '7px 10px',
-                borderRadius: 999,
-                fontSize: 11,
-                border: `1px solid ${step.status === 'completed'
-                  ? 'color-mix(in srgb, var(--accent-color) 45%, transparent)'
-                  : step.status === 'in_progress'
-                    ? 'color-mix(in srgb, #f59e0b 55%, transparent)'
-                    : 'var(--border-color)'}`,
-                background: step.status === 'completed'
-                  ? 'color-mix(in srgb, var(--accent-color) 9%, white)'
-                  : step.status === 'in_progress'
-                    ? 'color-mix(in srgb, #f59e0b 10%, white)'
-                    : 'var(--bg-secondary)',
-                color: step.status === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)',
-              }}
-            >
-              <motion.span
-                animate={step.status === 'in_progress' && !reduceMotion ? {
-                  scale: [1, 1.2, 1],
-                  opacity: [0.8, 1, 0.8],
-                } : undefined}
-                transition={step.status === 'in_progress' ? {
-                  duration: 1.2,
-                  repeat: Infinity,
-                  ease: 'easeInOut',
-                } : undefined}
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: '50%',
-                  background: step.status === 'completed'
-                    ? 'var(--accent-color)'
-                    : step.status === 'in_progress'
-                      ? '#f59e0b'
-                      : step.status === 'error'
-                        ? '#ef4444'
-                        : step.status === 'waiting'
-                          ? '#8b5cf6'
-                          : 'var(--text-muted)',
-                  boxShadow: step.status === 'in_progress' ? '0 0 0 4px rgba(245, 158, 11, 0.12)' : 'none',
-                }}
-              />
-              {step.label}
-            </motion.div>
-          ))}
+        <div style={{ marginTop: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+            {steps.map((step, index) => {
+              const isCompleted = step.status === 'completed'
+              const isInProgress = step.status === 'in_progress'
+              return (
+                <div
+                  key={step.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    fontSize: 10,
+                    fontWeight: isInProgress ? 600 : 500,
+                    color: isCompleted
+                      ? 'var(--accent-color)'
+                      : isInProgress
+                        ? '#b45309'
+                        : 'var(--text-muted)',
+                  }}
+                >
+                  {isCompleted ? (
+                    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : isInProgress ? (
+                    <motion.span
+                      animate={!reduceMotion ? { opacity: [0.5, 1, 0.5] } : undefined}
+                      transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        background: '#f59e0b',
+                        boxShadow: '0 0 0 3px rgba(245, 158, 11, 0.15)',
+                      }}
+                    />
+                  ) : (
+                    <span
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: '50%',
+                        background: 'var(--border-color)',
+                      }}
+                    />
+                  )}
+                  <span>{step.label}</span>
+                </div>
+              )
+            })}
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              height: 3,
+              borderRadius: 2,
+              background: 'var(--border-color)',
+              overflow: 'hidden',
+            }}
+          >
+            {steps.map((step, index) => {
+              const isCompleted = step.status === 'completed'
+              const isInProgress = step.status === 'in_progress'
+              const segmentWidth = `${100 / steps.length}%`
+              return (
+                <motion.div
+                  key={step.id}
+                  initial={false}
+                  animate={{
+                    background: isCompleted
+                      ? 'var(--accent-color)'
+                      : isInProgress
+                        ? '#f59e0b'
+                        : 'transparent',
+                  }}
+                  transition={{ duration: 0.3 }}
+                  style={{
+                    width: segmentWidth,
+                    height: '100%',
+                    marginRight: index < steps.length - 1 ? 2 : 0,
+                    borderRadius: 2,
+                  }}
+                />
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -562,6 +588,28 @@ export function LiteratureSearchPanel() {
                       </div>
                       <div style={{ fontSize: 12, lineHeight: 1.5, color: 'rgba(15, 23, 42, 0.65)', marginTop: 2 }}>
                         {bubble.text}
+                        {isLatest && isLoading && (
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
+                            {[0, 1, 2].map(i => (
+                              <motion.span
+                                key={i}
+                                animate={!reduceMotion ? { opacity: [0.3, 1, 0.3] } : undefined}
+                                transition={{
+                                  duration: 1,
+                                  repeat: Infinity,
+                                  delay: i * 0.15,
+                                  ease: 'easeInOut',
+                                }}
+                                style={{
+                                  width: 3,
+                                  height: 3,
+                                  borderRadius: '50%',
+                                  background: 'rgba(15, 23, 42, 0.45)',
+                                }}
+                              />
+                            ))}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </motion.div>
@@ -732,6 +780,10 @@ export function LiteratureSearchPanel() {
               canSubmit={allQuestionsAnswered}
               isLoading={isLoading}
               onSubmit={() => void startSearch()}
+              onSkip={() => {
+                setQuestions([])
+                setAnswers({})
+              }}
               reduceMotion={reduceMotion}
             />
           )}
@@ -777,11 +829,35 @@ export function LiteratureSearchPanel() {
               alignItems: 'center',
             }}
           >
-            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}>
               {questions.length > 0
                 ? '回答后会重新规划整轮检索'
                 : isLoading
-                  ? '正在流式推进检索阶段'
+                  ? (
+                    <>
+                      <span>正在检索</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                        {[0, 1, 2].map(i => (
+                          <motion.span
+                            key={i}
+                            animate={!reduceMotion ? { opacity: [0.3, 1, 0.3] } : undefined}
+                            transition={{
+                              duration: 1,
+                              repeat: Infinity,
+                              delay: i * 0.15,
+                              ease: 'easeInOut',
+                            }}
+                            style={{
+                              width: 3,
+                              height: 3,
+                              borderRadius: '50%',
+                              background: 'var(--text-muted)',
+                            }}
+                          />
+                        ))}
+                      </span>
+                    </>
+                  )
                   : '支持中途停止并补充说明后重新规划'}
             </div>
 
@@ -979,6 +1055,7 @@ function ClarificationPanel({
   canSubmit,
   isLoading,
   onSubmit,
+  onSkip,
   reduceMotion,
 }: {
   questions: ClarificationQuestion[]
@@ -987,6 +1064,7 @@ function ClarificationPanel({
   canSubmit: boolean
   isLoading: boolean
   onSubmit: () => void
+  onSkip: () => void
   reduceMotion: boolean | null
 }) {
   const answeredCount = questions.filter(question => {
@@ -1124,15 +1202,25 @@ function ClarificationPanel({
         <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
           已完成 {answeredCount}/{questions.length} 题
         </div>
-        <Button
-          size="sm"
-          color="primary"
-          onPress={onSubmit}
-          isLoading={isLoading}
-          isDisabled={!canSubmit}
-        >
-          提交并继续检索
-        </Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button
+            size="sm"
+            variant="light"
+            onPress={onSkip}
+            isDisabled={isLoading}
+          >
+            跳过
+          </Button>
+          <Button
+            size="sm"
+            color="primary"
+            onPress={onSubmit}
+            isLoading={isLoading}
+            isDisabled={!canSubmit}
+          >
+            提交并继续检索
+          </Button>
+        </div>
       </div>
     </motion.div>
   )

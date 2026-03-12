@@ -404,7 +404,11 @@ export async function getGuideByKnowledgeId(knowledgeItemId: string): Promise<Gu
  * 更新 AI导读 缓存
  */
 export async function updateGuide(id: string, updates: Partial<GuideCache>): Promise<void> {
-  await db.guides.update(id, {
+  const guideTable = db.guides as unknown as {
+    update: (key: string, changes: Record<string, unknown>) => Promise<number>
+  }
+
+  await guideTable.update(id, {
     ...updates,
     updatedAt: new Date().toISOString(),
   })

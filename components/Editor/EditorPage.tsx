@@ -36,6 +36,7 @@ import { FormulaInlineContentSpec } from './InlineFormula'
 import { FormulaInputExtension } from '@/lib/formulaInputExtension'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
 import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
+import { registerEditor, unregisterEditor } from '@/lib/editorContext'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -299,6 +300,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       }
     })
   }, [])
+
+  // 注册编辑器实例供助手工具使用
+  useEffect(() => {
+    registerEditor(editor)
+    return () => unregisterEditor()
+  }, [editor])
 
   // 同步 ghostTextRef
   useEffect(() => {

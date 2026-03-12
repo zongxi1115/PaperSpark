@@ -368,7 +368,7 @@ async function generateGuideHighlights(
           quote: item.quote?.trim() || matchedBlock.text.slice(0, 48),
         } satisfies AIGuideHighlight
       })
-      .filter((item): item is AIGuideHighlight => item !== null)
+      .filter(Boolean) as AIGuideHighlight[]
 
     if (highlights.length > 0) {
       return { success: true, highlights }

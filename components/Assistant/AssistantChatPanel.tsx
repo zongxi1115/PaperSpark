@@ -3,6 +3,9 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Button, Tooltip, Switch, Chip, Select, SelectItem, Dropdown, DropdownTrigger, DropdownMenu, DropdownSection, DropdownItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure } from '@heroui/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { readDocument, type DocumentReadResult } from './tools/ReadDocumentTool'
+import { EditDocumentTool, type EditDocumentRequest } from './tools/EditDocumentTool'
+import { getEditor } from '@/lib/editorContext'
 import { 
   getAgents, 
   getSettings, 
@@ -44,7 +47,9 @@ export function AssistantChatPanel() {
   const [noteContent, setNoteContent] = useState('')
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
   const [showNotesList, setShowNotesList] = useState(false)
-  
+  const [docContext, setDocContext] = useState<DocumentReadResult | null>(null)
+  const [useDocContext, setUseDocContext] = useState(false)
+
   const { isOpen: isNoteModalOpen, onOpen: onNoteModalOpen, onClose: onNoteModalClose } = useDisclosure()
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -633,6 +638,9 @@ export function AssistantChatPanel() {
       const systemPrompt = selectedAgent?.prompt || ''
       let knowledgeCandidates: AssistantCitation[] = []
       const assetContext = useAssets ? buildAssetContext(content) : ''
+      const docContextText = useDocContext && docContext
+        ? `\n\n当前编辑器文档内容（Markdown格式）：\n\`\`\`\n${docContext.markdown.slice(0, 8000)}\n\`\`\``
+        : ''
       const mentionCandidates = mentions.length > 0
         ? await buildMentionKnowledgeCandidates(content, { allowIndexing: useKnowledge })
         : []
@@ -698,7 +706,7 @@ export function AssistantChatPanel() {
             content: m.content,
           })),
           modelConfig,
-          systemPrompt,
+          systemPrompt: systemPrompt + docContextText,
           useKnowledge: shouldSendKnowledgeContext,
           knowledgeCandidates,
           assetContext,
@@ -1037,6 +1045,45 @@ export function AssistantChatPanel() {
               </Tooltip>
               <Switch size="sm" isSelected={useAssets} onValueChange={setUseAssets} />
             </div>
+
+            {getEditor() && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <Tooltip content="读取当前编辑器文档内容，作为对话上下文">
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>引用当前文档</span>
+                </Tooltip>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {docContext && (
+                    <span style={{ fontSize: 10, color: '#10b981' }}>
+                      {docContext.blockCount}块/{docContext.charCount}字
+                    </span>
+                  )}
+                  <button
+                    onClick={() => {
+                      const result = readDocument()
+                      if (result) {
+                        setDocContext(result)
+                        setUseDocContext(true)
+                        addToast({ title: `已读取文档 (${result.blockCount} 块)`, color: 'success' })
+                      } else {
+                        addToast({ title: '未找到编辑器', color: 'warning' })
+                      }
+                    }}
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 4,
+                      padding: '2px 7px',
+                      fontSize: 11,
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    读取
+                  </button>
+                  <Switch size="sm" isSelected={useDocContext} onValueChange={setUseDocContext} isDisabled={!docContext} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1116,7 +1163,24 @@ export function AssistantChatPanel() {
                   )}
                   {message.role === 'assistant' ? (
                     <>
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          code({ node, className, children, ...props }: any) {
+                            const isBlock = node?.position?.start?.line !== node?.position?.end?.line || String(children).includes('\n')
+                            const lang = /language-(\w+)/.exec(className || '')?.[1]
+                            if (isBlock && lang === 'edit_document') {
+                              try {
+                                const req: EditDocumentRequest = JSON.parse(String(children).trim())
+                                return <EditDocumentTool request={req} />
+                              } catch {
+                                // fall through to normal code block
+                              }
+                            }
+                            return <code className={className} {...props}>{children}</code>
+                          }
+                        }}
+                      >
                         {message.content}
                       </ReactMarkdown>
                       {idx === messages.length - 1 && isLoading && (

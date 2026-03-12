@@ -11,7 +11,7 @@ import type {
 
 export const maxDuration = 120
 
-const MAX_CONCURRENT_REQUESTS = 4
+const MAX_CONCURRENT_REQUESTS = 8
 
 type ParagraphBlock = TranslationBlockPayload & {
   order: number

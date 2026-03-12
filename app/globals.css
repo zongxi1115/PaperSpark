@@ -81,3 +81,23 @@ math-field:focus,
 math-field:focus-within {
   outline: none;
 }
+
+/* PDF 文本块高亮动画 */
+.block-highlight {
+  animation: block-pulse 2s ease-in-out;
+}
+
+@keyframes block-pulse {
+  0% {
+    background-color: rgba(59, 130, 246, 0.3);
+    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0.5);
+  }
+  50% {
+    background-color: rgba(59, 130, 246, 0.2);
+    box-shadow: 0 0 0 15px rgba(59, 130, 246, 0.4);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: none;
+  }
+}

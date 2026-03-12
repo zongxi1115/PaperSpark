@@ -16,10 +16,12 @@ import {
   getTranslation,
   deleteTranslation,
   getAnnotationsByDocumentId,
-  saveAnnotation,
   deleteAnnotation,
+  updateAnnotation,
+  getFullTextByKnowledgeId,
 } from '@/lib/pdfCache'
 import PDFViewer from '@/components/PDF/PDFViewer'
+import AIGuidePanel from '@/components/Guide/AIGuidePanel'
 import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
 import { parsePDFWithSurya } from '@/lib/suryaParser'
@@ -44,11 +46,16 @@ export default function ImmersiveReaderPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [scale, setScale] = useState(1.2)
-  const [sidebarTab, setSidebarTab] = useState<'info' | 'translate' | 'notes'>('info')
+  const [sidebarTab, setSidebarTab] = useState<'info' | 'translate' | 'notes' | 'guide'>('guide')
+  const [sidebarWidth, setSidebarWidth] = useState(288) // 288px = 72 * 4
 
   // PDF 数据
   const [blocks, setBlocks] = useState<TextBlock[]>([])
   const [translatedBlocks, setTranslatedBlocks] = useState<Map<string, string>>(new Map())
+  const [fullText, setFullText] = useState<string>('')
+
+  // 跳转控制
+  const [jumpToBlock, setJumpToBlock] = useState<{ blockId: string; pageNum: number } | null>(null)
 
   // 翻译状态
   const [translating, setTranslating] = useState(false)
@@ -60,6 +67,8 @@ export default function ImmersiveReaderPage() {
 
   // 批注
   const [annotations, setAnnotations] = useState<PDFAnnotation[]>([])
+  const [editingAnnotationId, setEditingAnnotationId] = useState<string | null>(null)
+  const [editingNoteText, setEditingNoteText] = useState('')
 
   // 元数据
   const [metadata, setMetadata] = useState<{
@@ -179,6 +188,18 @@ export default function ImmersiveReaderPage() {
         setBlocks(allBlocks)
       }
 
+      // 加载全文内容
+      if (existingDoc.fullText) {
+        setFullText(existingDoc.fullText)
+      } else if (existingPages.length > 0) {
+        // 如果没有缓存的全文，从页面拼接
+        const text = existingPages
+          .sort((a, b) => a.pageNum - b.pageNum)
+          .map(p => p.fullText || p.blocks.map(b => b.text).join('\n'))
+          .join('\n\n')
+        setFullText(text)
+      }
+
       setMetadata({
         title: existingDoc.metadata.title,
         authors: existingDoc.metadata.authors,
@@ -284,6 +305,11 @@ export default function ImmersiveReaderPage() {
         parsedAt,
         updatedAt: parsedAt,
       })
+
+      // 设置全文内容
+      if (result.fullText) {
+        setFullText(result.fullText)
+      }
 
       setMetadata({
         title: mergedMetadata.title,
@@ -419,17 +445,32 @@ export default function ImmersiveReaderPage() {
     }
   }, [translating, structureParsing, suryaReady, blocks, knowledgeId])
 
-  // 添加批注
-  const handleAnnotationAdd = useCallback(async (annotation: PDFAnnotation) => {
-    const newAnnotation = { ...annotation, documentId: knowledgeId }
-    await saveAnnotation(newAnnotation)
-    setAnnotations(prev => [...prev, newAnnotation])
-  }, [knowledgeId])
+  // 添加批注（PDFViewer 已经保存，这里只更新状态）
+  const handleAnnotationAdd = useCallback((annotation: PDFAnnotation) => {
+    setAnnotations(prev => [...prev, annotation])
+  }, [])
 
   // 删除批注
   const handleAnnotationDelete = useCallback(async (id: string) => {
     await deleteAnnotation(id)
     setAnnotations(prev => prev.filter(a => a.id !== id))
+    if (editingAnnotationId === id) setEditingAnnotationId(null)
+  }, [editingAnnotationId])
+
+  // 更新批注笔记
+  const handleAnnotationNoteUpdate = useCallback(async (id: string, content: string) => {
+    const type = content.trim() ? 'note' : 'highlight'
+    await updateAnnotation(id, { content, type })
+    setAnnotations(prev => prev.map(a =>
+      a.id === id
+        ? { ...a, content, type, updatedAt: new Date().toISOString() }
+        : a
+    ))
+    setEditingAnnotationId(null)
+  }, [])
+
+  const handleAnnotationJump = useCallback((pageNum: number) => {
+    setCurrentPage(pageNum)
   }, [])
 
   // 更新 blocks 的翻译
@@ -525,6 +566,21 @@ export default function ImmersiveReaderPage() {
           </Button>
         </Tooltip>
 
+        <div className="w-6 h-px bg-[#444] my-2" />
+
+        <Tooltip content="AI导读" placement="right">
+          <Button
+            isIconOnly
+            size="sm"
+            variant={sidebarTab === 'guide' ? 'solid' : 'light'}
+            color={sidebarTab === 'guide' ? 'primary' : 'default'}
+            className={sidebarTab === 'guide' ? '' : 'text-gray-400 hover:text-white'}
+            onPress={() => setSidebarTab('guide')}
+          >
+            <Icon icon="mdi:robot-outline" className="text-xl" />
+          </Button>
+        </Tooltip>
+
         <div className="flex-1" />
 
         {/* 翻译状态 */}
@@ -553,7 +609,38 @@ export default function ImmersiveReaderPage() {
       </div>
 
       {/* 左侧面板 */}
-      <div className="w-72 bg-[#252525] border-r border-[#333] flex flex-col overflow-hidden">
+      <div 
+        className="bg-[#252525] border-r border-[#333] flex flex-col overflow-hidden relative"
+        style={{ width: sidebarWidth }}
+      >
+        {/* 拖动调整宽度手柄 */}
+        <div
+          className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-500/50 active:bg-blue-500 transition-colors z-10"
+          onMouseDown={(e) => {
+            e.preventDefault()
+            const startX = e.clientX
+            const startWidth = sidebarWidth
+
+            const handleMouseMove = (moveEvent: MouseEvent) => {
+              const delta = moveEvent.clientX - startX
+              const newWidth = Math.max(200, Math.min(500, startWidth + delta))
+              setSidebarWidth(newWidth)
+            }
+
+            const handleMouseUp = () => {
+              document.removeEventListener('mousemove', handleMouseMove)
+              document.removeEventListener('mouseup', handleMouseUp)
+              document.body.style.cursor = ''
+              document.body.style.userSelect = ''
+            }
+
+            document.body.style.cursor = 'col-resize'
+            document.body.style.userSelect = 'none'
+            document.addEventListener('mousemove', handleMouseMove)
+            document.addEventListener('mouseup', handleMouseUp)
+          }}
+        />
+
         {/* 文档信息 */}
         {sidebarTab === 'info' && (
           <div className="flex-1 overflow-auto p-4">
@@ -688,46 +775,163 @@ export default function ImmersiveReaderPage() {
 
         {/* 批注 */}
         {sidebarTab === 'notes' && (
-          <div className="flex-1 overflow-auto p-4">
-            <h3 className="text-sm font-medium text-gray-300 mb-3">批注 ({annotations.length})</h3>
+          <div className="flex-1 overflow-auto p-3">
+            <div className="flex items-center justify-between mb-3 px-1">
+              <h3 className="text-sm font-medium text-gray-300">
+                批注
+                {annotations.length > 0 && (
+                  <span className="ml-1.5 text-[10px] bg-[#333] text-gray-400 rounded-full px-1.5 py-0.5">
+                    {annotations.length}
+                  </span>
+                )}
+              </h3>
+              {annotations.filter(a => a.type === 'note').length > 0 && (
+                <span className="text-[10px] text-blue-400 flex items-center gap-0.5">
+                  <Icon icon="mdi:note-text-outline" className="text-xs" />
+                  {annotations.filter(a => a.type === 'note').length} 条笔记
+                </span>
+              )}
+            </div>
 
             {annotations.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-8 text-gray-500">
-                <Icon icon="mdi:comment-text-outline" className="text-3xl mb-2" />
-                <p className="text-sm">暂无批注</p>
-                <p className="text-xs mt-1 text-gray-600">选中文本后点击颜色添加高亮</p>
+              <div className="flex flex-col items-center justify-center py-10 text-gray-500 px-4">
+                <Icon icon="mdi:comment-text-outline" className="text-4xl mb-3 text-gray-600" />
+                <p className="text-sm text-center">暂无批注</p>
+                <p className="text-xs mt-1.5 text-gray-600 text-center leading-relaxed">
+                  选中 PDF 文本后点击颜色添加高亮，或点击 ✏️ 图标添加带笔记的高亮
+                </p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-2.5">
                 {annotations.map(ann => (
                   <div
                     key={ann.id}
-                    className="p-2 bg-[#1a1a1a] rounded group"
+                    className="bg-[#1a1a1a] rounded-xl overflow-hidden group border border-transparent hover:border-[#333] transition-colors"
                   >
-                    <div className="flex items-start gap-2">
-                      <div
-                        className="w-3 h-3 rounded-full mt-1 flex-shrink-0"
-                        style={{ backgroundColor: HIGHLIGHT_COLORS[ann.color].border }}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs text-gray-300 line-clamp-3">{ann.selectedText}</p>
-                        <p className="text-[10px] text-gray-600 mt-1">第 {ann.pageNum} 页</p>
+                    {/* 头部：页码 + 类型标记 + 删除 */}
+                    <div
+                      className="flex items-center justify-between px-3 py-1.5"
+                      style={{ borderLeft: `3px solid ${HIGHLIGHT_COLORS[ann.color].border}` }}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span
+                          className="text-[10px] font-medium cursor-pointer hover:text-blue-400 transition-colors"
+                          style={{ color: HIGHLIGHT_COLORS[ann.color].border }}
+                          onClick={() => handleAnnotationJump(ann.pageNum)}
+                          title="跳转到该页"
+                        >
+                          第 {ann.pageNum} 页
+                        </span>
+                        {ann.type === 'note' && (
+                          <span className="flex items-center gap-0.5 text-[10px] text-blue-400">
+                            <Icon icon="mdi:note-text-outline" className="text-[10px]" />
+                            笔记
+                          </span>
+                        )}
                       </div>
                       <Button
                         isIconOnly
                         size="sm"
                         variant="light"
-                        className="opacity-0 group-hover:opacity-100 text-gray-500 hover:text-red-400 min-w-6 h-6"
+                        className="opacity-0 group-hover:opacity-100 text-gray-600 hover:text-red-400 min-w-5 h-5"
                         onPress={() => handleAnnotationDelete(ann.id)}
                       >
-                        <Icon icon="mdi:delete-outline" className="text-sm" />
+                        <Icon icon="mdi:delete-outline" className="text-xs" />
                       </Button>
                     </div>
+
+                    {/* 选中文本引用 */}
+                    <div className="px-3 pt-2 pb-1">
+                      <p
+                        className="text-xs text-gray-400 italic leading-relaxed line-clamp-3 pl-2 border-l-2 cursor-pointer hover:text-gray-300 transition-colors"
+                        style={{ borderColor: HIGHLIGHT_COLORS[ann.color].border + '60' }}
+                        onClick={() => handleAnnotationJump(ann.pageNum)}
+                      >
+                        {ann.selectedText}
+                      </p>
+                    </div>
+
+                    {/* 笔记内容 / 编辑区 */}
+                    {editingAnnotationId === ann.id ? (
+                      <div className="px-3 pb-3 pt-1">
+                        <textarea
+                          className="w-full bg-[#252535] text-gray-200 text-xs rounded-lg px-2.5 py-2 resize-none focus:outline-none border border-gray-600 focus:border-blue-500 placeholder-gray-600"
+                          rows={3}
+                          value={editingNoteText}
+                          onChange={e => setEditingNoteText(e.target.value)}
+                          placeholder="写下你的想法..."
+                          autoFocus
+                        />
+                        <div className="flex gap-2 mt-1.5 justify-end">
+                          <Button
+                            size="sm"
+                            variant="light"
+                            className="text-gray-500 h-6 min-w-0 px-2 text-xs"
+                            onPress={() => setEditingAnnotationId(null)}
+                          >
+                            取消
+                          </Button>
+                          <Button
+                            size="sm"
+                            color="primary"
+                            className="h-6 min-w-0 px-2.5 text-xs"
+                            onPress={() => handleAnnotationNoteUpdate(ann.id, editingNoteText)}
+                          >
+                            保存
+                          </Button>
+                        </div>
+                      </div>
+                    ) : ann.content ? (
+                      <div
+                        className="mx-3 mb-3 mt-1 rounded-lg bg-[#252535] border border-blue-900/30 px-2.5 py-2 cursor-pointer hover:border-blue-700/50 transition-colors group/note"
+                        onClick={() => {
+                          setEditingAnnotationId(ann.id)
+                          setEditingNoteText(ann.content || '')
+                        }}
+                        title="点击编辑笔记"
+                      >
+                        <div className="flex items-start gap-1.5">
+                          <Icon icon="mdi:note-text-outline" className="text-blue-400 text-xs mt-0.5 shrink-0" />
+                          <p className="text-xs text-gray-300 leading-relaxed flex-1">{ann.content}</p>
+                          <Icon icon="mdi:pencil-outline" className="text-gray-600 group-hover/note:text-gray-400 text-xs shrink-0 mt-0.5 transition-colors" />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="px-3 pb-2.5">
+                        <button
+                          className="text-[11px] text-gray-600 hover:text-blue-400 flex items-center gap-1 transition-colors"
+                          onClick={() => {
+                            setEditingAnnotationId(ann.id)
+                            setEditingNoteText('')
+                          }}
+                        >
+                          <Icon icon="mdi:plus-circle-outline" className="text-xs" />
+                          添加笔记
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
             )}
           </div>
+        )}
+
+        {/* AI导读 */}
+        {sidebarTab === 'guide' && (
+          <AIGuidePanel
+            documentId={knowledgeId}
+            knowledgeItemId={knowledgeId}
+            blocks={blocks}
+            fullText={fullText}
+            modelConfig={getSelectedSmallModel(getSettings())}
+            onBlockClick={(blockId, pageNum) => {
+              if (pageNum) {
+                setCurrentPage(pageNum)
+                setJumpToBlock({ blockId, pageNum })
+              }
+            }}
+          />
         )}
       </div>
 
@@ -838,6 +1042,7 @@ export default function ImmersiveReaderPage() {
               annotations={annotations}
               onAnnotationAdd={handleAnnotationAdd}
               onAnnotationDelete={handleAnnotationDelete}
+              jumpToBlock={jumpToBlock}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500">

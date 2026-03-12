@@ -15,7 +15,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+import chromadb
+from chromadb.config import Settings
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -533,3 +535,233 @@ def get_job_result(job_id: str):
         **model_to_dict(status_payload),
         parsed=parsed,
     )
+
+
+# ============ ChromaDB 向量存储功能 ============
+
+# ChromaDB 数据目录
+CHROMA_ROOT = Path("out") / "chroma_db"
+CHROMA_ROOT.mkdir(parents=True, exist_ok=True)
+
+# 初始化 ChromaDB 客户端（嵌入式持久化模式）
+_chroma_client: chromadb.ClientAPI | None = None
+
+
+def get_chroma_client() -> chromadb.ClientAPI:
+    global _chroma_client
+    if _chroma_client is None:
+        _chroma_client = chromadb.PersistentClient(
+            path=str(CHROMA_ROOT.resolve()),
+            settings=Settings(anonymized_telemetry=False)
+        )
+    return _chroma_client
+
+
+class EmbedRequest(BaseModel):
+    document_id: str
+    texts: list[str]
+    block_ids: list[str]
+    metadatas: list[dict[str, Any]]
+    openai_api_key: str
+    openai_base_url: str = "https://api.openai.com/v1"
+
+
+class SearchRequest(BaseModel):
+    document_id: str
+    query: str
+    top_k: int = 5
+    openai_api_key: str
+    openai_base_url: str = "https://api.openai.com/v1"
+
+
+class EmbedResponse(BaseModel):
+    success: bool
+    message: str
+    count: int | None = None
+
+
+class SearchResult(BaseModel):
+    block_id: str
+    text: str
+    score: float
+    metadata: dict[str, Any]
+
+
+class SearchResponse(BaseModel):
+    success: bool
+    results: list[SearchResult]
+    query: str
+
+
+async def generate_embeddings(
+    texts: list[str],
+    api_key: str,
+    base_url: str
+) -> list[list[float]]:
+    """调用 OpenAI API 生成嵌入向量"""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(
+            f"{base_url}/embeddings",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+            json={
+                "model": "text-embedding-3-small",
+                "input": texts,
+            },
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=500,
+                detail=f"OpenAI API error: {response.text}"
+            )
+
+        data = response.json()
+        return [item["embedding"] for item in data["data"]]
+
+
+@app.get("/rag/health")
+def rag_health() -> dict[str, Any]:
+    """检查向量数据库状态"""
+    try:
+        client = get_chroma_client()
+        collections = client.list_collections()
+        return {
+            "ok": True,
+            "chroma_path": str(CHROMA_ROOT.resolve()),
+            "collections_count": len(collections),
+        }
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/rag/embed", response_model=EmbedResponse)
+async def rag_embed(request: EmbedRequest = Body(...)) -> EmbedResponse:
+    """生成并存储文档嵌入向量"""
+    if not request.texts:
+        return EmbedResponse(success=True, message="没有文本需要嵌入", count=0)
+
+    try:
+        # 生成嵌入向量
+        embeddings = await generate_embeddings(
+            request.texts,
+            request.openai_api_key,
+            request.openai_base_url
+        )
+
+        # 获取或创建集合
+        client = get_chroma_client()
+        collection_name = f"doc_{request.document_id.replace('-', '_')}"
+        
+        try:
+            collection = client.get_collection(name=collection_name)
+        except Exception:
+            collection = client.create_collection(
+                name=collection_name,
+                metadata={"document_id": request.document_id}
+            )
+
+        # 添加向量
+        collection.add(
+            ids=request.block_ids,
+            embeddings=embeddings,
+            documents=request.texts,
+            metadatas=request.metadatas,
+        )
+
+        return EmbedResponse(
+            success=True,
+            message=f"成功嵌入 {len(request.texts)} 个文本块",
+            count=len(request.texts)
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/rag/search", response_model=SearchResponse)
+async def rag_search(request: SearchRequest = Body(...)) -> SearchResponse:
+    """语义搜索文档"""
+    try:
+        # 生成查询嵌入
+        query_embeddings = await generate_embeddings(
+            [request.query],
+            request.openai_api_key,
+            request.openai_base_url
+        )
+
+        # 获取集合并搜索
+        client = get_chroma_client()
+        collection_name = f"doc_{request.document_id.replace('-', '_')}"
+        
+        try:
+            collection = client.get_collection(name=collection_name)
+        except Exception:
+            return SearchResponse(
+                success=True,
+                results=[],
+                query=request.query
+            )
+
+        results = collection.query(
+            query_embeddings=query_embeddings,
+            n_results=request.top_k,
+        )
+
+        search_results = []
+        if results["ids"] and results["ids"][0]:
+            for i, block_id in enumerate(results["ids"][0]):
+                distance = results["distances"][0][i] if results.get("distances") else 0
+                # 距离转相似度 (假设是余弦距离)
+                score = 1 - distance if distance <= 1 else 1 / (1 + distance)
+                
+                search_results.append(SearchResult(
+                    block_id=block_id,
+                    text=results["documents"][0][i] if results.get("documents") else "",
+                    score=score,
+                    metadata=results["metadatas"][0][i] if results.get("metadatas") else {},
+                ))
+
+        return SearchResponse(
+            success=True,
+            results=search_results,
+            query=request.query
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/rag/{document_id}")
+def rag_delete(document_id: str) -> dict[str, Any]:
+    """删除文档的向量数据"""
+    try:
+        client = get_chroma_client()
+        collection_name = f"doc_{document_id.replace('-', '_')}"
+        
+        try:
+            client.delete_collection(name=collection_name)
+            return {"success": True, "message": f"已删除文档 {document_id} 的向量数据"}
+        except Exception:
+            return {"success": True, "message": "集合不存在或已删除"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/rag/collections")
+def rag_list_collections() -> dict[str, Any]:
+    """列出所有向量集合"""
+    try:
+        client = get_chroma_client()
+        collections = client.list_collections()
+        return {
+            "success": True,
+            "collections": [
+                {"name": c.name, "count": c.count()}
+                for c in collections
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

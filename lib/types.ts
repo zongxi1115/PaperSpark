@@ -407,11 +407,11 @@ export type HighlightColor = 'yellow' | 'green' | 'blue' | 'pink' | 'purple'
 
 // 高亮颜色映射
 export const HIGHLIGHT_COLORS: Record<HighlightColor, { bg: string; border: string }> = {
-  yellow: { bg: 'rgba(255, 235, 59, 0.4)', border: 'rgba(255, 193, 7, 0.8)' },
-  green: { bg: 'rgba(76, 175, 80, 0.3)', border: 'rgba(76, 175, 80, 0.8)' },
-  blue: { bg: 'rgba(33, 150, 243, 0.3)', border: 'rgba(33, 150, 243, 0.8)' },
-  pink: { bg: 'rgba(233, 30, 99, 0.25)', border: 'rgba(233, 30, 99, 0.8)' },
-  purple: { bg: 'rgba(156, 39, 176, 0.3)', border: 'rgba(156, 39, 176, 0.8)' },
+  yellow: { bg: 'rgba(255, 235, 59, 0.18)', border: 'rgba(245, 158, 11, 0.62)' },
+  green: { bg: 'rgba(76, 175, 80, 0.16)', border: 'rgba(34, 197, 94, 0.58)' },
+  blue: { bg: 'rgba(33, 150, 243, 0.14)', border: 'rgba(59, 130, 246, 0.6)' },
+  pink: { bg: 'rgba(233, 30, 99, 0.12)', border: 'rgba(236, 72, 153, 0.58)' },
+  purple: { bg: 'rgba(156, 39, 176, 0.14)', border: 'rgba(168, 85, 247, 0.58)' },
 }
 
 // 批注类型
@@ -451,4 +451,124 @@ export interface TranslationStreamEvent {
     error?: string
     done?: boolean
   }
+}
+
+// ============ AI导读相关类型 ============
+
+// 思维导图节点类型
+export type MindMapNodeType = 'root' | 'section' | 'paragraph'
+
+// 思维导图节点（树形结构）
+export interface MindMapNode {
+  id: string
+  type: MindMapNodeType
+  label: string
+  blockId?: string // 关联的文本块ID（用于跳转）
+  pageNum?: number // 页码
+  children?: MindMapNode[]
+}
+
+// React Flow 节点数据
+export interface FlowNodeData {
+  label: string
+  blockId?: string
+  pageNum?: number
+  type: MindMapNodeType
+}
+
+// AI导读概要
+export interface AIGuideSummary {
+  background: string // 研究背景
+  methods: string // 核心方法
+  conclusions: string // 主要结论
+  keyPoints: string[] // 关键要点列表
+}
+
+// 段落关键要点
+export interface BlockKeyPoints {
+  blockId: string
+  text: string // 原文片段
+  keyPoints: string[] // 3-5个关键要点
+  pageNum: number
+}
+
+// AI导读完整数据
+export interface AIGuideData {
+  summary: AIGuideSummary
+  structure: MindMapNode[]
+  blockKeyPoints: BlockKeyPoints[]
+}
+
+// AI导读缓存
+export interface GuideCache {
+  id: string // `${documentId}_guide`
+  documentId: string
+  knowledgeItemId: string
+  summary: AIGuideSummary
+  structure: MindMapNode[]
+  blockKeyPoints: BlockKeyPoints[]
+  modelUsed: string
+  generatedAt: string
+  updatedAt: string
+}
+
+// AI导读请求类型
+export type AIGuideAction = 'summary' | 'structure' | 'keypoints' | 'all'
+
+// AI导读请求体
+export interface AIGuideRequest {
+  documentId: string
+  knowledgeItemId: string
+  blocks: TextBlock[]
+  fullText?: string
+  modelConfig: ModelConfig
+  action: AIGuideAction
+}
+
+// AI导读响应
+export interface AIGuideResponse {
+  success: boolean
+  summary?: AIGuideSummary
+  structure?: MindMapNode[]
+  blockKeyPoints?: BlockKeyPoints[]
+  error?: string
+}
+
+// ============ RAG 向量存储相关类型 ============
+
+// 向量文档
+export interface VectorDocument {
+  id: string
+  documentId: string
+  blockId: string
+  text: string
+  embedding?: number[]
+  metadata: {
+    pageNum: number
+    type: TextBlockType
+    bbox: BoundingBox
+  }
+}
+
+// RAG 搜索请求
+export interface RAGSearchRequest {
+  documentId: string
+  query: string
+  topK?: number
+}
+
+// RAG 搜索结果
+export interface RAGSearchResult {
+  blockId: string
+  text: string
+  score: number
+  pageNum: number
+  type: TextBlockType
+}
+
+// RAG 嵌入请求
+export interface RAGEmbedRequest {
+  documentId: string
+  blocks: TextBlock[]
+  modelConfig: ModelConfig
 }

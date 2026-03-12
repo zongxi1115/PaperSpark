@@ -1,12 +1,14 @@
 'use client'
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { Button, Switch, Select, SelectItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure } from '@heroui/react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { Button, Tooltip, Switch, Chip, Select, SelectItem, Dropdown, DropdownTrigger, DropdownMenu, DropdownSection, DropdownItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure } from '@heroui/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { 
   getAgents, 
   getSettings, 
-  getKnowledgeItems, 
+  getKnowledgeItems,
+  getAssets,
+  getAssetTypes,
   getSelectedLargeModel,
   getConversations,
   saveConversation,
@@ -16,7 +18,11 @@ import {
   addAssistantNote,
   deleteAssistantNote,
 } from '@/lib/storage'
-import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote } from '@/lib/types'
+import { getVectorDocumentsByDocumentId } from '@/lib/pdfCache'
+import { getFullTextByKnowledgeId } from '@/lib/pdfCache'
+import { searchMyKnowledgeBase as runKnowledgeSearch } from '@/lib/assistantKnowledge'
+import { indexKnowledgeForRAG } from '@/lib/rag'
+import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote, AssistantToolEvent, AssistantCitation } from '@/lib/types'
 
 export function AssistantChatPanel() {
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
@@ -24,11 +30,15 @@ export function AssistantChatPanel() {
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [useKnowledge, setUseKnowledge] = useState(false)
+  const [useAssets, setUseAssets] = useState(false)
+  const [knowledgeBusy, setKnowledgeBusy] = useState(false)
   const [agents, setAgents] = useState<Agent[]>([])
   const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null)
   const [settings, setSettings] = useState<AppSettings | null>(null)
-  const [showAgentPicker, setShowAgentPicker] = useState(false)
-  const [agentFilter, setAgentFilter] = useState('')
+  const [showSlashMenu, setShowSlashMenu] = useState(false)
+  const [showMentionMenu, setShowMentionMenu] = useState(false)
+  const [mentionQuery, setMentionQuery] = useState('')
+  const [mentions, setMentions] = useState<Array<{ id: string; type: 'knowledge' | 'asset'; title: string }>>([])
   const [showHistory, setShowHistory] = useState(false)
   const [notes, setNotes] = useState<AssistantNote[]>([])
   const [noteContent, setNoteContent] = useState('')
@@ -60,37 +70,66 @@ export function AssistantChatPanel() {
   // 处理输入变化
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const nextValue = e.target.value
-    if (nextValue === '/' && !showAgentPicker && inputValue.length === 0) {
-      setShowAgentPicker(true)
-      setAgentFilter('')
+    if (nextValue === '/' && !showSlashMenu && inputValue.length === 0) {
+      setShowSlashMenu(true)
       setInputValue('')
       return
     }
+
+    const mentionMatch = nextValue.match(/(?:^|\s)@([^\s@]*)$/)
+    if (mentionMatch) {
+      setMentionQuery(mentionMatch[1] || '')
+      setShowMentionMenu(true)
+    } else {
+      setMentionQuery('')
+      setShowMentionMenu(false)
+    }
+
     setInputValue(nextValue)
   }
 
   // 处理输入框按键
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === '/' && !showAgentPicker && inputValue.length === 0) {
+    if (e.key === '/' && !showSlashMenu && inputValue.length === 0) {
       e.preventDefault()
-      setShowAgentPicker(true)
-      setAgentFilter('')
+      setShowSlashMenu(true)
       return
     }
 
-    if (e.key === 'Escape' && showAgentPicker) {
-      setShowAgentPicker(false)
-    } else if (e.key === 'Enter' && !e.shiftKey && !showAgentPicker) {
+    if (e.key === 'Escape' && (showSlashMenu || showMentionMenu)) {
+      setShowSlashMenu(false)
+      setShowMentionMenu(false)
+    } else if (e.key === 'Enter' && !e.shiftKey && !showSlashMenu) {
       e.preventDefault()
       handleSend()
     }
   }
 
+  const handleSlashAction = useCallback((key: React.Key) => {
+    const value = String(key)
+
+    if (value === 'command-knowledge') {
+      setUseKnowledge(current => !current)
+    } else if (value === 'command-assets') {
+      setUseAssets(current => !current)
+    } else if (value === 'agent:none') {
+      handleRemoveAgent()
+    } else if (value.startsWith('agent:')) {
+      const agentId = value.replace('agent:', '')
+      const agent = agents.find(item => item.id === agentId)
+      if (agent) {
+        handleSelectAgent(agent)
+      }
+    }
+
+    setShowSlashMenu(false)
+    inputRef.current?.focus()
+  }, [agents])
+
   // 选择智能体
   const handleSelectAgent = (agent: Agent) => {
     setSelectedAgent(agent)
-    setShowAgentPicker(false)
-    setAgentFilter('')
+    setShowSlashMenu(false)
 
     if (currentConversation) {
       const updated: AssistantConversation = {
@@ -120,6 +159,204 @@ export function AssistantChatPanel() {
     }
     inputRef.current?.focus()
   }
+
+  const buildAssetContext = useCallback((query: string) => {
+    const assets = getAssets()
+    const assetTypes = getAssetTypes()
+    const tokens = query
+      .toLowerCase()
+      .split(/\s+/)
+      .map(token => token.trim())
+      .filter(token => token.length >= 2)
+
+    const ranked = assets
+      .map(asset => {
+        const assetType = assetTypes.find(type => type.id === asset.typeId)
+        const haystack = [
+          asset.title,
+          asset.summary,
+          ...(asset.tags || []),
+          assetType?.name,
+        ].filter(Boolean).join('\n').toLowerCase()
+
+        const score = tokens.reduce((total, token) => total + (haystack.includes(token) ? 1 : 0), 0)
+        return { asset, assetType, score }
+      })
+      .filter(entry => entry.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 5)
+
+    if (ranked.length === 0) {
+      return ''
+    }
+
+    return ranked.map(({ asset, assetType }) => [
+      `标题：${asset.title}`,
+      assetType?.name ? `类型：${assetType.name}` : '',
+      asset.summary ? `摘要：${asset.summary}` : '',
+      asset.tags?.length ? `标签：${asset.tags.join('、')}` : '',
+    ].filter(Boolean).join('\n')).join('\n\n---\n\n')
+  }, [])
+
+  const extractBlockNoteText = useCallback((value: unknown): string => {
+    if (typeof value === 'string') return value
+    if (!value) return ''
+    if (Array.isArray(value)) {
+      return value.map(item => extractBlockNoteText(item)).filter(Boolean).join('\n')
+    }
+    if (typeof value === 'object') {
+      const record = value as Record<string, unknown>
+      return [
+        extractBlockNoteText(record.text),
+        extractBlockNoteText(record.content),
+        extractBlockNoteText(record.children),
+      ].filter(Boolean).join('\n')
+    }
+    return ''
+  }, [])
+
+  const buildTextBlocks = useCallback((documentId: string, text: string) => {
+    return text
+      .split(/\n{2,}/)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .slice(0, 12)
+      .map((part, index) => ({
+        id: `${documentId}-block-${index + 1}`,
+        type: 'paragraph' as const,
+        text: part.slice(0, 1200),
+        bbox: { x: 0, y: 0, width: 0, height: 0 },
+        style: { fontSize: 12, fontFamily: 'system-ui', isBold: false, isItalic: false },
+        pageNum: index + 1,
+        itemIds: [],
+      }))
+  }, [])
+
+  const mentionCandidates = useMemo(() => {
+    const keyword = mentionQuery.trim().toLowerCase()
+    const knowledgeItems = getKnowledgeItems().map(item => ({
+      id: item.id,
+      type: 'knowledge' as const,
+      title: item.title,
+      subtitle: item.cachedSummary || item.abstract || item.authors?.join('、') || '知识库条目',
+    }))
+    const assetItems = getAssets().map(asset => ({
+      id: asset.id,
+      type: 'asset' as const,
+      title: asset.title,
+      subtitle: asset.summary || asset.tags?.join('、') || '资产库条目',
+    }))
+
+    return [...knowledgeItems, ...assetItems]
+      .filter(item => !mentions.some(mention => mention.id === item.id && mention.type === item.type))
+      .filter(item => !keyword || item.title.toLowerCase().includes(keyword) || item.subtitle.toLowerCase().includes(keyword))
+      .slice(0, 8)
+  }, [mentionQuery, mentions])
+
+  const handleMentionSelect = useCallback((candidate: { id: string; type: 'knowledge' | 'asset'; title: string }) => {
+    setMentions(prev => [...prev, candidate])
+    setInputValue(prev => prev.replace(/(?:^|\s)@([^\s@]*)$/, ''))
+    setMentionQuery('')
+    setShowMentionMenu(false)
+    requestAnimationFrame(() => {
+      inputRef.current?.focus()
+    })
+  }, [])
+
+  const removeMention = useCallback((id: string, type: 'knowledge' | 'asset') => {
+    setMentions(prev => prev.filter(item => !(item.id === id && item.type === type)))
+  }, [])
+
+  const buildMentionKnowledgeCandidates = useCallback(async (query: string) => {
+    const focusedResults: AssistantCitation[] = []
+    const knowledgeMentions = mentions.filter(item => item.type === 'knowledge')
+    const assetMentions = mentions.filter(item => item.type === 'asset')
+
+    for (const mention of knowledgeMentions) {
+      const knowledge = getKnowledgeItems().find(item => item.id === mention.id)
+      if (!knowledge) continue
+
+      if (knowledge.cachedSummary || knowledge.abstract) {
+        focusedResults.push({
+          id: `mention-overview-${knowledge.id}`,
+          knowledgeItemId: knowledge.id,
+          title: knowledge.title,
+          excerpt: [knowledge.cachedSummary, knowledge.abstract].filter(Boolean).join('\n\n'),
+          score: 0.98,
+          sourceKind: 'overview',
+          year: knowledge.year,
+          journal: knowledge.journal,
+          authors: knowledge.authors,
+        })
+      }
+
+      let vectorDocuments = await getVectorDocumentsByDocumentId(knowledge.id)
+      if (!vectorDocuments.length && knowledge.hasImmersiveCache) {
+        const fullText = await getFullTextByKnowledgeId(knowledge.id)
+        const blocks = buildTextBlocks(knowledge.id, fullText || '')
+        if (blocks.length) {
+          await indexKnowledgeForRAG({ documentId: knowledge.id, blocks, forceLocal: true })
+          vectorDocuments = await getVectorDocumentsByDocumentId(knowledge.id)
+        }
+      }
+
+      const matchedVectors = vectorDocuments
+        .map(doc => ({
+          ...doc,
+          score: doc.text.toLowerCase().includes(query.toLowerCase()) ? 0.99 : 0.9,
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3)
+
+      matchedVectors.forEach((doc, index) => {
+        focusedResults.push({
+          id: `mention-fulltext-${knowledge.id}-${index}`,
+          knowledgeItemId: knowledge.id,
+          title: knowledge.title,
+          excerpt: doc.text,
+          score: doc.score,
+          sourceKind: 'fulltext',
+          pageNum: doc.pageNum ?? undefined,
+          year: knowledge.year,
+          journal: knowledge.journal,
+          authors: knowledge.authors,
+        })
+      })
+    }
+
+    for (const mention of assetMentions) {
+      const asset = getAssets().find(item => item.id === mention.id)
+      if (!asset) continue
+      const fullText = extractBlockNoteText(asset.content || asset.summary || '')
+      if (!fullText.trim()) continue
+
+      const paragraphs = fullText
+        .split(/\n{2,}/)
+        .map(part => part.trim())
+        .filter(Boolean)
+        .sort((a, b) => {
+          const aScore = a.toLowerCase().includes(query.toLowerCase()) ? 1 : 0
+          const bScore = b.toLowerCase().includes(query.toLowerCase()) ? 1 : 0
+          return bScore - aScore
+        })
+        .slice(0, 3)
+
+      paragraphs.forEach((paragraph, index) => {
+        focusedResults.push({
+          id: `mention-asset-${asset.id}-${index}`,
+          knowledgeItemId: asset.id,
+          title: asset.title,
+          excerpt: paragraph,
+          score: paragraph.toLowerCase().includes(query.toLowerCase()) ? 0.97 : 0.88,
+          sourceKind: 'asset',
+        })
+      })
+    }
+
+    return focusedResults
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 8)
+  }, [mentions, buildTextBlocks, extractBlockNoteText])
 
   // 复制内容
   const handleCopy = async (content: string) => {
@@ -264,12 +501,16 @@ export function AssistantChatPanel() {
       messages: updatedMessages,
     })
     setInputValue('')
+    setMentionQuery('')
+    setShowMentionMenu(false)
     setIsLoading(true)
 
     const assistantMessage: AssistantMessage = {
       id: generateId(),
       role: 'assistant',
       content: '',
+      toolEvents: [],
+      citations: [],
       createdAt: new Date().toISOString(),
     }
 
@@ -282,19 +523,59 @@ export function AssistantChatPanel() {
       }
 
       const systemPrompt = selectedAgent?.prompt || ''
+      let knowledgeCandidates: AssistantCitation[] = []
+      const assetContext = useAssets ? buildAssetContext(content) : ''
+      const mentionCandidates = mentions.length > 0
+        ? await buildMentionKnowledgeCandidates(content)
+        : []
+      const shouldUseKnowledge = useKnowledge || mentionCandidates.length > 0
 
-      let knowledgeContext = ''
-      if (useKnowledge) {
-        const items = getKnowledgeItems()
-        if (items.length > 0) {
-          const recentItems = items.slice(0, 5)
-          knowledgeContext = recentItems.map(item => {
-            const parts = [`标题：${item.title}`]
-            if (item.abstract) parts.push(`摘要：${item.abstract}`)
-            if (item.cachedSummary) parts.push(`总结：${item.cachedSummary}`)
-            return parts.join('\n')
-          }).join('\n\n---\n\n')
-        }
+      if (shouldUseKnowledge) {
+        setKnowledgeBusy(true)
+        assistantMessage.toolEvents = [{
+          id: 'knowledge-hybrid-search',
+          toolName: 'knowledgeHybridSearch',
+          status: 'running',
+          message: '正在混合检索知识库概要与精读全文…',
+        }]
+        setCurrentConversation(prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            messages: [...updatedMessages, { ...assistantMessage }],
+          }
+        })
+
+        knowledgeCandidates = await runKnowledgeSearch(content)
+        knowledgeCandidates = [...mentionCandidates, ...knowledgeCandidates]
+          .sort((left, right) => right.score - left.score)
+          .filter((candidate, index, array) => array.findIndex(item => item.id === candidate.id) === index)
+          .slice(0, 8)
+        assistantMessage.toolEvents = [{
+          id: 'knowledge-hybrid-search',
+          toolName: 'knowledgeHybridSearch',
+          status: knowledgeCandidates.length > 0 ? 'success' : 'error',
+          message: knowledgeCandidates.length > 0
+            ? `已召回 ${knowledgeCandidates.length} 条知识库候选证据`
+            : '未召回到可用的知识库证据',
+        }]
+        assistantMessage.citations = knowledgeCandidates
+      } else if (mentionCandidates.length > 0) {
+        knowledgeCandidates = mentionCandidates
+        assistantMessage.toolEvents = [{
+          id: 'mention-focused-search',
+          toolName: 'mentionFocusedSearch',
+          status: 'success',
+          message: `已按提及内容锁定 ${mentionCandidates.length} 条重点证据`,
+        }]
+        assistantMessage.citations = knowledgeCandidates
+        setCurrentConversation(prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            messages: [...updatedMessages, { ...assistantMessage }],
+          }
+        })
       }
 
       abortControllerRef.current = new AbortController()
@@ -309,7 +590,9 @@ export function AssistantChatPanel() {
           })),
           modelConfig,
           systemPrompt,
-          knowledgeContext: useKnowledge ? knowledgeContext : undefined,
+          useKnowledge: shouldUseKnowledge,
+          knowledgeCandidates,
+          assetContext,
         }),
         signal: abortControllerRef.current.signal,
       })
@@ -321,23 +604,96 @@ export function AssistantChatPanel() {
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
       let fullContent = ''
+      let buffer = ''
+
+      const applyAssistantUpdate = (updater: (draft: AssistantMessage) => void) => {
+        updater(assistantMessage)
+        setCurrentConversation(prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            messages: [...updatedMessages, { ...assistantMessage }],
+          }
+        })
+      }
+
+      const upsertToolEvent = (nextEvent: AssistantToolEvent) => {
+        const currentEvents = assistantMessage.toolEvents || []
+        const existingIndex = currentEvents.findIndex(event => event.id === nextEvent.id)
+        const nextEvents = [...currentEvents]
+
+        if (existingIndex >= 0) {
+          nextEvents[existingIndex] = nextEvent
+        } else {
+          nextEvents.push(nextEvent)
+        }
+
+        applyAssistantUpdate(draft => {
+          draft.toolEvents = nextEvents
+        })
+      }
+
+      const processLine = (line: string) => {
+        if (!line.trim()) return
+        const payload = JSON.parse(line) as {
+          type: 'tool-status' | 'text-delta' | 'citations' | 'error' | 'done'
+          id?: string
+          toolName?: string
+          status?: AssistantToolEvent['status']
+          message?: string
+          delta?: string
+          citations?: AssistantCitation[]
+          error?: string
+        }
+
+        if (payload.type === 'tool-status' && payload.id && payload.toolName && payload.status && payload.message) {
+          upsertToolEvent({
+            id: payload.id,
+            toolName: payload.toolName,
+            status: payload.status,
+            message: payload.message,
+          })
+          return
+        }
+
+        if (payload.type === 'citations' && Array.isArray(payload.citations)) {
+          applyAssistantUpdate(draft => {
+            draft.citations = payload.citations
+          })
+          return
+        }
+
+        if (payload.type === 'text-delta' && payload.delta) {
+          fullContent += payload.delta
+          applyAssistantUpdate(draft => {
+            draft.content = fullContent
+          })
+          return
+        }
+
+        if (payload.type === 'error') {
+          throw new Error(payload.error || '助手响应失败')
+        }
+      }
 
       if (reader) {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
           
-          const chunk = decoder.decode(value, { stream: true })
-          fullContent += chunk
-          
-          assistantMessage.content = fullContent
-          setCurrentConversation(prev => {
-            if (!prev) return prev
-            return {
-              ...prev,
-              messages: [...updatedMessages, assistantMessage],
-            }
-          })
+          buffer += decoder.decode(value, { stream: true })
+
+          let lineBreakIndex = buffer.indexOf('\n')
+          while (lineBreakIndex >= 0) {
+            const line = buffer.slice(0, lineBreakIndex)
+            buffer = buffer.slice(lineBreakIndex + 1)
+            processLine(line)
+            lineBreakIndex = buffer.indexOf('\n')
+          }
+        }
+
+        if (buffer.trim()) {
+          processLine(buffer)
         }
       }
 
@@ -353,6 +709,7 @@ export function AssistantChatPanel() {
       saveConversation(finalConv)
       setConversations(getConversations())
       setCurrentConversation(finalConv)
+      setMentions([])
 
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
@@ -363,10 +720,11 @@ export function AssistantChatPanel() {
         addToast({ title: '发送失败，请重试', color: 'danger' })
       }
     } finally {
+      setKnowledgeBusy(false)
       setIsLoading(false)
       abortControllerRef.current = null
     }
-  }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, agents])
+  }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates])
 
   // 停止生成
   const handleStop = () => {
@@ -394,9 +752,6 @@ export function AssistantChatPanel() {
   }
 
   const models = getModels()
-  const filteredAgents = agents.filter(a => 
-    a.title.toLowerCase().includes(agentFilter.toLowerCase())
-  )
 
   const messages = currentConversation?.messages || []
 
@@ -546,20 +901,33 @@ export function AssistantChatPanel() {
             </Select>
           </div>
 
-          {/* 知识库检索开关 */}
-          <div style={{ 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'space-between',
-          }}>
-            <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-              我的知识库检索
-            </span>
-            <Switch
-              size="sm"
-              isSelected={useKnowledge}
-              onValueChange={setUseKnowledge}
-            />
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Tooltip content="输入 / 可切换智能体，也可以在输入框里直接用 / 打开命令菜单">
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {selectedAgent ? `当前智能体：${selectedAgent.title}` : '当前智能体：未指定'}
+                </span>
+              </Tooltip>
+              {selectedAgent && (
+                <Button size="sm" variant="light" onPress={handleRemoveAgent}>
+                  清除
+                </Button>
+              )}
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Tooltip content="基于关键词 + RAG 混合检索知识库摘要与精读全文，并在回答中附规范引用">
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>我的知识库检索</span>
+              </Tooltip>
+              <Switch size="sm" isSelected={useKnowledge} onValueChange={setUseKnowledge} isDisabled={knowledgeBusy} />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Tooltip content="引用资产库中与你问题相关的素材、摘要和标签，作为辅助回答上下文">
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>引用我的资产库</span>
+              </Tooltip>
+              <Switch size="sm" isSelected={useAssets} onValueChange={setUseAssets} />
+            </div>
           </div>
         </div>
 
@@ -588,7 +956,7 @@ export function AssistantChatPanel() {
               <div>
                 <p style={{ marginBottom: 8 }}>开始与 AI 助手对话</p>
                 <p style={{ fontSize: 11, opacity: 0.7 }}>
-                  输入 / 可快速选择智能体人设
+                  输入 / 可快速切换智能体、知识库和资产库引用
                 </p>
               </div>
             </div>
@@ -627,6 +995,16 @@ export function AssistantChatPanel() {
                     color: message.role === 'user' ? 'var(--text-primary)' : 'var(--text-secondary)',
                   }}
                 >
+                  {message.role === 'assistant' && message.toolEvents && message.toolEvents.length > 0 && (
+                    <div style={{ display: 'grid', gap: 4, marginBottom: 10, fontSize: 11, color: 'var(--text-muted)' }}>
+                      {message.toolEvents.map(event => (
+                        <div key={event.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                          <span style={{ color: event.status === 'error' ? '#ef4444' : event.status === 'success' ? '#10b981' : '#f59e0b' }}>●</span>
+                          <span>{event.message}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   {message.role === 'assistant' ? (
                     <>
                       <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -650,6 +1028,23 @@ export function AssistantChatPanel() {
                     <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
                   )}
                 </div>
+
+                {message.role === 'assistant' && message.citations && message.citations.length > 0 && (
+                  <div style={{ display: 'grid', gap: 6, marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
+                    {message.citations.map(citation => (
+                      <div key={citation.id} style={{ lineHeight: 1.6 }}>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{citation.id}</span>
+                        {' · '}
+                        <span>{citation.title}</span>
+                        {citation.sourceKind === 'fulltext'
+                          ? ` · 精读RAG${citation.pageNum ? ` · 第${citation.pageNum}页` : ''}`
+                          : citation.sourceKind === 'asset'
+                            ? ' · 资产库全文'
+                            : ' · 概要'}
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* 操作按钮 */}
                 <div style={{
@@ -741,107 +1136,35 @@ export function AssistantChatPanel() {
           <div style={{
             position: 'relative',
           }}>
-            {/* 智能体选择器弹窗 */}
-            {showAgentPicker && (
-              <div style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 'calc(100% + 8px)',
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 8,
-                boxShadow: '0 4px 20px rgba(0,0,0,0.2)',
-                zIndex: 1000,
-                maxHeight: 220,
-                overflow: 'hidden',
-                display: 'flex',
-                flexDirection: 'column',
-              }}>
-                <div style={{
-                  padding: '8px 10px',
-                  borderBottom: '1px solid var(--border-color)',
-                }}>
-                  <input
-                    type="text"
-                    value={agentFilter}
-                    onChange={(e) => setAgentFilter(e.target.value)}
-                    placeholder="搜索智能体..."
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Escape') {
-                        e.preventDefault()
-                        setShowAgentPicker(false)
-                        inputRef.current?.focus()
-                      }
-                    }}
-                    style={{
-                      width: '100%',
-                      background: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: 6,
-                      padding: '6px 10px',
-                      fontSize: 12,
-                      color: 'var(--text-primary)',
-                      outline: 'none',
-                    }}
-                  />
-                </div>
-                <div style={{
-                  overflowY: 'auto',
-                  maxHeight: 170,
-                }}>
-                  {filteredAgents.map(agent => (
-                    <div
-                      key={agent.id}
-                      onClick={() => handleSelectAgent(agent)}
-                      style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        transition: 'background 0.15s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = 'var(--bg-secondary)'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = 'transparent'
-                      }}
-                    >
-                      <span style={{ 
-                        fontSize: 12,
-                        fontWeight: 500,
-                      }}>
-                        {agent.title}
-                      </span>
-                      {agent.isPreset && (
-                        <span style={{
-                          fontSize: 9,
-                          padding: '1px 4px',
-                          background: 'var(--text-muted)',
-                          color: 'white',
-                          borderRadius: 3,
-                        }}>
-                          预设
-                        </span>
-                      )}
-                    </div>
+            <Dropdown isOpen={showSlashMenu} onOpenChange={setShowSlashMenu} placement="top-start">
+              <DropdownTrigger>
+                <button
+                  type="button"
+                  aria-hidden="true"
+                  style={{
+                    position: 'absolute',
+                    left: 12,
+                    bottom: 56,
+                    width: 1,
+                    height: 1,
+                    opacity: 0,
+                    pointerEvents: 'none',
+                  }}
+                />
+              </DropdownTrigger>
+              <DropdownMenu aria-label="快捷命令" onAction={handleSlashAction}>
+                <DropdownSection title="快捷引用" showDivider>
+                  <DropdownItem key="command-knowledge">{useKnowledge ? '关闭我的知识库检索' : '引用我的知识库'}</DropdownItem>
+                  <DropdownItem key="command-assets">{useAssets ? '关闭我的资产库引用' : '引用我的资产库'}</DropdownItem>
+                </DropdownSection>
+                <DropdownSection title="使用智能体">
+                  <DropdownItem key="agent:none">不使用智能体</DropdownItem>
+                  {agents.map(agent => (
+                    <DropdownItem key={`agent:${agent.id}`}>{agent.title}</DropdownItem>
                   ))}
-                  {filteredAgents.length === 0 && (
-                    <div style={{ 
-                      padding: 16, 
-                      textAlign: 'center', 
-                      color: 'var(--text-muted)',
-                      fontSize: 12,
-                    }}>
-                      未找到匹配的智能体
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+                </DropdownSection>
+              </DropdownMenu>
+            </Dropdown>
 
             <div style={{
               background: 'var(--bg-secondary)',
@@ -862,7 +1185,7 @@ export function AssistantChatPanel() {
                 display: 'flex',
                 flexWrap: 'wrap',
                 gap: 6,
-                padding: selectedAgent ? '6px 8px 0' : '0',
+                padding: selectedAgent || useKnowledge || useAssets || mentions.length > 0 ? '6px 8px 0' : '0',
               }}>
                 {selectedAgent && (
                   <div style={{
@@ -910,6 +1233,43 @@ export function AssistantChatPanel() {
                     </button>
                   </div>
                 )}
+                {useKnowledge && (
+                  <Chip size="sm" variant="flat" color="secondary">知识库检索</Chip>
+                )}
+                {useAssets && (
+                  <Chip size="sm" variant="flat" color="success">资产库引用</Chip>
+                )}
+                {mentions.map(mention => (
+                  <div
+                    key={`${mention.type}:${mention.id}`}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 4,
+                      background: mention.type === 'knowledge' ? 'rgba(168, 85, 247, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+                      border: mention.type === 'knowledge' ? '1px solid rgba(168, 85, 247, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)',
+                      borderRadius: 999,
+                      padding: '2px 8px',
+                      fontSize: 11,
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    <span>{mention.type === 'knowledge' ? '@知识' : '@资产'} · {mention.title}</span>
+                    <button
+                      onClick={() => removeMention(mention.id, mention.type)}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--text-muted)',
+                        padding: 0,
+                        lineHeight: 1,
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
               </div>
               
               {/* 输入框 */}
@@ -918,7 +1278,7 @@ export function AssistantChatPanel() {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder={selectedAgent ? '继续输入消息...' : '输入消息，按 / 选择智能体...'}
+                placeholder={selectedAgent ? '继续输入消息，按 / 切换智能体或引用来源…' : '输入消息，按 / 使用智能体、知识库、资产库…'}
                 disabled={isLoading}
                 style={{
                   width: '100%',
@@ -935,6 +1295,54 @@ export function AssistantChatPanel() {
                 }}
               />
             </div>
+
+            {showMentionMenu && mentionCandidates.length > 0 && (
+              <div style={{
+                position: 'absolute',
+                left: 0,
+                right: 70,
+                bottom: 62,
+                background: 'var(--bg-primary)',
+                border: '1px solid var(--border-color)',
+                borderRadius: 8,
+                boxShadow: '0 12px 24px rgba(0, 0, 0, 0.12)',
+                padding: 6,
+                display: 'grid',
+                gap: 4,
+                zIndex: 20,
+              }}>
+                {mentionCandidates.map(candidate => (
+                  <button
+                    key={`${candidate.type}:${candidate.id}`}
+                    type="button"
+                    onClick={() => handleMentionSelect(candidate)}
+                    style={{
+                      textAlign: 'left',
+                      padding: '8px 10px',
+                      borderRadius: 6,
+                      border: 'none',
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      display: 'grid',
+                      gap: 2,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.background = 'var(--bg-secondary)'
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.background = 'transparent'
+                    }}
+                  >
+                    <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>
+                      {candidate.title}
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                      {candidate.type === 'knowledge' ? '知识库' : '资产库'} · {candidate.subtitle}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
             
             {/* 发送/停止按钮 */}
             <div style={{

@@ -444,4 +444,32 @@ export async function hasVectorDocuments(documentId: string): Promise<boolean> {
   return (await db.vectors.where('documentId').equals(documentId).count()) > 0
 }
 
+/**
+ * 删除知识条目的所有缓存数据
+ * 包括：PDF 文件、文档缓存、页面、翻译、批注、导读、向量
+ */
+export async function deleteKnowledgeItemCache(knowledgeItemId: string): Promise<void> {
+  await db.transaction('rw', [db.files, db.documents, db.pages, db.translations, db.annotations, db.guides, db.vectors], async () => {
+    // 删除 PDF 文件缓存
+    await db.files.delete(knowledgeItemId)
+
+    // 获取文档缓存
+    const doc = await db.documents.where('knowledgeItemId').equals(knowledgeItemId).first()
+    if (doc) {
+      // 删除相关页面
+      await db.pages.where('documentId').equals(doc.id).delete()
+      // 删除相关翻译
+      await db.translations.where('documentId').equals(doc.id).delete()
+      // 删除相关批注
+      await db.annotations.where('documentId').equals(doc.id).delete()
+      // 删除相关导读
+      await db.guides.where('documentId').equals(doc.id).delete()
+      // 删除相关向量
+      await db.vectors.where('documentId').equals(doc.id).delete()
+      // 删除文档记录
+      await db.documents.delete(doc.id)
+    }
+  })
+}
+
 export { db }

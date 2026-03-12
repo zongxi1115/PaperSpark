@@ -32,6 +32,9 @@ import {
   getSelectedSmallModel,
   getSelectedLargeModel,
 } from '@/lib/storage'
+import { storeFile } from '@/lib/localFiles'
+import { deleteKnowledgeItemCache } from '@/lib/pdfCache'
+import { deleteKnowledgeVectors } from '@/lib/rag'
 import type { KnowledgeItem, ZoteroConfig } from '@/lib/types'
 
 function getSourceLabel(item: KnowledgeItem) {
@@ -61,6 +64,9 @@ export function KnowledgePanel() {
   const { isOpen: isDetailOpen, onOpen: onDetailOpen, onClose: onDetailClose } = useDisclosure()
   const { isOpen: isZoteroOpen, onOpen: onZoteroOpen, onClose: onZoteroClose } = useDisclosure()
   const { isOpen: isImportOpen, onOpen: onImportOpen, onClose: onImportClose } = useDisclosure()
+  const { isOpen: isDeleteConfirmOpen, onOpen: onDeleteConfirmOpen, onClose: onDeleteConfirmClose } = useDisclosure()
+  const [deleting, setDeleting] = useState(false)
+  const [itemToDelete, setItemToDelete] = useState<KnowledgeItem | null>(null)
 
   // 加载知识库数据
   useEffect(() => {
@@ -139,17 +145,48 @@ export function KnowledgePanel() {
     onDetailOpen()
   }, [onDetailOpen])
 
-  // 删除条目
-  const handleDelete = useCallback((id: string, e?: React.MouseEvent) => {
+  // 点击条目显示详情
+  const handleItemClick = useCallback((item: KnowledgeItem) => {
+    setSelectedItem(item)
+    setShowTranslated(true) // 默认显示中文翻译
+    onDetailOpen()
+  }, [onDetailOpen])
+
+  // 打开删除确认弹窗
+  const handleDeleteClick = useCallback((item: KnowledgeItem, e?: React.MouseEvent) => {
     e?.stopPropagation()
-    deleteKnowledgeItem(id)
-    setItems(getKnowledgeItems())
-    if (selectedItem?.id === id) {
-      setSelectedItem(null)
-      onDetailClose()
+    setItemToDelete(item)
+    onDeleteConfirmOpen()
+  }, [onDeleteConfirmOpen])
+
+  // 确认删除条目
+  const handleConfirmDelete = useCallback(async () => {
+    if (!itemToDelete) return
+
+    setDeleting(true)
+    try {
+      // 删除本地缓存
+      await deleteKnowledgeItemCache(itemToDelete.id)
+      // 删除远程向量
+      await deleteKnowledgeVectors(itemToDelete.id)
+      // 删除知识库条目
+      deleteKnowledgeItem(itemToDelete.id)
+
+      setItems(getKnowledgeItems())
+      if (selectedItem?.id === itemToDelete.id) {
+        setSelectedItem(null)
+        onDetailClose()
+      }
+      addToast({ title: '已删除', color: 'default' })
+      onDeleteConfirmClose()
+      setItemToDelete(null)
+    } catch (error) {
+      console.error('Delete error:', error)
+      addToast({ title: '删除失败', color: 'danger' })
+    } finally {
+      setDeleting(false)
     }
-    addToast({ title: '已删除', color: 'default' })
-  }, [selectedItem, onDetailClose])
+  }, [itemToDelete, selectedItem, onDetailClose, onDeleteConfirmClose])
 
   // 翻译英文摘要
   const handleTranslate = useCallback(async () => {
@@ -284,9 +321,14 @@ export function KnowledgePanel() {
 
     setLoading(true)
     try {
-      let data: { content: string; fileName: string; fileType: string; fileSize?: number }
+      let data: { content: string; fileName: string; fileType: string; fileSize?: number; url?: string }
+      let localFileId: string | undefined
 
       if (importTab === 'upload' && pendingFile) {
+        // 先将文件存储到 IndexedDB，用于沉浸式阅读时获取
+        const storeResult = await storeFile(pendingFile)
+        localFileId = storeResult.id
+
         const formData = new FormData()
         formData.append('file', pendingFile)
         const res = await fetch('/api/knowledge/upload', { method: 'POST', body: formData })
@@ -309,6 +351,7 @@ export function KnowledgePanel() {
         year: importYear || '',
         journal: importJournal || '',
         sourceType: importTab === 'url' ? 'url' : 'upload',
+        sourceId: localFileId, // IndexedDB 文件 ID，用于沉浸式阅读获取 PDF
         fileName: data.fileName,
         fileType: data.fileType,
         fileSize: data.fileSize,

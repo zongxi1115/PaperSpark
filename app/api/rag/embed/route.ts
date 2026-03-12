@@ -54,10 +54,11 @@ async function generateEmbeddings(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { documentId, blocks, modelConfig } = body as {
+    const { documentId, blocks, modelConfig, forceLocal } = body as {
       documentId: string
       blocks: TextBlock[]
       modelConfig?: ModelConfig | null
+      forceLocal?: boolean
     }
 
     const provider = resolveEmbeddingProvider(modelConfig)
@@ -94,7 +95,7 @@ export async function POST(req: NextRequest) {
     // 尝试使用 Surya Python 服务
     const suryaAvailable = await checkSuryaService()
     
-    if (suryaAvailable) {
+    if (suryaAvailable && !forceLocal) {
       try {
         const response = await fetch(`${SURYA_SERVICE_URL}/rag/embed`, {
           method: 'POST',

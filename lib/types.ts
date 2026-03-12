@@ -261,7 +261,29 @@ export interface AssistantMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
+  toolEvents?: AssistantToolEvent[]
+  citations?: AssistantCitation[]
   createdAt: string
+}
+
+export interface AssistantToolEvent {
+  id: string
+  toolName: string
+  status: 'running' | 'success' | 'error'
+  message: string
+}
+
+export interface AssistantCitation {
+  id: string
+  knowledgeItemId: string
+  title: string
+  excerpt: string
+  sourceKind: 'overview' | 'fulltext' | 'asset'
+  score: number
+  pageNum?: number
+  year?: string
+  journal?: string
+  authors?: string[]
 }
 
 // 助手对话会话类型
@@ -577,5 +599,6 @@ export interface RAGSearchResult {
 export interface RAGEmbedRequest {
   documentId: string
   blocks: TextBlock[]
-  modelConfig: ModelConfig
+  modelConfig?: ModelConfig | null
+  forceLocal?: boolean
 }

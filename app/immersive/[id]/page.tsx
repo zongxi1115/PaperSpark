@@ -2,9 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Button, Tooltip, Skeleton, Progress, Chip } from '@heroui/react'
+import { Button, Tooltip, Skeleton, Progress, Chip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, addToast } from '@heroui/react'
 import { Icon } from '@iconify/react'
-import { getKnowledgeItem, getSettings, getSelectedSmallModel, updateKnowledgeItem } from '@/lib/storage'
+import { getKnowledgeItem, getSettings, getSelectedSmallModel, updateKnowledgeItem, deleteKnowledgeItem } from '@/lib/storage'
 import {
   getPDFFile,
   savePDFFile,
@@ -19,13 +19,14 @@ import {
   deleteAnnotation,
   updateAnnotation,
   getFullTextByKnowledgeId,
+  deleteKnowledgeItemCache,
 } from '@/lib/pdfCache'
 import PDFViewer from '@/components/PDF/PDFViewer'
 import AIGuidePanel from '@/components/Guide/AIGuidePanel'
 import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
 import { parsePDFWithSurya } from '@/lib/suryaParser'
-import { indexKnowledgeForRAG } from '@/lib/rag'
+import { indexKnowledgeForRAG, deleteKnowledgeVectors } from '@/lib/rag'
 
 function attachPageMetrics(blocks: TextBlock[], pageWidth: number, pageHeight: number) {
   return blocks.map(block => ({
@@ -85,6 +86,32 @@ export default function ImmersiveReaderPage() {
   const [abstractExpanded, setAbstractExpanded] = useState(false)
 
   const processedRef = useRef(false)
+
+  // 删除确认弹窗
+  const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
+  const [deleting, setDeleting] = useState(false)
+
+  // 删除文档
+  const handleDeleteDocument = useCallback(async () => {
+    setDeleting(true)
+    try {
+      // 删除本地缓存（PDF文件、文档缓存、页面、翻译、批注、导读、向量）
+      await deleteKnowledgeItemCache(knowledgeId)
+      // 删除远程向量数据库
+      await deleteKnowledgeVectors(knowledgeId)
+      // 删除知识库条目
+      deleteKnowledgeItem(knowledgeId)
+
+      addToast({ title: '文档已删除', color: 'success' })
+      onDeleteClose()
+      router.push('/documents')
+    } catch (error) {
+      console.error('Delete document error:', error)
+      addToast({ title: '删除失败', color: 'danger' })
+    } finally {
+      setDeleting(false)
+    }
+  }, [knowledgeId, onDeleteClose, router])
 
   const buildRAGIndex = useCallback(async (sourceBlocks: TextBlock[], documentUpdatedAt: string) => {
     updateKnowledgeItem(knowledgeId, {
@@ -662,6 +689,20 @@ export default function ImmersiveReaderPage() {
             <Icon icon="mdi:check-circle" className="text-xl text-green-500" />
           </Tooltip>
         )}
+
+        <div className="w-6 h-px bg-[#444] my-2" />
+
+        <Tooltip content="删除文档" placement="right">
+          <Button
+            isIconOnly
+            size="sm"
+            variant="light"
+            className="text-gray-400 hover:text-red-400"
+            onPress={onDeleteOpen}
+          >
+            <Icon icon="mdi:delete-outline" className="text-xl" />
+          </Button>
+        </Tooltip>
       </div>
 
       {/* 左侧面板 */}
@@ -1176,6 +1217,27 @@ export default function ImmersiveReaderPage() {
           )}
         </div>
       </div>
+
+      {/* 删除确认弹窗 */}
+      <Modal isOpen={isDeleteOpen} onClose={onDeleteClose}>
+        <ModalContent>
+          <ModalHeader>确认删除</ModalHeader>
+          <ModalBody>
+            <p className="text-gray-300">
+              确定要删除文档 <span className="font-medium text-white">{documentTitle}</span> 吗？
+            </p>
+            <p className="text-sm text-gray-500">
+              此操作将删除文档本身、所有翻译缓存、批注和 RAG 索引数据，且无法恢复。
+            </p>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="light" onPress={onDeleteClose}>取消</Button>
+            <Button color="danger" onPress={handleDeleteDocument} isLoading={deleting}>
+              确认删除
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </div>
   )
 }

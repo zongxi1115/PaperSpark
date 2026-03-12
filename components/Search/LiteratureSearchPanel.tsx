@@ -25,6 +25,7 @@ import type {
   ThoughtBubble,
 } from '@/lib/literatureSearchTypes'
 import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
+import { ToolCallFeed } from './ToolCallFeed'
 
 type AnswerState = Record<string, { value: string; customText: string }>
 
@@ -359,8 +360,16 @@ export function LiteratureSearchPanel() {
 
         <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
           {steps.map(step => (
-            <div
+            <motion.div
               key={step.id}
+              animate={step.status === 'in_progress' && !reduceMotion ? {
+                opacity: [0.7, 1, 0.7],
+              } : undefined}
+              transition={step.status === 'in_progress' ? {
+                duration: 1.6,
+                repeat: Infinity,
+                ease: 'easeInOut',
+              } : undefined}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -381,7 +390,16 @@ export function LiteratureSearchPanel() {
                 color: step.status === 'pending' ? 'var(--text-muted)' : 'var(--text-primary)',
               }}
             >
-              <span
+              <motion.span
+                animate={step.status === 'in_progress' && !reduceMotion ? {
+                  scale: [1, 1.2, 1],
+                  opacity: [0.8, 1, 0.8],
+                } : undefined}
+                transition={step.status === 'in_progress' ? {
+                  duration: 1.2,
+                  repeat: Infinity,
+                  ease: 'easeInOut',
+                } : undefined}
                 style={{
                   width: 6,
                   height: 6,
@@ -399,7 +417,7 @@ export function LiteratureSearchPanel() {
                 }}
               />
               {step.label}
-            </div>
+            </motion.div>
           ))}
         </div>
       </div>
@@ -491,96 +509,79 @@ export function LiteratureSearchPanel() {
         )}
 
         {thinking.length > 0 && (
-          <section style={{ display: 'grid', gap: 10 }}>
-            {thinking.map(bubble => (
-              <motion.div
-                key={bubble.id}
-                initial={reduceMotion ? false : { opacity: 0, y: 14 }}
-                animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
-                style={{
-                  alignSelf: 'flex-start',
-                  maxWidth: '92%',
-                  padding: '12px 14px',
-                  borderRadius: '16px 16px 16px 6px',
-                  background: 'linear-gradient(135deg, color-mix(in srgb, #0f172a 9%, white), color-mix(in srgb, var(--accent-color) 9%, white))',
-                  border: '1px solid color-mix(in srgb, var(--accent-color) 18%, transparent)',
-                  boxShadow: '0 10px 24px rgba(15, 23, 42, 0.05)',
-                }}
-              >
-                <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 0.6 }}>
-                  思考气泡 · {steps.find(step => step.id === bubble.stage)?.label || bubble.stage}
-                </div>
-                <div style={{ fontSize: 13, lineHeight: 1.6, marginTop: 6 }}>{bubble.text}</div>
-              </motion.div>
-            ))}
-          </section>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+              padding: '6px 8px',
+              borderRadius: 10,
+              background: 'rgba(15, 23, 42, 0.015)',
+              border: '1px solid rgba(15, 23, 42, 0.04)',
+            }}
+          >
+            <AnimatePresence mode="popLayout" initial={false}>
+              {thinking.slice(-3).map((bubble, index) => {
+                const isLatest = index === thinking.slice(-3).length - 1
+                return (
+                  <motion.div
+                    key={bubble.id}
+                    layout
+                    initial={reduceMotion ? false : { opacity: 0, y: 12, filter: 'blur(4px)' }}
+                    animate={reduceMotion ? undefined : { opacity: 1, y: 0, filter: 'blur(0px)' }}
+                    transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 8,
+                      padding: '4px 10px',
+                      borderRadius: 6,
+                      background: 'transparent',
+                    }}
+                  >
+                    <motion.div
+                      animate={isLatest && !reduceMotion ? { opacity: [0.5, 1, 0.5] } : undefined}
+                      transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+                      style={{
+                        width: 14,
+                        height: 14,
+                        flexShrink: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        marginTop: 2,
+                      }}
+                    >
+                      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} style={{ opacity: 0.5 }}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M12 18v-5.25m0 0a6.01 6.01 0 001.5-.189m-1.5.189a6.01 6.01 0 01-1.5-.189m3.75 7.478a12.06 12.06 0 01-4.5 0m3.75 2.383a14.406 14.406 0 01-3 0M14.25 18v-.192c0-.983.658-1.823 1.508-2.316a7.5 7.5 0 10-7.517 0c.85.493 1.509 1.333 1.509 2.316V18" />
+                      </svg>
+                    </motion.div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'rgba(15, 23, 42, 0.45)' }}>
+                        {steps.find(step => step.id === bubble.stage)?.label || bubble.stage}
+                      </div>
+                      <div style={{ fontSize: 12, lineHeight: 1.5, color: 'rgba(15, 23, 42, 0.65)', marginTop: 2 }}>
+                        {bubble.text}
+                      </div>
+                    </div>
+                  </motion.div>
+                )
+              })}
+            </AnimatePresence>
+            {thinking.length > 3 && (
+              <div style={{ fontSize: 11, color: 'rgba(15, 23, 42, 0.35)', paddingLeft: 10 }}>
+                +{thinking.length - 3} 条历史思考
+              </div>
+            )}
+          </div>
         )}
 
         {toolCalls.length > 0 && (
-          <section
-            style={{
-              borderRadius: 16,
-              border: '1px solid color-mix(in srgb, var(--border-color) 75%, transparent)',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                padding: '10px 12px',
-                background: 'var(--bg-secondary)',
-                borderBottom: '1px solid var(--border-color)',
-                fontSize: 11,
-                fontWeight: 700,
-                letterSpacing: 0.5,
-                color: 'var(--text-muted)',
-              }}
-            >
-              工具调用轨迹
-            </div>
-            <div style={{ display: 'grid' }}>
-              {toolCalls.map(call => (
-                <div
-                  key={call.id}
-                  style={{
-                    padding: '11px 12px',
-                    borderBottom: '1px solid color-mix(in srgb, var(--border-color) 55%, transparent)',
-                    background: call.status === 'running'
-                      ? 'color-mix(in srgb, #f59e0b 6%, white)'
-                      : call.status === 'error'
-                        ? 'color-mix(in srgb, #ef4444 5%, white)'
-                        : 'white',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span
-                        style={{
-                          width: 7,
-                          height: 7,
-                          borderRadius: '50%',
-                          background: call.status === 'completed'
-                            ? 'var(--accent-color)'
-                            : call.status === 'running'
-                              ? '#f59e0b'
-                              : '#ef4444',
-                        }}
-                      />
-                      <span style={{ fontSize: 12, fontWeight: 700 }}>{call.name}</span>
-                    </div>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      {call.resultCount !== undefined ? `${call.resultCount} 条` : call.status === 'running' ? '执行中' : ''}
-                    </span>
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 5, lineHeight: 1.55 }}>
-                    入参摘要：{call.inputSummary}
-                  </div>
-                  {call.note && (
-                    <div style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>{call.note}</div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </section>
+          <ToolCallFeed
+            calls={toolCalls}
+            isLoading={isLoading}
+            reduceMotion={reduceMotion}
+          />
         )}
 
         {results && (
@@ -748,7 +749,7 @@ export function LiteratureSearchPanel() {
           <textarea
             value={inputValue}
             onChange={event => setInputValue(event.target.value)}
-            placeholder={questions.length > 0 ? '可继续补充限定条件，然后点“继续检索”' : '例如：帮我检索近五年关于 RAG 评测框架与 hallucination 缓解的高质量论文'}
+            placeholder={questions.length > 0 ? '补充限定条件...' : '输入研究问题，如：RAG 评测框架相关论文'}
             style={{
               width: '100%',
               minHeight: 90,
@@ -785,24 +786,27 @@ export function LiteratureSearchPanel() {
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
-              {isLoading && (
-                <Button size="sm" color="danger" variant="flat" onPress={stopSearch}>
-                  停止
+              {isLoading ? (
+                <>
+                  <Button size="sm" color="danger" variant="flat" onPress={stopSearch}>
+                    停止
+                  </Button>
+                  {canRestart && (
+                    <Button size="sm" variant="flat" onPress={() => void interruptAndRestart()}>
+                      打断并重检
+                    </Button>
+                  )}
+                </>
+              ) : (
+                <Button
+                  size="sm"
+                  color="primary"
+                  onPress={() => void startSearch()}
+                  isDisabled={!inputValue.trim() || (questions.length > 0 && !allQuestionsAnswered)}
+                >
+                  {questions.length > 0 ? '继续检索' : '开始检索'}
                 </Button>
               )}
-              {canRestart && (
-                <Button size="sm" variant="flat" onPress={() => void interruptAndRestart()}>
-                  打断并重检
-                </Button>
-              )}
-              <Button
-                size="sm"
-                color="primary"
-                onPress={() => void startSearch()}
-                isDisabled={!inputValue.trim() || (questions.length > 0 && !allQuestionsAnswered)}
-              >
-                {questions.length > 0 ? '继续检索' : '开始检索'}
-              </Button>
             </div>
           </div>
         </div>

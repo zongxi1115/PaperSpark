@@ -1,8 +1,8 @@
 'use client'
 
 import { Popover, PopoverContent, PopoverTrigger } from '@heroui/react'
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { TextBlock, PDFAnnotation, HIGHLIGHT_COLORS, HighlightColor } from '@/lib/types'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { TextBlock, PDFAnnotation, HIGHLIGHT_COLORS, HighlightColor, GuideFocusTarget } from '@/lib/types'
 import { saveAnnotation, updateAnnotation } from '@/lib/pdfCache'
 
 // PDF.js 类型定义
@@ -115,6 +115,7 @@ interface PDFViewerProps {
   onAnnotationDelete?: (id: string) => void
   onAnnotationUpdate?: (annotation: PDFAnnotation) => void
   jumpToBlock?: { blockId: string; pageNum: number } | null
+  focusTarget?: GuideFocusTarget | null
   translationDisplayMode?: 'overlay' | 'parallel'
 }
 
@@ -308,6 +309,7 @@ function PDFPage({
   onAnnotationAdd,
   onAnnotationDelete,
   onAnnotationUpdate,
+  focusTarget,
 }: {
   page: PDFPageProxy
   scale: number
@@ -321,6 +323,7 @@ function PDFPage({
   onAnnotationAdd?: (annotation: PDFAnnotation) => void
   onAnnotationDelete?: (id: string) => void
   onAnnotationUpdate?: (annotation: PDFAnnotation) => void
+  focusTarget?: GuideFocusTarget | null
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
@@ -341,6 +344,14 @@ function PDFPage({
     rect: { x: number; y: number; width: number; height: number }
   } | null>(null)
   const freeNoteDismissRef = useRef(false)
+
+  const focusedBlock = useMemo(() => {
+    if (!focusTarget || focusTarget.pageNum !== page.pageNumber || !blocks?.length) {
+      return null
+    }
+
+    return blocks.find(block => block.id === focusTarget.blockId) || null
+  }, [blocks, focusTarget, page.pageNumber])
 
   // 获取设备像素比
   const pixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
@@ -840,6 +851,38 @@ function PDFPage({
         )
       })}
 
+      {focusedBlock && (
+        <div
+          className="absolute pointer-events-none z-10"
+          style={{
+            left: focusedBlock.bbox.x * scale,
+            top: focusedBlock.bbox.y * scale,
+            width: focusedBlock.bbox.width * scale,
+            height: focusedBlock.bbox.height * scale,
+          }}
+        >
+          <div className="absolute inset-0 rounded-md border-2 border-sky-400/80 bg-sky-300/12 shadow-[0_0_0_4px_rgba(56,189,248,0.18)] animate-pulse" />
+          {(focusTarget?.title || focusTarget?.note) && (
+            <div
+              className="absolute left-0 max-w-72 rounded-xl border border-sky-400/30 bg-[#0f172ae6] px-3 py-2 text-white shadow-xl"
+              style={{
+                top: focusedBlock.bbox.y * scale > 96
+                  ? -10
+                  : focusedBlock.bbox.height * scale + 10,
+                transform: focusedBlock.bbox.y * scale > 96 ? 'translateY(-100%)' : 'none',
+              }}
+            >
+              {focusTarget.title && (
+                <p className="text-xs font-medium text-sky-200">{focusTarget.title}</p>
+              )}
+              {focusTarget.note && (
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-200">{focusTarget.note}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 高亮 & 笔记菜单 */}
       {showHighlightMenu && selection && (
         <div
@@ -1027,6 +1070,7 @@ export default function PDFViewer({
   onAnnotationDelete,
   onAnnotationUpdate,
   jumpToBlock,
+  focusTarget,
   translationDisplayMode = 'overlay',
 }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -1195,6 +1239,7 @@ export default function PDFViewer({
               onAnnotationAdd={onAnnotationAdd}
               onAnnotationDelete={onAnnotationDelete}
               onAnnotationUpdate={onAnnotationUpdate}
+              focusTarget={focusTarget}
             />
 
             {showTranslation && translationDisplayMode === 'parallel' && (
@@ -1208,6 +1253,7 @@ export default function PDFViewer({
                 showTextLayer={false}
                 interactive={false}
                 annotations={[]}
+                focusTarget={focusTarget}
               />
             )}
           </div>

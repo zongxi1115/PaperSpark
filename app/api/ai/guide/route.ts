@@ -7,6 +7,7 @@ import type {
   AIGuideSummary,
   MindMapNode,
   BlockKeyPoints,
+  AIGuideHighlight,
   AIGuideAction,
 } from '@/lib/types'
 
@@ -283,6 +284,114 @@ async function generateBlockKeyPoints(
   return { success: true, blockKeyPoints: allKeyPoints }
 }
 
+async function generateGuideHighlights(
+  blocks: TextBlock[],
+  modelConfig: ModelConfig
+): Promise<{ success: boolean; highlights?: AIGuideHighlight[]; error?: string }> {
+  if (!blocks || blocks.length === 0) {
+    return { success: false, error: '没有可用的文本块' }
+  }
+
+  const provider = createOpenAI({
+    baseURL: modelConfig.baseUrl || 'https://api.openai.com/v1',
+    apiKey: modelConfig.apiKey,
+  })
+
+  const candidateBlocks = blocks
+    .filter(block => {
+      if ((block.type === 'title' || block.type === 'subtitle') && block.text.trim().length > 6) {
+        return true
+      }
+      return block.type === 'paragraph' && block.text.trim().length > 80
+    })
+    .slice(0, 80)
+    .map(block => ({
+      blockId: block.id,
+      pageNum: block.pageNum,
+      type: block.type,
+      text: block.text.slice(0, 500),
+    }))
+
+  if (candidateBlocks.length === 0) {
+    return { success: true, highlights: [] }
+  }
+
+  const systemPrompt = `你是一个学术文献精读助手。请从候选文本块中选出最值得精读的 4-6 个文章重点，并返回 JSON 数组：
+[
+  {
+    "blockId": "对应文本块ID",
+    "title": "重点标题（8-16字中文）",
+    "note": "为什么这一段重要、读者应该关注什么（40-90字中文）",
+    "quote": "摘录的关键短句（可选，最多40字）"
+  }
+]
+
+要求：
+1. 重点必须覆盖论文的重要贡献、方法、结果或结论
+2. 必须使用输入中的真实 blockId
+3. 只返回 JSON 数组，不要添加解释或 markdown`
+
+  try {
+    const { text } = await generateText({
+      model: provider.chat(modelConfig.modelName),
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: `请从以下候选文本块中提取文章重点：\n\n${JSON.stringify(candidateBlocks, null, 2)}` },
+      ],
+    })
+
+    let jsonStr = text.trim()
+    if (jsonStr.startsWith('```')) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+    }
+
+    const parsed = JSON.parse(jsonStr) as Array<{
+      blockId?: string
+      title?: string
+      note?: string
+      quote?: string
+    }>
+
+    const highlights = parsed
+      .map((item, index) => {
+        const matchedBlock = blocks.find(block => block.id === item.blockId)
+        if (!matchedBlock || !item.blockId) {
+          return null
+        }
+
+        return {
+          id: `${item.blockId}-highlight-${index}`,
+          blockId: item.blockId,
+          pageNum: matchedBlock.pageNum,
+          title: item.title?.trim() || `重点 ${index + 1}`,
+          note: item.note?.trim() || matchedBlock.text.slice(0, 90),
+          quote: item.quote?.trim() || matchedBlock.text.slice(0, 48),
+        } satisfies AIGuideHighlight
+      })
+      .filter((item): item is AIGuideHighlight => item !== null)
+
+    if (highlights.length > 0) {
+      return { success: true, highlights }
+    }
+  } catch {
+    // 继续使用降级方案
+  }
+
+  const fallbackHighlights = candidateBlocks
+    .filter(block => block.type === 'paragraph')
+    .slice(0, 5)
+    .map((block, index) => ({
+      id: `${block.blockId}-fallback-${index}`,
+      blockId: block.blockId,
+      pageNum: block.pageNum,
+      title: `重点段落 ${index + 1}`,
+      note: block.text.slice(0, 90),
+      quote: block.text.slice(0, 48),
+    }))
+
+  return { success: true, highlights: fallbackHighlights }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
@@ -303,6 +412,7 @@ export async function POST(req: NextRequest) {
       summary?: AIGuideSummary
       structure?: MindMapNode[]
       blockKeyPoints?: BlockKeyPoints[]
+      highlights?: AIGuideHighlight[]
     } = {}
 
     // 根据action执行对应操作
@@ -325,6 +435,13 @@ export async function POST(req: NextRequest) {
       const keyPointsResult = await generateBlockKeyPoints(blocks, modelConfig)
       if (keyPointsResult.success && keyPointsResult.blockKeyPoints) {
         results.blockKeyPoints = keyPointsResult.blockKeyPoints
+      }
+    }
+
+    if (action === 'highlights' || action === 'all') {
+      const highlightsResult = await generateGuideHighlights(blocks, modelConfig)
+      if (highlightsResult.success && highlightsResult.highlights) {
+        results.highlights = highlightsResult.highlights
       }
     }
 

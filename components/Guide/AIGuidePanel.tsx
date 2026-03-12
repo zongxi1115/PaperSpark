@@ -1,11 +1,26 @@
 'use client'
 
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { Button, Skeleton, Chip, Progress } from '@heroui/react'
+import { Button, Skeleton, Chip, Progress, Modal, ModalContent, ModalHeader, ModalBody } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import GuideMindMap from './GuideMindMap'
-import type { TextBlock, AIGuideSummary, MindMapNode, BlockKeyPoints, ModelConfig } from '@/lib/types'
+import type {
+  TextBlock,
+  AIGuideSummary,
+  MindMapNode,
+  BlockKeyPoints,
+  ModelConfig,
+  AIGuideHighlight,
+  GuideFocusTarget,
+  GuideCache,
+  AIGuideAction,
+  AIGuideResponse,
+} from '@/lib/types'
 import { getGuideByKnowledgeId, saveGuide } from '@/lib/pdfCache'
+
+type GuideSection = 'summary' | 'structure' | 'keypoints' | 'highlights'
+
+const GUIDE_SECTIONS: GuideSection[] = ['summary', 'structure', 'highlights', 'keypoints']
 
 interface AIGuidePanelProps {
   documentId: string
@@ -13,7 +28,7 @@ interface AIGuidePanelProps {
   blocks: TextBlock[]
   fullText?: string
   modelConfig: ModelConfig | null
-  onBlockClick?: (blockId: string, pageNum: number) => void
+  onBlockClick?: (target: GuideFocusTarget) => void
 }
 
 export default function AIGuidePanel({
@@ -24,17 +39,50 @@ export default function AIGuidePanel({
   modelConfig,
   onBlockClick,
 }: AIGuidePanelProps) {
-  const [loading, setLoading] = useState(false)
   const [loadingCache, setLoadingCache] = useState(true)
-  const [generating, setGenerating] = useState<string | null>(null)
+  const [allLoading, setAllLoading] = useState(false)
+  const [sectionLoading, setSectionLoading] = useState<Record<GuideSection, boolean>>({
+    summary: false,
+    structure: false,
+    keypoints: false,
+    highlights: false,
+  })
   const [progress, setProgress] = useState(0)
 
   const [summary, setSummary] = useState<AIGuideSummary | null>(null)
   const [structure, setStructure] = useState<MindMapNode[]>([])
+  const [highlights, setHighlights] = useState<AIGuideHighlight[]>([])
   const [blockKeyPoints, setBlockKeyPoints] = useState<BlockKeyPoints[]>([])
+  const [mindMapFullscreen, setMindMapFullscreen] = useState(false)
 
   // 使用 ref 防止重复加载
   const loadedRef = useRef(false)
+  const guideDataRef = useRef<GuideCache>({
+    id: documentId,
+    documentId,
+    knowledgeItemId,
+    summary: null,
+    structure: [],
+    blockKeyPoints: [],
+    highlights: [],
+    modelUsed: modelConfig?.modelName || 'unknown',
+    generatedAt: '',
+    updatedAt: '',
+  })
+
+  useEffect(() => {
+    guideDataRef.current = {
+      ...guideDataRef.current,
+      id: documentId,
+      documentId,
+      knowledgeItemId,
+      summary,
+      structure,
+      blockKeyPoints,
+      highlights,
+      modelUsed: modelConfig?.modelName || guideDataRef.current.modelUsed || 'unknown',
+    }
+  }, [documentId, knowledgeItemId, summary, structure, blockKeyPoints, highlights, modelConfig])
 
   // 加载缓存的导读数据
   const loadCachedGuide = useCallback(async () => {
@@ -45,8 +93,16 @@ export default function AIGuidePanel({
     try {
       const cached = await getGuideByKnowledgeId(knowledgeItemId)
       if (cached) {
+        guideDataRef.current = {
+          ...guideDataRef.current,
+          ...cached,
+          id: documentId,
+          documentId,
+          knowledgeItemId,
+        }
         if (cached.summary) setSummary(cached.summary)
         if (cached.structure) setStructure(cached.structure)
+        if (cached.highlights) setHighlights(cached.highlights)
         if (cached.blockKeyPoints) setBlockKeyPoints(cached.blockKeyPoints)
       }
     } catch (error) {
@@ -57,179 +113,159 @@ export default function AIGuidePanel({
   }, [knowledgeItemId])
 
   // 保存导读数据到缓存
-  const saveGuideToCache = useCallback(async (
-    newSummary?: AIGuideSummary | null,
-    newStructure?: MindMapNode[],
-    newBlockKeyPoints?: BlockKeyPoints[]
-  ) => {
+  const saveGuideToCache = useCallback(async (nextGuide: GuideCache) => {
     if (!documentId || !knowledgeItemId) return
 
     const now = new Date().toISOString()
     await saveGuide({
+      ...nextGuide,
       id: documentId,
       documentId,
       knowledgeItemId,
-      summary: newSummary || summary,
-      structure: newStructure || structure,
-      blockKeyPoints: newBlockKeyPoints || blockKeyPoints,
       modelUsed: modelConfig?.modelName || 'unknown',
-      generatedAt: now,
+      generatedAt: nextGuide.generatedAt || now,
       updatedAt: now,
     })
-  }, [documentId, knowledgeItemId, summary, structure, blockKeyPoints, modelConfig])
+  }, [documentId, knowledgeItemId, modelConfig])
+
+  const commitGuidePatch = useCallback(async (patch: Partial<GuideCache>) => {
+    const nextGuide: GuideCache = {
+      ...guideDataRef.current,
+      ...patch,
+      id: documentId,
+      documentId,
+      knowledgeItemId,
+      modelUsed: modelConfig?.modelName || guideDataRef.current.modelUsed || 'unknown',
+      generatedAt: guideDataRef.current.generatedAt || new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }
+
+    guideDataRef.current = nextGuide
+
+    if (Object.prototype.hasOwnProperty.call(patch, 'summary')) {
+      setSummary((patch.summary as AIGuideSummary | null | undefined) ?? null)
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'structure')) {
+      setStructure(patch.structure || [])
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'highlights')) {
+      setHighlights(patch.highlights || [])
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'blockKeyPoints')) {
+      setBlockKeyPoints(patch.blockKeyPoints || [])
+    }
+
+    await saveGuideToCache(nextGuide)
+  }, [documentId, knowledgeItemId, modelConfig, saveGuideToCache])
 
   // 组件挂载时加载缓存
   useEffect(() => {
     loadCachedGuide()
   }, [loadCachedGuide])
 
-  // 生成所有导读内容
-  const generateAll = useCallback(async () => {
-    if (!modelConfig || !blocks.length) return
+  const generateSection = useCallback(async (
+    action: GuideSection,
+    options?: { onSettled?: () => void }
+  ) => {
+    if (!modelConfig) {
+      options?.onSettled?.()
+      return
+    }
 
-    setLoading(true)
+    if (action !== 'summary' && blocks.length === 0) {
+      options?.onSettled?.()
+      return
+    }
+
+    setSectionLoading(prev => ({ ...prev, [action]: true }))
+
+    try {
+      const requestBody: {
+        documentId: string
+        knowledgeItemId: string
+        blocks: TextBlock[]
+        modelConfig: ModelConfig
+        action: AIGuideAction
+        fullText?: string
+      } = {
+        documentId,
+        knowledgeItemId,
+        blocks,
+        modelConfig,
+        action,
+      }
+
+      if (action === 'summary') {
+        requestBody.fullText = fullText || blocks.map(block => block.text).join('\n\n')
+      }
+
+      const response = await fetch('/api/ai/guide', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(requestBody),
+      })
+
+      const result = await response.json() as AIGuideResponse
+      if (!result.success) {
+        return
+      }
+
+      if (action === 'summary' && result.summary) {
+        await commitGuidePatch({ summary: result.summary })
+      }
+
+      if (action === 'structure' && result.structure) {
+        await commitGuidePatch({ structure: result.structure })
+      }
+
+      if (action === 'highlights' && result.highlights) {
+        await commitGuidePatch({ highlights: result.highlights })
+      }
+
+      if (action === 'keypoints' && result.blockKeyPoints) {
+        await commitGuidePatch({ blockKeyPoints: result.blockKeyPoints })
+      }
+    } catch (error) {
+      console.error(`Generate ${action} error:`, error)
+    } finally {
+      setSectionLoading(prev => ({ ...prev, [action]: false }))
+      options?.onSettled?.()
+    }
+  }, [blocks, commitGuidePatch, documentId, fullText, knowledgeItemId, modelConfig])
+
+  const generateAll = useCallback(async () => {
+    if (!modelConfig || !blocks.length || allLoading) return
+
+    let completed = 0
+    setAllLoading(true)
     setProgress(0)
 
-    try {
-      const response = await fetch('/api/ai/guide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentId,
-          knowledgeItemId,
-          blocks,
-          fullText,
-          modelConfig,
-          action: 'all',
-        }),
-      })
-
-      const result = await response.json()
-
-      if (result.success) {
-        const newSummary = result.summary || null
-        const newStructure = result.structure || []
-        const newBlockKeyPoints = result.blockKeyPoints || []
-
-        if (newSummary) setSummary(newSummary)
-        if (newStructure.length) setStructure(newStructure)
-        if (newBlockKeyPoints.length) setBlockKeyPoints(newBlockKeyPoints)
-
-        // 保存到缓存
-        await saveGuideToCache(newSummary, newStructure, newBlockKeyPoints)
-
-        setProgress(100)
-      }
-    } catch (error) {
-      console.error('Generate guide error:', error)
-    } finally {
-      setLoading(false)
+    const handleSettled = () => {
+      completed += 1
+      setProgress(Math.round((completed / GUIDE_SECTIONS.length) * 100))
     }
-  }, [documentId, knowledgeItemId, blocks, fullText, modelConfig, saveGuideToCache])
-
-  // 单独生成概要
-  const generateSummary = useCallback(async () => {
-    if (!modelConfig) return
-    setGenerating('summary')
 
     try {
-      const text = fullText || blocks.map(b => b.text).join('\n\n')
-      const response = await fetch('/api/ai/guide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentId,
-          knowledgeItemId,
-          blocks,
-          fullText: text,
-          modelConfig,
-          action: 'summary',
-        }),
-      })
-
-      const result = await response.json()
-      if (result.success && result.summary) {
-        setSummary(result.summary)
-        await saveGuideToCache(result.summary, undefined, undefined)
-      }
-    } catch (error) {
-      console.error('Generate summary error:', error)
+      await Promise.allSettled(
+        GUIDE_SECTIONS.map(action => generateSection(action, { onSettled: handleSettled }))
+      )
     } finally {
-      setGenerating(null)
+      setAllLoading(false)
     }
-  }, [documentId, knowledgeItemId, blocks, fullText, modelConfig, saveGuideToCache])
-
-  // 单独生成结构
-  const generateStructure = useCallback(async () => {
-    if (!modelConfig) return
-    setGenerating('structure')
-
-    try {
-      const response = await fetch('/api/ai/guide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentId,
-          knowledgeItemId,
-          blocks,
-          modelConfig,
-          action: 'structure',
-        }),
-      })
-
-      const result = await response.json()
-      if (result.success && result.structure) {
-        setStructure(result.structure)
-        await saveGuideToCache(undefined, result.structure, undefined)
-      }
-    } catch (error) {
-      console.error('Generate structure error:', error)
-    } finally {
-      setGenerating(null)
-    }
-  }, [documentId, knowledgeItemId, blocks, modelConfig, saveGuideToCache])
-
-  // 单独生成关键要点
-  const generateKeyPoints = useCallback(async () => {
-    if (!modelConfig) return
-    setGenerating('keypoints')
-
-    try {
-      const response = await fetch('/api/ai/guide', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          documentId,
-          knowledgeItemId,
-          blocks,
-          modelConfig,
-          action: 'keypoints',
-        }),
-      })
-
-      const result = await response.json()
-      if (result.success && result.blockKeyPoints) {
-        setBlockKeyPoints(result.blockKeyPoints)
-        await saveGuideToCache(undefined, undefined, result.blockKeyPoints)
-      }
-    } catch (error) {
-      console.error('Generate keypoints error:', error)
-    } finally {
-      setGenerating(null)
-    }
-  }, [documentId, knowledgeItemId, blocks, modelConfig, saveGuideToCache])
+  }, [allLoading, blocks.length, generateSection, modelConfig])
 
   // 处理节点点击
   const handleNodeClick = useCallback(
-    (blockId: string | undefined, pageNum: number | undefined) => {
-      if (blockId && pageNum && onBlockClick) {
-        onBlockClick(blockId, pageNum)
+    (target: GuideFocusTarget) => {
+      if (target.blockId && target.pageNum && onBlockClick) {
+        onBlockClick(target)
       }
     },
     [onBlockClick]
   )
 
-  const hasAnyContent = summary || structure.length > 0 || blockKeyPoints.length > 0
+  const hasAnyContent = Boolean(summary) || structure.length > 0 || highlights.length > 0 || blockKeyPoints.length > 0
+  const hasActiveGeneration = allLoading || Object.values(sectionLoading).some(Boolean)
 
   // 加载缓存中
   if (loadingCache) {
@@ -259,7 +295,7 @@ export default function AIGuidePanel({
               size="sm"
               color="primary"
               variant="flat"
-              isLoading={loading}
+              isLoading={allLoading}
               onPress={generateAll}
               isDisabled={!modelConfig || blocks.length === 0}
             >
@@ -272,7 +308,7 @@ export default function AIGuidePanel({
               variant="light"
               className="text-gray-400"
               onPress={generateAll}
-              isDisabled={loading || !modelConfig}
+              isDisabled={hasActiveGeneration || !modelConfig}
             >
               <Icon icon="mdi:refresh" className="text-sm" />
             </Button>
@@ -281,7 +317,7 @@ export default function AIGuidePanel({
       </div>
 
       {/* 进度条 */}
-      {loading && (
+      {allLoading && (
         <div className="px-3 py-2">
           <Progress value={progress} size="sm" color="primary" />
         </div>
@@ -298,16 +334,16 @@ export default function AIGuidePanel({
                 size="sm"
                 variant="light"
                 className="text-xs text-gray-500 h-6 min-w-0 px-2"
-                isLoading={generating === 'summary'}
-                onPress={generateSummary}
-                isDisabled={!modelConfig}
+                isLoading={sectionLoading.summary}
+                onPress={() => generateSection('summary')}
+                isDisabled={!modelConfig || sectionLoading.summary}
               >
                 生成
               </Button>
             )}
           </div>
 
-          {loading && !summary ? (
+          {sectionLoading.summary && !summary ? (
             <div className="space-y-2">
               <Skeleton className="h-4 w-full rounded bg-[#333]" />
               <Skeleton className="h-4 w-3/4 rounded bg-[#333]" />
@@ -349,18 +385,31 @@ export default function AIGuidePanel({
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-gray-400">文章结构</span>
-            {!structure.length && (
-              <Button
-                size="sm"
-                variant="light"
-                className="text-xs text-gray-500 h-6 min-w-0 px-2"
-                isLoading={generating === 'structure'}
-                onPress={generateStructure}
-                isDisabled={!modelConfig}
-              >
-                生成
-              </Button>
-            )}
+            <div className="flex items-center gap-1">
+              {structure.length > 0 && (
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant="light"
+                  className="text-gray-500 min-w-0 h-6 w-6"
+                  onPress={() => setMindMapFullscreen(true)}
+                >
+                  <Icon icon="mdi:fullscreen" className="text-sm" />
+                </Button>
+              )}
+              {!structure.length && (
+                <Button
+                  size="sm"
+                  variant="light"
+                  className="text-xs text-gray-500 h-6 min-w-0 px-2"
+                  isLoading={sectionLoading.structure}
+                  onPress={() => generateSection('structure')}
+                  isDisabled={!modelConfig || sectionLoading.structure}
+                >
+                  生成
+                </Button>
+              )}
+            </div>
           </div>
 
           {structure.length > 0 ? (
@@ -368,7 +417,62 @@ export default function AIGuidePanel({
           ) : (
             <div className="h-40 flex items-center justify-center border border-dashed border-[#333] rounded-lg">
               <p className="text-xs text-gray-600">
-                {loading ? '生成中...' : '点击"生成"按钮生成思维导图'}
+                {sectionLoading.structure ? '生成中...' : '点击"生成"按钮生成思维导图'}
+              </p>
+            </div>
+          )}
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-gray-400">文章重点</span>
+            {!highlights.length && (
+              <Button
+                size="sm"
+                variant="light"
+                className="text-xs text-gray-500 h-6 min-w-0 px-2"
+                isLoading={sectionLoading.highlights}
+                onPress={() => generateSection('highlights')}
+                isDisabled={!modelConfig || sectionLoading.highlights}
+              >
+                生成
+              </Button>
+            )}
+          </div>
+
+          {highlights.length > 0 ? (
+            <div className="space-y-2">
+              {highlights.map(item => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className="w-full rounded-xl border border-[#333] bg-[#171717] px-3 py-3 text-left transition-colors hover:border-[#4d72ff] hover:bg-[#1d1f2a]"
+                  onClick={() => onBlockClick?.({
+                    blockId: item.blockId,
+                    pageNum: item.pageNum,
+                    title: item.title,
+                    note: item.note,
+                  })}
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Chip size="sm" variant="flat" className="text-[10px] h-5">
+                      P.{item.pageNum}
+                    </Chip>
+                    <span className="text-xs font-medium text-blue-300">{item.title}</span>
+                  </div>
+                  {item.quote && (
+                    <p className="text-[11px] text-gray-500 mb-1.5 line-clamp-2">
+                      {item.quote}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-300 leading-relaxed">{item.note}</p>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="h-24 flex items-center justify-center border border-dashed border-[#333] rounded-lg">
+              <p className="text-xs text-gray-600">
+                {sectionLoading.highlights ? '生成中...' : '点击"生成"按钮提取文章重点'}
               </p>
             </div>
           )}
@@ -383,9 +487,9 @@ export default function AIGuidePanel({
                 size="sm"
                 variant="light"
                 className="text-xs text-gray-500 h-6 min-w-0 px-2"
-                isLoading={generating === 'keypoints'}
-                onPress={generateKeyPoints}
-                isDisabled={!modelConfig}
+                isLoading={sectionLoading.keypoints}
+                onPress={() => generateSection('keypoints')}
+                isDisabled={!modelConfig || sectionLoading.keypoints}
               >
                 生成
               </Button>
@@ -398,7 +502,12 @@ export default function AIGuidePanel({
                 <div
                   key={block.blockId}
                   className="p-2 bg-[#1a1a1a] rounded border border-[#333] cursor-pointer hover:border-[#444] transition-colors"
-                  onClick={() => onBlockClick?.(block.blockId, block.pageNum)}
+                  onClick={() => onBlockClick?.({
+                    blockId: block.blockId,
+                    pageNum: block.pageNum,
+                    title: '段落讲解',
+                    note: block.keyPoints.join('； '),
+                  })}
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <Chip size="sm" variant="flat" className="text-[10px] h-5">
@@ -427,12 +536,25 @@ export default function AIGuidePanel({
           ) : (
             <div className="h-20 flex items-center justify-center border border-dashed border-[#333] rounded-lg">
               <p className="text-xs text-gray-600">
-                {loading ? '生成中...' : '点击"生成"按钮提取段落关键要点'}
+                {sectionLoading.keypoints ? '生成中...' : '点击"生成"按钮提取段落关键要点'}
               </p>
             </div>
           )}
         </div>
       </div>
+
+      <Modal isOpen={mindMapFullscreen} onClose={() => setMindMapFullscreen(false)} size="5xl">
+        <ModalContent className="bg-[#161616] text-white">
+          <ModalHeader className="border-b border-[#2a2a2a]">文章结构</ModalHeader>
+          <ModalBody className="p-4">
+            <GuideMindMap
+              structure={structure}
+              onNodeClick={handleNodeClick}
+              className="h-[70vh]"
+            />
+          </ModalBody>
+        </ModalContent>
+      </Modal>
     </div>
   )
 }

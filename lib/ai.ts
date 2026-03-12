@@ -126,13 +126,29 @@ export async function extractMetadata(
   fileName?: string
 ): Promise<{ 
   success: boolean
-  metadata?: { title: string; authors: string[]; abstract: string; year: string; journal: string }
+  metadata?: {
+    title: string
+    authors: string[]
+    abstract: string
+    year: string
+    journal: string
+    keywords: string[]
+    references: string[]
+  }
   error?: string 
 }> {
   if (!content || content.trim().length < 50) {
     return { 
       success: false, 
-      metadata: { title: fileName || '未知标题', authors: [], abstract: '', year: '', journal: '' }
+      metadata: {
+        title: fileName || '未知标题',
+        authors: [],
+        abstract: '',
+        year: '',
+        journal: '',
+        keywords: [],
+        references: [],
+      }
     }
   }
 
@@ -142,13 +158,17 @@ export async function extractMetadata(
   "authors": ["作者1", "作者2"],
   "abstract": "摘要内容（如果没有找到摘要，请根据内容生成一个简短的摘要，100字以内）",
   "year": "发表年份",
-  "journal": "期刊或会议名称"
+  "journal": "期刊或会议名称",
+  "keywords": ["关键词1", "关键词2", "关键词3"],
+  "references": ["参考文献1", "参考文献2"]
 }
 
 要求：
 1. 只返回 JSON 对象，不要添加任何解释或 markdown 代码块标记
 2. 如果某项信息无法确定，使用空字符串
-3. 作者列表最多保留前5位`
+ 3. 作者列表最多保留前5位
+ 4. keywords 提取 3-8 个
+ 5. references 尽量提取完整，至少返回前 10 条可识别参考文献，没有则返回空数组`
 
   const prompt = `请从以下文献内容中提取元数据：\n\n${content.slice(0, 6000)}`
 
@@ -157,7 +177,15 @@ export async function extractMetadata(
   if (!result.success || !result.text) {
     return {
       success: false,
-      metadata: { title: fileName || '未知标题', authors: [], abstract: '', year: '', journal: '' },
+      metadata: {
+        title: fileName || '未知标题',
+        authors: [],
+        abstract: '',
+        year: '',
+        journal: '',
+        keywords: [],
+        references: [],
+      },
       error: result.error,
     }
   }
@@ -178,12 +206,22 @@ export async function extractMetadata(
         abstract: metadata.abstract || '',
         year: metadata.year || '',
         journal: metadata.journal || '',
+        keywords: metadata.keywords || [],
+        references: metadata.references || [],
       },
     }
   } catch {
     return {
       success: false,
-      metadata: { title: fileName || '未知标题', authors: [], abstract: '', year: '', journal: '' },
+      metadata: {
+        title: fileName || '未知标题',
+        authors: [],
+        abstract: '',
+        year: '',
+        journal: '',
+        keywords: [],
+        references: [],
+      },
       error: '解析元数据失败',
     }
   }

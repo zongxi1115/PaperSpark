@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import {
   ReactFlow,
   Node,
@@ -15,10 +15,18 @@ import {
   Controls,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import type { MindMapNode, MindMapNodeType } from '@/lib/types'
+import type { GuideFocusTarget, MindMapNode, MindMapNodeType } from '@/lib/types'
+
+type MindMapFlowData = {
+  [key: string]: unknown
+  label: string
+  blockId?: string
+  pageNum?: number
+  type: MindMapNodeType
+}
 
 // 自定义节点组件 - 纵向布局
-function MindMapNodeComponent({ data }: NodeProps<{ label: string; type: MindMapNodeType; blockId?: string; pageNum?: number }>) {
+function MindMapNodeComponent({ data }: NodeProps<Node<MindMapFlowData, 'mindMapNode'>>) {
   const nodeType = data.type
   const bgColors: Record<MindMapNodeType, string> = {
     root: 'bg-gradient-to-b from-blue-600 to-blue-700 border-blue-400',
@@ -40,17 +48,16 @@ function MindMapNodeComponent({ data }: NodeProps<{ label: string; type: MindMap
 
   return (
     <div
-      className={`${bgColors[nodeType]} ${textSizes[nodeType]} ${paddings[nodeType]} rounded-lg shadow-lg border cursor-pointer hover:shadow-xl hover:scale-105 transition-all`}
-      style={{ minWidth: '60px', maxWidth: '180px' }}
+      className={`${bgColors[nodeType]} ${textSizes[nodeType]} ${paddings[nodeType]} min-w-15 max-w-45 rounded-lg border shadow-lg transition-all hover:scale-105 hover:shadow-xl cursor-pointer`}
     >
-      <Handle type="target" position={Position.Top} className="w-2 h-2 !bg-white/50 !border-0" />
+      <Handle type="target" position={Position.Top} className="w-2 h-2 bg-white/50! border-0!" />
       <div className="text-white text-center truncate" title={data.label}>
         {data.label}
       </div>
       {data.pageNum && (
         <div className="text-[9px] text-white/50 text-center mt-0.5">第{data.pageNum}页</div>
       )}
-      <Handle type="source" position={Position.Bottom} className="w-2 h-2 !bg-white/50 !border-0" />
+      <Handle type="source" position={Position.Bottom} className="w-2 h-2 bg-white/50! border-0!" />
     </div>
   )
 }
@@ -61,15 +68,13 @@ const nodeTypes = {
 
 interface GuideMindMapProps {
   structure: MindMapNode[]
-  onNodeClick?: (blockId: string | undefined, pageNum: number | undefined) => void
+  onNodeClick?: (target: GuideFocusTarget) => void
+  className?: string
 }
 
 // 将树形结构转换为 React Flow 节点和边 - 纵向布局
-function convertToFlowElements(
-  nodes: MindMapNode[],
-  onNodeClick?: (blockId: string | undefined, pageNum: number | undefined) => void
-): { nodes: Node[]; edges: Edge[] } {
-  const flowNodes: Node[] = []
+function convertToFlowElements(nodes: MindMapNode[]): { nodes: Node<MindMapFlowData>[]; edges: Edge[] } {
+  const flowNodes: Node<MindMapFlowData>[] = []
   const flowEdges: Edge[] = []
   const levelGapY = 70 // 纵向间距
 
@@ -136,19 +141,27 @@ function convertToFlowElements(
   return { nodes: flowNodes, edges: flowEdges }
 }
 
-export default function GuideMindMap({ structure, onNodeClick }: GuideMindMapProps) {
+export default function GuideMindMap({ structure, onNodeClick, className }: GuideMindMapProps) {
   const { nodes: initialNodes, edges: initialEdges } = useMemo(
-    () => convertToFlowElements(structure, onNodeClick),
-    [structure, onNodeClick]
+    () => convertToFlowElements(structure),
+    [structure]
   )
 
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<MindMapFlowData>>(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
 
+  useEffect(() => {
+    setNodes(initialNodes)
+    setEdges(initialEdges)
+  }, [initialEdges, initialNodes, setEdges, setNodes])
+
   const handleNodeClick = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
-      if (onNodeClick && node.data.blockId) {
-        onNodeClick(node.data.blockId, node.data.pageNum)
+    (_event: React.MouseEvent, node: Node<MindMapFlowData>) => {
+      if (onNodeClick && node.data.blockId && node.data.pageNum) {
+        onNodeClick({
+          blockId: node.data.blockId,
+          pageNum: node.data.pageNum,
+        })
       }
     },
     [onNodeClick]
@@ -163,7 +176,7 @@ export default function GuideMindMap({ structure, onNodeClick }: GuideMindMapPro
   }
 
   return (
-    <div className="h-64 w-full bg-[#1a1a1a] rounded-lg border border-[#333] overflow-hidden">
+    <div className={`${className || 'h-64'} w-full bg-[#1a1a1a] rounded-lg border border-[#333] overflow-hidden`}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -182,7 +195,7 @@ export default function GuideMindMap({ structure, onNodeClick }: GuideMindMapPro
       >
         <Background color="rgba(255,255,255,0.03)" gap={16} />
         <Controls
-          className="!bg-[#252525] !border !border-[#333] !rounded-lg"
+          className="bg-[#252525]! border! border-[#333]! rounded-lg!"
           showInteractive={false}
         />
       </ReactFlow>

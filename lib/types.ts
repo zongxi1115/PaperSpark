@@ -500,6 +500,7 @@ export interface MindMapNode {
 
 // React Flow 节点数据
 export interface FlowNodeData {
+  [key: string]: unknown
   label: string
   blockId?: string
   pageNum?: number
@@ -522,11 +523,28 @@ export interface BlockKeyPoints {
   pageNum: number
 }
 
+export interface AIGuideHighlight {
+  id: string
+  blockId: string
+  pageNum: number
+  title: string
+  note: string
+  quote?: string
+}
+
+export interface GuideFocusTarget {
+  blockId: string
+  pageNum: number
+  title?: string
+  note?: string
+}
+
 // AI导读完整数据
 export interface AIGuideData {
   summary: AIGuideSummary
   structure: MindMapNode[]
   blockKeyPoints: BlockKeyPoints[]
+  highlights: AIGuideHighlight[]
 }
 
 // AI导读缓存
@@ -534,16 +552,17 @@ export interface GuideCache {
   id: string // `${documentId}_guide`
   documentId: string
   knowledgeItemId: string
-  summary: AIGuideSummary
-  structure: MindMapNode[]
-  blockKeyPoints: BlockKeyPoints[]
+  summary?: AIGuideSummary | null
+  structure?: MindMapNode[]
+  blockKeyPoints?: BlockKeyPoints[]
+  highlights?: AIGuideHighlight[]
   modelUsed: string
   generatedAt: string
   updatedAt: string
 }
 
 // AI导读请求类型
-export type AIGuideAction = 'summary' | 'structure' | 'keypoints' | 'all'
+export type AIGuideAction = 'summary' | 'structure' | 'keypoints' | 'highlights' | 'all'
 
 // AI导读请求体
 export interface AIGuideRequest {
@@ -561,6 +580,7 @@ export interface AIGuideResponse {
   summary?: AIGuideSummary
   structure?: MindMapNode[]
   blockKeyPoints?: BlockKeyPoints[]
+  highlights?: AIGuideHighlight[]
   error?: string
 }
 

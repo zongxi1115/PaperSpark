@@ -23,7 +23,7 @@ import {
 } from '@/lib/pdfCache'
 import PDFViewer from '@/components/PDF/PDFViewer'
 import AIGuidePanel from '@/components/Guide/AIGuidePanel'
-import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload } from '@/lib/types'
+import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload, GuideFocusTarget } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
 import { parsePDFWithSurya } from '@/lib/suryaParser'
 import { indexKnowledgeForRAG, deleteKnowledgeVectors } from '@/lib/rag'
@@ -34,6 +34,104 @@ function attachPageMetrics(blocks: TextBlock[], pageWidth: number, pageHeight: n
     sourcePageWidth: block.sourcePageWidth || pageWidth,
     sourcePageHeight: block.sourcePageHeight || pageHeight,
   }))
+}
+
+const REFERENCE_SECTION_PATTERN = /^(references|bibliography|参考文献|引用文献|文献引用)$/i
+const DOI_PATTERN = /\b(10\.\d{4,9}\/[\w.()/:;+-]+)\b/ig
+const URL_PATTERN = /https?:\/\/[^\s<>")\]]+/ig
+const ARXIV_PATTERN = /\barXiv:\s*([a-z\-.]+\/\d{7}|\d{4}\.\d{4,5}(?:v\d+)?)\b/i
+
+function normalizeReferenceText(value: string) {
+  return value
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
+    .trim()
+}
+
+function stripTrailingLinkPunctuation(value: string) {
+  return value.replace(/[),.;\]]+$/, '')
+}
+
+function dedupeStrings(values: string[]) {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  values.forEach(value => {
+    const normalized = normalizeReferenceText(value)
+    const key = normalized.toLowerCase()
+    if (!normalized || seen.has(key)) return
+    seen.add(key)
+    result.push(normalized)
+  })
+
+  return result
+}
+
+function mergeReferenceLists(...lists: Array<string[] | undefined>) {
+  return dedupeStrings(lists.flatMap(list => list || []))
+}
+
+function extractReferenceLinks(reference: string) {
+  const links: Array<{ type: string; url: string }> = []
+  const pushLink = (type: string, url: string) => {
+    const cleaned = stripTrailingLinkPunctuation(url)
+    if (!cleaned || links.some(item => item.url === cleaned)) return
+    links.push({ type, url: cleaned })
+  }
+
+  const doiMatches = Array.from(reference.matchAll(DOI_PATTERN)).map(match => stripTrailingLinkPunctuation(match[1]))
+  doiMatches.forEach(doi => pushLink('DOI', `https://doi.org/${doi}`))
+
+  const urlMatches = Array.from(reference.matchAll(URL_PATTERN)).map(match => stripTrailingLinkPunctuation(match[0]))
+  urlMatches.forEach(url => {
+    const type = /doi\.org\//i.test(url) ? 'DOI' : 'Link'
+    pushLink(type, url)
+  })
+
+  const arxivMatch = reference.match(ARXIV_PATTERN)
+  if (arxivMatch?.[1]) {
+    pushLink('arXiv', `https://arxiv.org/abs/${arxivMatch[1]}`)
+  }
+
+  return links
+}
+
+function extractReferencesFromBlocks(blocks: TextBlock[]) {
+  const orderedBlocks = [...blocks].sort((left, right) => {
+    if (left.pageNum !== right.pageNum) return left.pageNum - right.pageNum
+    if ((left.order ?? 0) !== (right.order ?? 0)) return (left.order ?? 0) - (right.order ?? 0)
+    if (left.bbox.y !== right.bbox.y) return left.bbox.y - right.bbox.y
+    return left.bbox.x - right.bbox.x
+  })
+
+  let inReferenceSection = false
+  const references: string[] = []
+
+  orderedBlocks.forEach(block => {
+    const text = normalizeReferenceText(block.text)
+    if (!text) return
+
+    if (block.type === 'title' || block.type === 'subtitle') {
+      inReferenceSection = REFERENCE_SECTION_PATTERN.test(text)
+      return
+    }
+
+    const hasIdentifier = DOI_PATTERN.test(text) || URL_PATTERN.test(text) || ARXIV_PATTERN.test(text)
+    DOI_PATTERN.lastIndex = 0
+    URL_PATTERN.lastIndex = 0
+
+    const looksLikeReference =
+      block.type === 'reference' ||
+      block.sourceLabel === 'Footnote' ||
+      (inReferenceSection && ['paragraph', 'list', 'caption'].includes(block.type)) ||
+      (hasIdentifier && text.length > 32)
+
+    if (!looksLikeReference) return
+    if (text.length < 24) return
+    references.push(text)
+  })
+
+  return dedupeStrings(references)
 }
 
 export default function ImmersiveReaderPage() {
@@ -58,6 +156,7 @@ export default function ImmersiveReaderPage() {
 
   // 跳转控制
   const [jumpToBlock, setJumpToBlock] = useState<{ blockId: string; pageNum: number } | null>(null)
+  const [focusedGuideTarget, setFocusedGuideTarget] = useState<GuideFocusTarget | null>(null)
 
   // 翻译状态
   const [translating, setTranslating] = useState(false)
@@ -234,6 +333,9 @@ export default function ImmersiveReaderPage() {
       existingPages.length > 0
     setSuryaReady(hasCompletedSuryaCache)
 
+    const cachedBlocks = existingPages.flatMap(page => attachPageMetrics(page.blocks, page.width, page.height))
+    const extractedCachedReferences = extractReferencesFromBlocks(cachedBlocks)
+
     if (existingDoc) {
       if (existingDoc.parser === 'surya') {
         const translation = await getTranslation(knowledgeId)
@@ -253,8 +355,7 @@ export default function ImmersiveReaderPage() {
 
       if (existingPages.length > 0) {
         setTotalPages(existingPages.length)
-        const allBlocks = existingPages.flatMap(p => attachPageMetrics(p.blocks, p.width, p.height))
-        setBlocks(allBlocks)
+        setBlocks(cachedBlocks)
       }
 
       // 加载全文内容
@@ -269,13 +370,24 @@ export default function ImmersiveReaderPage() {
         setFullText(text)
       }
 
+      const mergedReferences = mergeReferenceLists(existingDoc.metadata.references || [], extractedCachedReferences)
+
+      if (mergedReferences.length !== (existingDoc.metadata.references || []).length) {
+        await updatePDFDocument(knowledgeId, {
+          metadata: {
+            ...existingDoc.metadata,
+            references: mergedReferences,
+          },
+        })
+      }
+
       setMetadata({
         title: existingDoc.metadata.title,
         authors: existingDoc.metadata.authors,
         abstract: existingDoc.metadata.abstract,
         year: existingDoc.metadata.year,
         journal: existingDoc.metadata.journal,
-        references: existingDoc.metadata.references || [],
+        references: mergedReferences,
         keywords: existingDoc.metadata.keywords || [],
       })
       setMetadataLoading(false)
@@ -315,7 +427,7 @@ export default function ImmersiveReaderPage() {
         year: existingDoc?.metadata.year || item.year || '',
         journal: existingDoc?.metadata.journal || item.journal || '',
         keywords: existingDoc?.metadata.keywords || [],
-        references: existingDoc?.metadata.references || [],
+        references: mergeReferenceLists(existingDoc?.metadata.references || [], extractedCachedReferences),
       }
 
       const now = new Date().toISOString()
@@ -339,17 +451,22 @@ export default function ImmersiveReaderPage() {
         })
       }
 
+      const metadataModelConfig = getSelectedSmallModel(getSettings())
       const result = await parsePDFWithSurya({
         documentId: knowledgeId,
         fileBlob: cachedFile.blob,
         fileName: cachedFile.fileName,
         keepOutputs: false,
+        includeMetadata: Boolean(metadataModelConfig?.apiKey && metadataModelConfig?.modelName),
+        modelConfig: metadataModelConfig || undefined,
       })
 
       setTotalPages(result.pages.length)
       const allBlocks = result.pages.flatMap(p => attachPageMetrics(p.blocks, p.width, p.height))
       setBlocks(allBlocks)
       setSuryaReady(true)
+
+      const extractedReferences = extractReferencesFromBlocks(allBlocks)
 
       if (existingDoc?.parser !== 'surya') {
         await deleteTranslation(knowledgeId)
@@ -363,8 +480,8 @@ export default function ImmersiveReaderPage() {
         abstract: result.metadata.abstract || item.abstract || '',
         year: result.metadata.year || item.year || '',
         journal: result.metadata.journal || item.journal || '',
-        keywords: result.metadata.keywords || [],
-        references: result.metadata.references || [],
+        keywords: dedupeStrings(result.metadata.keywords || []),
+        references: mergeReferenceLists(result.metadata.references || [], extractedReferences),
       }
       const parsedAt = new Date().toISOString()
 
@@ -815,21 +932,7 @@ export default function ImmersiveReaderPage() {
                     </label>
                     <div className="space-y-2 max-h-64 overflow-auto">
                       {metadata.references.map((ref, idx) => {
-                        // 解析链接 (DOI, URL, arXiv 等)
-                        const doiMatch = ref.match(/10\.\d{4,}\/[^\s]+/gi)
-                        const urlMatch = ref.match(/https?:\/\/[^\s]+/gi)
-                        const arxivMatch = ref.match(/arXiv:\s*(\d+\.\d+)/i)
-                        
-                        const links: { type: string; url: string }[] = []
-                        if (doiMatch) {
-                          links.push({ type: 'DOI', url: `https://doi.org/${doiMatch[0]}` })
-                        }
-                        if (urlMatch) {
-                          links.push({ type: 'Link', url: urlMatch[0] })
-                        }
-                        if (arxivMatch) {
-                          links.push({ type: 'arXiv', url: `https://arxiv.org/abs/${arxivMatch[1]}` })
-                        }
+                        const links = extractReferenceLinks(ref)
 
                         return (
                           <div 
@@ -1125,10 +1228,11 @@ export default function ImmersiveReaderPage() {
             blocks={blocks}
             fullText={fullText}
             modelConfig={getSelectedSmallModel(getSettings())}
-            onBlockClick={(blockId, pageNum) => {
-              if (pageNum) {
-                setCurrentPage(pageNum)
-                setJumpToBlock({ blockId, pageNum })
+            onBlockClick={(target) => {
+              if (target.pageNum) {
+                setCurrentPage(target.pageNum)
+                setJumpToBlock({ blockId: target.blockId, pageNum: target.pageNum })
+                setFocusedGuideTarget(target)
               }
             }}
           />
@@ -1276,6 +1380,7 @@ export default function ImmersiveReaderPage() {
               onAnnotationDelete={handleAnnotationDelete}
               onAnnotationUpdate={handleAnnotationUpdate}
               jumpToBlock={jumpToBlock}
+              focusTarget={focusedGuideTarget}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500">

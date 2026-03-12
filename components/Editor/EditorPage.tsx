@@ -23,11 +23,11 @@ import {
 } from '@blocknote/xl-ai'
 import { zh as aiZh } from '@blocknote/xl-ai/locales'
 import { DefaultChatTransport } from 'ai'
-import { Button, Divider, Tooltip, addToast } from '@heroui/react'
+import { Button, Divider, Tooltip, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure } from '@heroui/react'
 import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
 import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems } from '@/lib/storage'
-import type { AppDocument, AppSettings } from '@/lib/types'
+import type { AppDocument, AppSettings, ArticleAuthor } from '@/lib/types'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
@@ -153,6 +153,18 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const [ghostText, setGhostText] = useState<string | null>(null) // ghost text 内容
   const [ghostPosition, setGhostPosition] = useState<{ top: number; left: number } | null>(null)
   const [citations, setCitations] = useState<Map<string, CitationData>>(new Map()) // 引用列表
+
+  // 文章元数据状态
+  const [articleTitle, setArticleTitle] = useState('')
+  const [articleAuthors, setArticleAuthors] = useState<ArticleAuthor[]>([])
+  const [articleAbstract, setArticleAbstract] = useState('')
+  const [articleKeywords, setArticleKeywords] = useState<string[]>([])
+  const [articleDate, setArticleDate] = useState(() => new Date().toISOString().split('T')[0])
+
+  // 作者编辑弹窗
+  const { isOpen: isAuthorModalOpen, onOpen: onAuthorModalOpen, onClose: onAuthorModalClose } = useDisclosure()
+  const [editingAuthor, setEditingAuthor] = useState<ArticleAuthor | null>(null)
+  const [authorForm, setAuthorForm] = useState({ name: '', affiliation: '', email: '' })
 
   // 当前主题配置，动态更新
   const activeThemeConfig = getThemeById(settings.editorThemeId ?? 'default')
@@ -375,6 +387,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
         })
         setCitations(extractedCitations)
       }
+      // 加载文章元数据
+      if (loaded.articleTitle) setArticleTitle(loaded.articleTitle)
+      if (loaded.articleAuthors) setArticleAuthors(loaded.articleAuthors)
+      if (loaded.articleAbstract) setArticleAbstract(loaded.articleAbstract)
+      if (loaded.articleKeywords) setArticleKeywords(loaded.articleKeywords)
+      if (loaded.articleDate) setArticleDate(loaded.articleDate)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [docId])
@@ -401,6 +419,66 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [syncSettingsFromStorage])
+
+  // 保存文章元数据
+  const saveArticleMetadata = useCallback(() => {
+    if (!doc) return
+    const updated: AppDocument = {
+      ...doc,
+      articleTitle,
+      articleAuthors,
+      articleAbstract,
+      articleKeywords,
+      articleDate,
+      updatedAt: new Date().toISOString(),
+    }
+    setDoc(updated)
+    saveDocument(updated)
+  }, [doc, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])
+
+  // 作者管理
+  const handleAddAuthor = useCallback(() => {
+    setEditingAuthor(null)
+    setAuthorForm({ name: '', affiliation: '', email: '' })
+    onAuthorModalOpen()
+  }, [onAuthorModalOpen])
+
+  const handleEditAuthor = useCallback((author: ArticleAuthor) => {
+    setEditingAuthor(author)
+    setAuthorForm({ name: author.name, affiliation: author.affiliation, email: author.email })
+    onAuthorModalOpen()
+  }, [onAuthorModalOpen])
+
+  const handleSaveAuthor = useCallback(() => {
+    if (!authorForm.name.trim()) {
+      addToast({ title: '请输入作者姓名', color: 'warning' })
+      return
+    }
+
+    if (editingAuthor) {
+      // 编辑现有作者
+      setArticleAuthors(prev => prev.map(a =>
+        a.id === editingAuthor.id
+          ? { ...a, ...authorForm }
+          : a
+      ))
+    } else {
+      // 添加新作者
+      const newAuthor: ArticleAuthor = {
+        id: `author-${Date.now()}`,
+        ...authorForm,
+      }
+      setArticleAuthors(prev => [...prev, newAuthor])
+    }
+    onAuthorModalClose()
+    // 延迟保存，等待状态更新
+    setTimeout(() => saveArticleMetadata(), 100)
+  }, [authorForm, editingAuthor, onAuthorModalClose, saveArticleMetadata])
+
+  const handleDeleteAuthor = useCallback((authorId: string) => {
+    setArticleAuthors(prev => prev.filter(a => a.id !== authorId))
+    setTimeout(() => saveArticleMetadata(), 100)
+  }, [saveArticleMetadata])
 
   // 重新扫描文档中的引用，按出现顺序重新编号
   const reindexCitations = useCallback(() => {
@@ -527,6 +605,11 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       ...doc,
       title,
       content: current,
+      articleTitle,
+      articleAuthors,
+      articleAbstract,
+      articleKeywords,
+      articleDate,
       updatedAt: new Date().toISOString(),
     }
     setDoc(updated)
@@ -762,6 +845,121 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               ['--editor-font-family' as string]: activeThemeConfig.fontFamily,
             }}
           >
+            {/* 文章标题区域 */}
+            <div style={{ marginBottom: 24 }}>
+              <input
+                type="text"
+                value={articleTitle}
+                onChange={(e) => {
+                  setArticleTitle(e.target.value)
+                  // 防抖保存
+                  if (doc) {
+                    const timeoutId = setTimeout(() => {
+                      const updated = { ...doc, articleTitle: e.target.value, updatedAt: new Date().toISOString() }
+                      saveDocument(updated)
+                    }, 500)
+                    return () => clearTimeout(timeoutId)
+                  }
+                }}
+                placeholder="点击输入文章标题"
+                style={{
+                  width: '100%',
+                  fontSize: 28,
+                  fontWeight: 700,
+                  border: 'none',
+                  outline: 'none',
+                  background: 'transparent',
+                  color: 'var(--text-primary)',
+                  padding: '8px 0',
+                  borderBottom: '2px solid transparent',
+                  transition: 'border-color 0.2s',
+                  textAlign: 'center',
+                }}
+                onFocus={(e) => {
+                  e.target.style.borderBottomColor = 'var(--accent-color)'
+                }}
+                onBlur={(e) => {
+                  e.target.style.borderBottomColor = 'transparent'
+                  saveArticleMetadata()
+                }}
+              />
+            </div>
+
+            {/* 描述表格 */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: 32,
+              marginBottom: 32,
+              fontSize: 13,
+              color: 'var(--text-secondary)',
+            }}>
+              {/* 日期 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <CalendarIcon />
+                <input
+                  type="date"
+                  value={articleDate}
+                  onChange={(e) => {
+                    setArticleDate(e.target.value)
+                    setTimeout(() => saveArticleMetadata(), 100)
+                  }}
+                  style={{
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--text-secondary)',
+                    fontSize: 13,
+                    cursor: 'pointer',
+                  }}
+                />
+              </div>
+
+              {/* 作者 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <UserIcon />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+                  {articleAuthors.length === 0 ? (
+                    <span
+                      onClick={handleAddAuthor}
+                      style={{ cursor: 'pointer', color: 'var(--accent-color)' }}
+                    >
+                      点击添加作者
+                    </span>
+                  ) : (
+                    <>
+                      {articleAuthors.map((author, index) => (
+                        <span key={author.id}>
+                          <span
+                            onClick={() => handleEditAuthor(author)}
+                            style={{ cursor: 'pointer' }}
+                            title={`${author.affiliation}${author.email ? `\n${author.email}` : ''}`}
+                          >
+                            {author.name}
+                          </span>
+                          {index < articleAuthors.length - 1 && <span>, </span>}
+                        </span>
+                      ))}
+                      <span
+                        onClick={handleAddAuthor}
+                        style={{
+                          cursor: 'pointer',
+                          color: 'var(--accent-color)',
+                          marginLeft: 4,
+                          fontSize: 12,
+                        }}
+                        title="添加作者"
+                      >
+                        +
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 分隔线 */}
+            <Divider style={{ marginBottom: 32 }} />
+
             <BlockNoteView
               key={settings.editorThemeId ?? 'default'}
               editor={editor}
@@ -939,6 +1137,57 @@ export function EditorPageContent({ docId }: EditorPageProps) {
 
       {/* Right Icon Sidebar - Fixed */}
       <RightSidebar />
+
+      {/* 作者编辑弹窗 */}
+      <Modal isOpen={isAuthorModalOpen} onClose={onAuthorModalClose} size="sm">
+        <ModalContent>
+          <ModalHeader>{editingAuthor ? '编辑作者' : '添加作者'}</ModalHeader>
+          <ModalBody>
+            <Input
+              label="姓名"
+              placeholder="作者姓名"
+              value={authorForm.name}
+              onValueChange={(v) => setAuthorForm(prev => ({ ...prev, name: v }))}
+              size="sm"
+              variant="bordered"
+            />
+            <Input
+              label="单位"
+              placeholder="所属机构/学校"
+              value={authorForm.affiliation}
+              onValueChange={(v) => setAuthorForm(prev => ({ ...prev, affiliation: v }))}
+              size="sm"
+              variant="bordered"
+            />
+            <Input
+              label="邮箱"
+              type="email"
+              placeholder="example@university.edu"
+              value={authorForm.email}
+              onValueChange={(v) => setAuthorForm(prev => ({ ...prev, email: v }))}
+              size="sm"
+              variant="bordered"
+            />
+          </ModalBody>
+          <ModalFooter>
+            {editingAuthor && (
+              <Button
+                color="danger"
+                variant="light"
+                onPress={() => {
+                  handleDeleteAuthor(editingAuthor.id)
+                  onAuthorModalClose()
+                }}
+              >
+                删除
+              </Button>
+            )}
+            <div style={{ flex: 1 }} />
+            <Button variant="light" onPress={onAuthorModalClose}>取消</Button>
+            <Button color="primary" onPress={handleSaveAuthor}>保存</Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
     </div>
   )
 }
@@ -979,6 +1228,26 @@ function CitationIcon() {
       <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
       <path d="M4 4.5A2.5 2.5 0 0 1 6.5 7H20" />
       <path d="M6.5 7h13.5v13H6.5a2.5 2.5 0 0 0 0-5H20V4H6.5a2.5 2.5 0 0 0 0 5Z" />
+    </svg>
+  )
+}
+
+function CalendarIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  )
+}
+
+function UserIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
     </svg>
   )
 }

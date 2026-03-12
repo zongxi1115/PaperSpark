@@ -120,7 +120,13 @@ function buildStyle(region: SuryaLayoutRegion, blockType: TextBlockType): TextSt
   }
 }
 
-function regionToBlock(documentId: string, pageNum: number, region: SuryaLayoutRegion): TextBlock | null {
+function regionToBlock(
+  documentId: string,
+  pageNum: number,
+  pageWidth: number,
+  pageHeight: number,
+  region: SuryaLayoutRegion,
+): TextBlock | null {
   const text = normalizeText(region.text)
   if (!text) return null
 
@@ -144,6 +150,8 @@ function regionToBlock(documentId: string, pageNum: number, region: SuryaLayoutR
     confidence: region.confidence,
     lineCount: region.line_count,
     order: region.position,
+    sourcePageWidth: pageWidth,
+    sourcePageHeight: pageHeight,
   }
 }
 
@@ -235,17 +243,19 @@ export function normalizeSuryaParseResult(
   metadata?: Partial<PDFMetadata>,
 ): SuryaParseResult {
   const pages: PDFPageCache[] = parsed.pages.map(page => {
+    const imageBox = page.image_bbox || [0, 0, 0, 0]
+    const pageWidth = Math.max(0, imageBox[2] - imageBox[0])
+    const pageHeight = Math.max(0, imageBox[3] - imageBox[1])
     const blocks = page.layout_regions
-      .map(region => regionToBlock(documentId, page.page, region))
+      .map(region => regionToBlock(documentId, page.page, pageWidth, pageHeight, region))
       .filter((block): block is TextBlock => block !== null)
 
-    const imageBox = page.image_bbox || [0, 0, 0, 0]
     return {
       id: `${documentId}_page_${page.page}`,
       documentId,
       pageNum: page.page,
-      width: Math.max(0, imageBox[2] - imageBox[0]),
-      height: Math.max(0, imageBox[3] - imageBox[1]),
+      width: pageWidth,
+      height: pageHeight,
       blocks,
       fullText: normalizeText(page.full_text || blocks.map(block => block.text).join('\n\n')),
       createdAt: new Date().toISOString(),

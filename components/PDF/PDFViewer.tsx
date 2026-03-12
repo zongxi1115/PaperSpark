@@ -168,22 +168,29 @@ function wrapTextToWidth(text: string, width: number, fontSize: number, fontFami
 function buildTranslationLayout(block: TextBlock, scale: number, viewport: PDFViewport): TranslationLayout {
   const paddingX = 6
   const paddingY = 4
-  const left = block.bbox.x * scale
-  const top = block.bbox.y * scale
+  const xScale = block.sourcePageWidth
+    ? viewport.width / block.sourcePageWidth
+    : scale
+  const yScale = block.sourcePageHeight
+    ? viewport.height / block.sourcePageHeight
+    : scale
+  const unitScale = Math.min(xScale, yScale)
+  const left = block.bbox.x * xScale
+  const top = block.bbox.y * yScale
   const width = Math.max(
     48,
-    Math.min(block.bbox.width * scale, viewport.width - left - 8),
+    Math.min(block.bbox.width * xScale, viewport.width - left - 8),
   )
   const height = Math.max(
     20,
-    Math.min(block.bbox.height * scale, viewport.height - top - 8),
+    Math.min(block.bbox.height * yScale, viewport.height - top - 8),
   )
   const contentWidth = Math.max(24, width - paddingX * 2)
   const contentHeight = Math.max(12, height - paddingY * 2)
   const fontFamily = block.style.fontFamily || 'serif'
   const preferredFontSize = Math.max(
     10,
-    Math.min(block.style.fontSize * scale * 0.82, contentHeight),
+    Math.min(block.style.fontSize * unitScale * 0.82, contentHeight),
   )
   const minFontSize = Math.max(8, Math.min(12, preferredFontSize))
   let low = minFontSize

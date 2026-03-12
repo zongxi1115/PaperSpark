@@ -1,9 +1,23 @@
+// 文章作者类型
+export interface ArticleAuthor {
+  id: string
+  name: string
+  affiliation: string // 单位
+  email: string
+}
+
 export interface AppDocument {
   id: string
-  title: string
+  title: string // 文档标题（列表显示用）
   content: unknown[]
   createdAt: string
   updatedAt: string
+  // 文章元数据
+  articleTitle?: string // 文章标题
+  articleAuthors?: ArticleAuthor[] // 作者列表
+  articleAbstract?: string // 摘要
+  articleKeywords?: string[] // 关键词
+  articleDate?: string // 文章日期
 }
 
 export interface ModelConfig {
@@ -168,6 +182,53 @@ export interface KnowledgeState {
   zoteroConfig: ZoteroConfig | null
 }
 
+// ============ 资产库相关类型 ============
+
+// 预设资产类型
+export const PRESET_ASSET_TYPES = [
+  { id: 'material', name: '素材', icon: 'solar:document-bold', color: '#3b82f6', description: '收集的资料、素材' },
+  { id: 'note', name: '随记', icon: 'solar:pen-bold', color: '#10b981', description: '随笔、想法记录' },
+] as const
+
+// 资产类型定义（用户可自定义扩展）
+export interface AssetType {
+  id: string
+  name: string
+  icon: string // emoji 或图标名
+  color: string // 主题色
+  description?: string
+  customFields?: AssetField[] // 自定义字段
+  isPreset?: boolean // 是否为预设类型
+  createdAt: string
+  updatedAt: string
+}
+
+// 自定义字段定义
+export interface AssetField {
+  id: string
+  name: string
+  type: 'text' | 'textarea' | 'number' | 'date' | 'select' | 'tags'
+  required?: boolean
+  options?: string[] // select 类型的选项
+  placeholder?: string
+}
+
+// 资产项
+export interface AssetItem {
+  id: string
+  title: string
+  typeId: string // 关联的资产类型 ID
+  summary?: string // AI 生成的概述
+  content: unknown[] // BlockNote 内容
+  // 自定义字段值
+  fieldValues?: Record<string, string | string[] | number>
+  // 标签
+  tags?: string[]
+  createdAt: string
+  updatedAt: string
+  aiProcessedAt?: string // AI 处理时间
+}
+
 // 随记想法类型
 export interface Thought {
   id: string
@@ -261,6 +322,8 @@ export interface TextBlock {
   confidence?: number
   lineCount?: number
   order?: number
+  sourcePageWidth?: number
+  sourcePageHeight?: number
 }
 
 export type PDFParserSource = 'pdfjs' | 'surya'

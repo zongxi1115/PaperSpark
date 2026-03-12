@@ -24,6 +24,14 @@ import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, 
 import { HIGHLIGHT_COLORS } from '@/lib/types'
 import { parsePDFWithSurya } from '@/lib/suryaParser'
 
+function attachPageMetrics(blocks: TextBlock[], pageWidth: number, pageHeight: number) {
+  return blocks.map(block => ({
+    ...block,
+    sourcePageWidth: block.sourcePageWidth || pageWidth,
+    sourcePageHeight: block.sourcePageHeight || pageHeight,
+  }))
+}
+
 export default function ImmersiveReaderPage() {
   const params = useParams()
   const router = useRouter()
@@ -167,7 +175,7 @@ export default function ImmersiveReaderPage() {
 
       if (existingPages.length > 0) {
         setTotalPages(existingPages.length)
-        const allBlocks = existingPages.flatMap(p => p.blocks)
+        const allBlocks = existingPages.flatMap(p => attachPageMetrics(p.blocks, p.width, p.height))
         setBlocks(allBlocks)
       }
 
@@ -241,7 +249,7 @@ export default function ImmersiveReaderPage() {
       })
 
       setTotalPages(result.pages.length)
-      const allBlocks = result.pages.flatMap(p => p.blocks)
+      const allBlocks = result.pages.flatMap(p => attachPageMetrics(p.blocks, p.width, p.height))
       setBlocks(allBlocks)
       setSuryaReady(true)
 

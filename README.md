@@ -197,29 +197,21 @@ SURYA_OCR_SERVICE_URL=http://127.0.0.1:8765
 <table>
     <tr>
         <td width="50%" valign="top">
-            <a href="md_assets/file_AI交互协同操作文档.mp4">
-                <img src="md_assets/file_主编辑区AI交互栏操作指引_引用知识库_快速笔记_在线代码执行和图片绘制.png" alt="AI 交互协同操作文档" width="100%" />
-            </a>
+            <video src="https://github.com/user-attachments/assets/47746635-5b73-4d3d-874e-19b77aba413b" controls width="100%"></video>
             <p align="center">AI 交互协同操作文档</p>
         </td>
         <td width="50%" valign="top">
-            <a href="md_assets/file_文献多智能体全方位检索.mp4">
-                <img src="md_assets/file_沉浸式阅读_文章重点提取并跳转到对应部分.png" alt="文献多智能体全方位检索" width="100%" />
-            </a>
+            <video src="https://github.com/user-attachments/assets/7797a2b6-c451-48a2-ae8b-ef05b2b17601" controls width="100%"></video>
             <p align="center">文献多智能体全方位检索</p>
         </td>
     </tr>
     <tr>
         <td width="50%" valign="top">
-            <a href="md_assets/file_文献智能引用.mp4">
-                <img src="md_assets/file_zotero批量导入到知识库.png" alt="文献智能引用" width="100%" />
-            </a>
+            <video src="https://github.com/user-attachments/assets/9c508a2f-2c20-4a15-b2a4-716514b9f8a4" controls width="100%"></video>
             <p align="center">文献智能引用</p>
         </td>
         <td width="50%" valign="top">
-            <a href="md_assets/file_智能文段纠错.mp4">
-                <img src="md_assets/file_basic_界面_带一个可视化公式编辑器演示.png" alt="智能文段纠错" width="100%" />
-            </a>
+            <video src="https://github.com/user-attachments/assets/3df403de-4c62-44ae-a2f1-70220e7cff97" controls width="100%"></video>
             <p align="center">智能文段纠错</p>
         </td>
     </tr>

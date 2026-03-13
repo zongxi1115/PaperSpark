@@ -1,14 +1,37 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Chip, Textarea, addToast } from '@heroui/react'
-import { Icon } from '@iconify/react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { Button, Tooltip, Spinner, addToast } from '@heroui/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { getSettings, getSelectedLargeModel, generateId } from '@/lib/storage'
-import type { AssistantCitation, AssistantMessage, GuideFocusTarget, TextBlock } from '@/lib/types'
+import { Icon } from '@iconify/react'
+import {
+  getSettings,
+  getSelectedLargeModel,
+  getSelectedSmallModel,
+  generateId,
+} from '@/lib/storage'
+import { getVectorDocumentsByDocumentId } from '@/lib/pdfCache'
+import type { TextBlock, ModelConfig, RAGSearchResult, GuideFocusTarget } from '@/lib/types'
 
-interface SelectionQuestionContext {
+interface ImmersiveChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  citations?: ChatCitation[]
+  followUpQuestions?: string[]
+  createdAt: string
+}
+
+interface ChatCitation {
+  id: string
+  blockId: string
+  pageNum: number
+  text: string
+  score: number
+}
+
+interface SelectionContext {
   id: string
   text: string
   pageNum: number
@@ -19,66 +42,8 @@ interface ImmersiveChatPanelProps {
   knowledgeItemId: string
   title: string
   blocks: TextBlock[]
-  selectionContext: SelectionQuestionContext | null
-  onCitationClick?: (target: GuideFocusTarget) => void
-}
-
-function tokenize(value: string) {
-  return value
-    .toLowerCase()
-    .split(/[\s，。；：、“”‘’（）()【】\[\],.;:!?！？]+/)
-    .map(token => token.trim())
-    .filter(token => token.length >= 2)
-}
-
-function buildImmersiveCandidates(params: {
-  knowledgeItemId: string
-  title: string
-  blocks: TextBlock[]
-  query: string
-  selectionContext: SelectionQuestionContext | null
-}): AssistantCitation[] {
-  const { knowledgeItemId, title, blocks, query, selectionContext } = params
-  const tokens = tokenize(query)
-  const candidateBlocks = blocks.filter(block => ['paragraph', 'title', 'subtitle', 'reference', 'list'].includes(block.type) && block.text.trim().length > 20)
-
-  const scored = candidateBlocks.map(block => {
-    const haystack = block.text.toLowerCase()
-    const tokenScore = tokens.length === 0
-      ? 0
-      : tokens.reduce((sum, token) => sum + (haystack.includes(token) ? 1 : 0), 0) / tokens.length
-    const exactSelectionBoost = selectionContext?.blockId === block.id ? 2 : 0
-    const quoteBoost = selectionContext?.text && haystack.includes(selectionContext.text.trim().toLowerCase()) ? 1.2 : 0
-    const structureBoost = block.type === 'title' || block.type === 'subtitle' ? 0.2 : 0
-    const score = tokenScore + exactSelectionBoost + quoteBoost + structureBoost
-
-    return { block, score }
-  })
-
-  const prioritized = [...scored]
-    .sort((left, right) => right.score - left.score)
-    .filter(item => item.score > 0 || item.block.id === selectionContext?.blockId)
-    .slice(0, 8)
-
-  if (selectionContext?.blockId) {
-    const selected = candidateBlocks.find(block => block.id === selectionContext.blockId)
-    if (selected && !prioritized.some(item => item.block.id === selected.id)) {
-      prioritized.unshift({ block: selected, score: 999 })
-    }
-  }
-
-  return prioritized
-    .slice(0, 8)
-    .map((item, index) => ({
-      id: `K${index + 1}`,
-      knowledgeItemId,
-      title,
-      excerpt: item.block.text.slice(0, 420),
-      sourceKind: 'fulltext' as const,
-      score: item.score,
-      blockId: item.block.id,
-      pageNum: item.block.pageNum,
-    }))
+  selectionContext?: SelectionContext | null
+  onCitationClick: (target: GuideFocusTarget) => void
 }
 
 export default function ImmersiveChatPanel({
@@ -88,152 +53,207 @@ export default function ImmersiveChatPanel({
   selectionContext,
   onCitationClick,
 }: ImmersiveChatPanelProps) {
-  const [messages, setMessages] = useState<AssistantMessage[]>([])
+  const [messages, setMessages] = useState<ImmersiveChatMessage[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [activeSelection, setActiveSelection] = useState<SelectionQuestionContext | null>(selectionContext)
-  const abortControllerRef = useRef<AbortController | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const [isGeneratingFollowUp, setIsGeneratingFollowUp] = useState(false)
 
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  // 滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
+  // 处理选中文字提问
   useEffect(() => {
-    if (!selectionContext) return
-    setActiveSelection(selectionContext)
-    setInputValue(current => {
-      if (current.trim()) return current
-      return '请解释我刚选中的这段内容，并结合上下文说明它在文中的作用。'
-    })
+    if (selectionContext && selectionContext.text) {
+      setInputValue(`关于选中的内容："${selectionContext.text.slice(0, 100)}${selectionContext.text.length > 100 ? '...' : ''}"\n\n请解释一下这段内容的含义。`)
+      inputRef.current?.focus()
+    }
   }, [selectionContext])
 
-  const settings = useMemo(() => getSettings(), [])
+  // RAG 搜索
+  const searchRelevantBlocks = useCallback(async (query: string): Promise<ChatCitation[]> => {
+    try {
+      const settings = getSettings()
+      const smallModelConfig = getSelectedSmallModel(settings)
 
+      // 获取本地向量
+      const localVectors = await getVectorDocumentsByDocumentId(knowledgeItemId)
+
+      const response = await fetch('/api/rag/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          documentId: knowledgeItemId,
+          query,
+          topK: 5,
+          modelConfig: smallModelConfig,
+          localVectors,
+        }),
+      })
+
+      if (!response.ok) {
+        return []
+      }
+
+      const result = await response.json()
+      if (!result.success || !Array.isArray(result.results)) {
+        return []
+      }
+
+      return result.results.map((r: RAGSearchResult) => ({
+        id: r.blockId,
+        blockId: r.blockId,
+        pageNum: r.pageNum,
+        text: r.text,
+        score: r.score,
+      }))
+    } catch (error) {
+      console.error('RAG search error:', error)
+      return []
+    }
+  }, [knowledgeItemId])
+
+  // 生成推荐追问问题
+  const generateFollowUpQuestions = useCallback(async (userQuery: string, assistantResponse: string): Promise<string[]> => {
+    try {
+      const settings = getSettings()
+      const smallModelConfig = getSelectedSmallModel(settings)
+
+      if (!smallModelConfig?.apiKey) {
+        return []
+      }
+
+      setIsGeneratingFollowUp(true)
+
+      const response = await fetch('/api/ai/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: `基于以下对话，生成3个用户可能想继续追问的问题。每个问题一行，不要编号，直接输出问题。
+
+文档标题：${title}
+
+用户问题：${userQuery}
+
+AI回答：${assistantResponse.slice(0, 500)}
+
+请生成3个相关的追问问题：`,
+          modelConfig: smallModelConfig,
+          maxTokens: 150,
+        }),
+      })
+
+      if (!response.ok) {
+        return []
+      }
+
+      const data = await response.json()
+      if (!data.completion) {
+        return []
+      }
+
+      const questions = data.completion
+        .split('\n')
+        .map((q: string) => q.trim())
+        .filter((q: string) => q.length > 5 && q.length < 100)
+        .slice(0, 3)
+
+      return questions
+    } catch (error) {
+      console.error('Generate follow-up questions error:', error)
+      return []
+    } finally {
+      setIsGeneratingFollowUp(false)
+    }
+  }, [title])
+
+  // 发送消息
   const handleSend = useCallback(async () => {
-    if (isLoading) return
+    const content = inputValue.trim()
+    if (!content || isLoading) return
 
-    const trimmed = inputValue.trim()
-    if (!trimmed && !activeSelection) {
-      return
-    }
-
-    const modelConfig = getSelectedLargeModel(settings)
-    if (!modelConfig?.apiKey || !modelConfig?.modelName) {
-      addToast({ title: '请先在设置中配置大模型', color: 'warning' })
-      return
-    }
-
-    const fallbackPrompt = activeSelection
-      ? '请解释我选中的这段内容，并结合全文上下文回答。'
-      : ''
-    const prompt = trimmed || fallbackPrompt
-    const knowledgeCandidates = buildImmersiveCandidates({
-      knowledgeItemId,
-      title,
-      blocks,
-      query: `${prompt}\n${activeSelection?.text || ''}`,
-      selectionContext: activeSelection,
-    })
-
-    if (knowledgeCandidates.length === 0) {
-      addToast({ title: '当前文档里没有检索到可用段落证据', color: 'warning' })
-      return
-    }
-
-    const userMessage: AssistantMessage = {
+    const userMessage: ImmersiveChatMessage = {
       id: generateId(),
       role: 'user',
-      content: prompt,
-      citations: knowledgeCandidates,
+      content,
       createdAt: new Date().toISOString(),
     }
 
-    const assistantMessage: AssistantMessage = {
-      id: generateId(),
-      role: 'assistant',
-      content: '',
-      citations: knowledgeCandidates,
-      createdAt: new Date().toISOString(),
-    }
-
-    const nextMessages = [...messages, userMessage, assistantMessage]
-    setMessages(nextMessages)
+    setMessages(prev => [...prev, userMessage])
     setInputValue('')
     setIsLoading(true)
 
-    const systemPrompt = [
-      `你是当前论文《${title}》的沉浸式阅读问答助手。`,
-      '你只能基于给定证据回答，绝对不能编造段落或页码。',
-      '你的每一段回答都必须带有 [K1] 这类引用标记，且整条回答至少引用 2 条证据。',
-      '如果证据不足，直接说明“证据不足”，并说明缺少什么。',
-      '回答末尾必须有“参考段落”小节，每行一个引用，格式为 [K1] 第X页｜摘录要点。',
-      activeSelection?.text ? `用户当前选中的原文是：${activeSelection.text}` : '',
-    ].filter(Boolean).join('\n')
+    const assistantMessage: ImmersiveChatMessage = {
+      id: generateId(),
+      role: 'assistant',
+      content: '',
+      createdAt: new Date().toISOString(),
+    }
 
     try {
+      const settings = getSettings()
+      const largeModelConfig = getSelectedLargeModel(settings)
+
+      if (!largeModelConfig?.apiKey) {
+        addToast({ title: '请先配置大参数模型 API Key', color: 'warning' })
+        setIsLoading(false)
+        return
+      }
+
+      // 搜索相关内容
+      const citations = await searchRelevantBlocks(content)
+
+      // 构建上下文
+      let contextText = ''
+      if (citations.length > 0) {
+        contextText = `\n\n以下是文档中与问题相关的段落，请参考这些内容回答：\n${citations.map((c, i) => `[${i + 1}] 第${c.pageNum}页：${c.text}`).join('\n\n')}`
+      }
+
+      // 如果有选中上下文
+      let selectionText = ''
+      if (selectionContext?.text) {
+        selectionText = `\n\n用户选中的内容（第${selectionContext.pageNum}页）：\n"${selectionContext.text}"`
+      }
+
       abortControllerRef.current = new AbortController()
+
       const response = await fetch('/api/ai/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: nextMessages.map(message => ({ role: message.role, content: message.content })),
-          modelConfig,
-          systemPrompt,
-          useKnowledge: true,
-          knowledgeCandidates,
+          messages: [
+            {
+              role: 'user',
+              content: `你是一个学术文档阅读助手，帮助用户理解文档内容。
+
+文档标题：${title}
+
+${selectionText}${contextText}
+
+用户问题：${content}
+
+请用中文回答，简洁明了。如果引用了文档内容，请在句末标注引用编号如[1]。`,
+            },
+          ],
+          modelConfig: largeModelConfig,
+          systemPrompt: '你是一个学术文档阅读助手，帮助用户理解学术论文和研究文档。回答要简洁、专业、有依据。',
         }),
         signal: abortControllerRef.current.signal,
       })
 
       if (!response.ok) {
-        throw new Error('AI 问答请求失败')
+        throw new Error('请求失败')
       }
 
       const reader = response.body?.getReader()
       const decoder = new TextDecoder()
-      let buffer = ''
       let fullContent = ''
-
-      const updateAssistant = (updater: (draft: AssistantMessage) => void) => {
-        setMessages(prev => {
-          const draft = [...prev]
-          const target = draft.find(message => message.id === assistantMessage.id)
-          if (!target) return prev
-          updater(target)
-          return draft
-        })
-      }
-
-      const processLine = (line: string) => {
-        if (!line.trim()) return
-
-        const payload = JSON.parse(line) as {
-          type: 'tool-status' | 'text-delta' | 'citations' | 'error' | 'done'
-          delta?: string
-          citations?: AssistantCitation[]
-          error?: string
-        }
-
-        if (payload.type === 'citations' && Array.isArray(payload.citations)) {
-          updateAssistant(draft => {
-            draft.citations = payload.citations
-          })
-          return
-        }
-
-        if (payload.type === 'text-delta' && payload.delta) {
-          fullContent += payload.delta
-          updateAssistant(draft => {
-            draft.content = fullContent
-          })
-          return
-        }
-
-        if (payload.type === 'error') {
-          throw new Error(payload.error || 'AI 回答失败')
-        }
-      }
+      let buffer = ''
 
       if (reader) {
         while (true) {
@@ -241,161 +261,245 @@ export default function ImmersiveChatPanel({
           if (done) break
 
           buffer += decoder.decode(value, { stream: true })
-          let lineBreakIndex = buffer.indexOf('\n')
 
+          let lineBreakIndex = buffer.indexOf('\n')
           while (lineBreakIndex >= 0) {
             const line = buffer.slice(0, lineBreakIndex)
             buffer = buffer.slice(lineBreakIndex + 1)
-            processLine(line)
+
+            if (line.trim()) {
+              try {
+                const payload = JSON.parse(line)
+                if (payload.type === 'text-delta' && payload.delta) {
+                  fullContent += payload.delta
+                  assistantMessage.content = fullContent
+                  setMessages(prev => {
+                    const newMessages = [...prev]
+                    const lastIdx = newMessages.findIndex(m => m.id === assistantMessage.id)
+                    if (lastIdx >= 0) {
+                      newMessages[lastIdx] = { ...assistantMessage }
+                    } else {
+                      newMessages.push(assistantMessage)
+                    }
+                    return newMessages
+                  })
+                }
+              } catch {
+                // 忽略解析错误
+              }
+            }
             lineBreakIndex = buffer.indexOf('\n')
           }
         }
+      }
 
-        if (buffer.trim()) {
-          processLine(buffer)
+      // 添加引用信息
+      if (citations.length > 0) {
+        assistantMessage.citations = citations
+      }
+
+      // 生成推荐追问问题
+      const followUpQuestions = await generateFollowUpQuestions(content, fullContent)
+      if (followUpQuestions.length > 0) {
+        assistantMessage.followUpQuestions = followUpQuestions
+      }
+
+      setMessages(prev => {
+        const newMessages = [...prev]
+        const lastIdx = newMessages.findIndex(m => m.id === assistantMessage.id)
+        if (lastIdx >= 0) {
+          newMessages[lastIdx] = { ...assistantMessage }
         }
-      }
+        return newMessages
+      })
 
-      setActiveSelection(null)
     } catch (error) {
-      if ((error as Error).name !== 'AbortError') {
-        addToast({ title: (error as Error).message || 'AI 问答失败', color: 'danger' })
-      }
+      console.error('Chat error:', error)
+      assistantMessage.content = '抱歉，回答时出现错误，请稍后重试。'
+      setMessages(prev => [...prev, assistantMessage])
     } finally {
       setIsLoading(false)
-      abortControllerRef.current = null
     }
-  }, [activeSelection, blocks, inputValue, isLoading, knowledgeItemId, messages, settings, title])
+  }, [inputValue, isLoading, title, selectionContext, searchRelevantBlocks, generateFollowUpQuestions])
 
+  // 停止生成
   const handleStop = useCallback(() => {
     abortControllerRef.current?.abort()
     setIsLoading(false)
   }, [])
 
+  // 快捷问题
+  const quickQuestions = [
+    '这篇文章的主要贡献是什么？',
+    '研究方法有哪些特点？',
+    '结论有哪些局限性？',
+  ]
+
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <div className="flex items-center justify-between border-b border-[#333] px-3 py-3">
-        <div>
-          <h3 className="text-sm font-medium text-gray-200">AI 问答</h3>
-          <p className="text-[11px] text-gray-500">仅基于当前论文段落作答，回答必须带可跳转引用。</p>
-        </div>
-        <Button
-          isIconOnly
-          size="sm"
-          variant="light"
-          className="text-gray-400"
-          onPress={() => setMessages([])}
-          isDisabled={messages.length === 0 || isLoading}
-        >
-          <Icon icon="mdi:delete-sweep-outline" className="text-base" />
-        </Button>
+    <div className="flex flex-col h-full">
+      {/* 头部 */}
+      <div className="px-4 py-3 border-b border-[#333]">
+        <h3 className="text-sm font-medium text-gray-200">AI 问答</h3>
+        <p className="text-xs text-gray-500 mt-0.5 truncate">{title}</p>
       </div>
 
-      {activeSelection && (
-        <div className="mx-3 mt-3 rounded-xl border border-sky-500/30 bg-sky-500/10 px-3 py-2">
-          <div className="mb-1 flex items-center justify-between gap-2">
-            <Chip size="sm" variant="flat" className="text-[10px] h-5">P.{activeSelection.pageNum}</Chip>
-            <button
-              type="button"
-              className="text-[11px] text-gray-400 transition-colors hover:text-white"
-              onClick={() => setActiveSelection(null)}
-            >
-              清除
-            </button>
-          </div>
-          <p className="text-xs leading-relaxed text-gray-300 line-clamp-4">{activeSelection.text}</p>
-        </div>
-      )}
-
-      <div className="flex-1 overflow-auto px-3 py-3 space-y-3">
+      {/* 消息列表 */}
+      <div className="flex-1 overflow-auto p-4 space-y-4">
         {messages.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-[#333] px-4 py-6 text-center text-gray-500">
-            <Icon icon="mdi:robot-outline" className="mx-auto mb-2 text-2xl text-gray-600" />
-            <p className="text-sm">可以直接提问，也可以先框选一段文字再问 AI。</p>
+          <div className="flex flex-col items-center justify-center h-full text-gray-500">
+            <Icon icon="mdi:chat-question-outline" className="text-4xl mb-3 text-gray-600" />
+            <p className="text-sm text-center mb-4">选择文本提问，或直接输入问题</p>
+            <div className="space-y-2 w-full max-w-xs">
+              {quickQuestions.map((q, i) => (
+                <button
+                  key={i}
+                  className="w-full text-left px-3 py-2 text-xs text-gray-400 bg-[#1a1a1a] rounded-lg hover:bg-[#252525] hover:text-gray-300 transition-colors"
+                  onClick={() => setInputValue(q)}
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
           </div>
-        ) : messages.map(message => (
-          <div
-            key={message.id}
-            className={`rounded-2xl border px-3 py-3 ${message.role === 'assistant' ? 'border-[#333] bg-[#171717]' : 'border-[#294560] bg-[#122233]'}`}
-          >
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <span className={`text-[11px] font-medium ${message.role === 'assistant' ? 'text-sky-300' : 'text-emerald-300'}`}>
-                {message.role === 'assistant' ? 'AI 回答' : '我的问题'}
-              </span>
-              <span className="text-[10px] text-gray-500">{new Date(message.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
-            </div>
-
-            <div className="prose prose-invert prose-p:my-1 prose-ul:my-1 prose-li:my-0 max-w-none text-sm leading-6">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content || (message.role === 'assistant' && isLoading ? '思考中…' : '')}</ReactMarkdown>
-            </div>
-
-            {message.citations && message.citations.length > 0 && (
-              <div className="mt-3 space-y-2">
-                <p className="text-[11px] text-gray-500">引用段落</p>
-                {message.citations.map(citation => (
-                  <button
-                    key={`${message.id}-${citation.id}`}
-                    type="button"
-                    className="block w-full rounded-xl border border-[#333] bg-[#111] px-3 py-2 text-left transition-colors hover:border-sky-500/50 hover:bg-[#151b24]"
-                    onClick={() => {
-                      if (citation.blockId && citation.pageNum) {
-                        onCitationClick?.({
-                          blockId: citation.blockId,
-                          pageNum: citation.pageNum,
-                          title: citation.id,
-                          note: citation.excerpt,
-                        })
-                      }
-                    }}
-                  >
-                    <div className="mb-1 flex items-center gap-2">
-                      <span className="text-xs font-medium text-sky-300">{citation.id}</span>
-                      {citation.pageNum && (
-                        <Chip size="sm" variant="flat" className="text-[10px] h-5">P.{citation.pageNum}</Chip>
-                      )}
+        ) : (
+          <>
+            {messages.map((message) => (
+              <div
+                key={message.id}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              >
+                <div
+                  className={`max-w-[90%] rounded-xl px-3 py-2 ${
+                    message.role === 'user'
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-[#252525] text-gray-200'
+                  }`}
+                >
+                  {message.role === 'assistant' ? (
+                    <div className="prose prose-invert prose-sm max-w-none">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        {message.content || '...'}
+                      </ReactMarkdown>
                     </div>
-                    <p className="text-xs leading-relaxed text-gray-300 line-clamp-3">{citation.excerpt}</p>
-                  </button>
-                ))}
+                  ) : (
+                    <p className="text-sm whitespace-pre-wrap">{message.content}</p>
+                  )}
+
+                  {/* 引用来源（精简显示） */}
+                  {message.citations && message.citations.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-[#333]">
+                      <p className="text-[10px] text-gray-500 mb-1">引用来源：</p>
+                      <div className="flex flex-wrap gap-1">
+                        {message.citations.slice(0, 3).map((citation) => (
+                          <button
+                            key={citation.id}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[#1a1a1a] text-blue-400 rounded hover:bg-blue-500/10 transition-colors"
+                            onClick={() => onCitationClick({
+                              blockId: citation.blockId,
+                              pageNum: citation.pageNum,
+                              title: `第${citation.pageNum}页`,
+                              note: citation.text.slice(0, 100),
+                            })}
+                          >
+                            <Icon icon="mdi:file-document-outline" className="text-[10px]" />
+                            <span>第{citation.pageNum}页</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 推荐追问 */}
+                  {message.followUpQuestions && message.followUpQuestions.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-[#333]">
+                      <p className="text-[10px] text-gray-500 mb-1.5">推荐追问：</p>
+                      <div className="space-y-1">
+                        {message.followUpQuestions.map((q, i) => (
+                          <button
+                            key={i}
+                            className="block w-full text-left px-2 py-1.5 text-[11px] text-gray-400 bg-[#1a1a1a] rounded hover:bg-[#2a2a2a] hover:text-gray-300 transition-colors"
+                            onClick={() => setInputValue(q)}
+                          >
+                            <Icon icon="mdi:lightbulb-outline" className="text-amber-500 mr-1" />
+                            {q}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {isLoading && messages[messages.length - 1]?.role === 'user' && (
+              <div className="flex justify-start">
+                <div className="bg-[#252525] rounded-xl px-3 py-2">
+                  <div className="flex items-center gap-2 text-gray-400">
+                    <Spinner size="sm" color="primary" />
+                    <span className="text-sm">思考中...</span>
+                  </div>
+                </div>
               </div>
             )}
-          </div>
-        ))}
-        <div ref={messagesEndRef} />
+
+            {isGeneratingFollowUp && (
+              <div className="flex justify-center">
+                <div className="flex items-center gap-1.5 text-[10px] text-gray-500">
+                  <Spinner size="sm" />
+                  <span>生成推荐问题...</span>
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
+          </>
+        )}
       </div>
 
-      <div className="border-t border-[#333] p-3">
-        <Textarea
-          minRows={3}
-          maxRows={8}
-          value={inputValue}
-          onValueChange={setInputValue}
-          placeholder={activeSelection ? '围绕选中文本继续提问…' : '问一个关于当前论文的问题…'}
-          classNames={{
-            inputWrapper: 'bg-[#171717] border border-[#333] shadow-none',
-            input: 'text-sm text-gray-200',
-          }}
-          onKeyDown={event => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault()
-              void handleSend()
-            }
-          }}
-        />
-
-        <div className="mt-3 flex items-center justify-between gap-2">
-          <p className="text-[11px] text-gray-500">回答只会基于当前文档候选段落生成。</p>
-          <div className="flex gap-2">
-            {isLoading && (
-              <Button size="sm" variant="light" className="text-gray-400" onPress={handleStop}>
-                停止
-              </Button>
-            )}
-            <Button size="sm" color="primary" onPress={() => void handleSend()} isLoading={isLoading}>
-              发送
+      {/* 输入区域 */}
+      <div className="p-3 border-t border-[#333]">
+        <div className="flex gap-2">
+          <textarea
+            ref={inputRef}
+            className="flex-1 bg-[#1a1a1a] text-gray-200 text-sm rounded-lg px-3 py-2 resize-none focus:outline-none border border-[#333] focus:border-blue-500 placeholder-gray-500"
+            rows={2}
+            placeholder="输入问题..."
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                handleSend()
+              }
+            }}
+          />
+          {isLoading ? (
+            <Button
+              isIconOnly
+              color="danger"
+              variant="light"
+              className="self-end"
+              onPress={handleStop}
+            >
+              <Icon icon="mdi:stop" className="text-lg" />
             </Button>
-          </div>
+          ) : (
+            <Tooltip content="发送">
+              <Button
+                isIconOnly
+                color="primary"
+                className="self-end"
+                onPress={handleSend}
+                isDisabled={!inputValue.trim()}
+              >
+                <Icon icon="mdi:send" className="text-lg" />
+              </Button>
+            </Tooltip>
+          )}
         </div>
+        <p className="text-[10px] text-gray-600 mt-1.5 text-center">
+          Shift+Enter 换行 · Enter 发送
+        </p>
       </div>
     </div>
   )

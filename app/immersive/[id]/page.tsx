@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Button, Tooltip, Skeleton, Progress, Chip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, addToast } from '@heroui/react'
+import { Button, Tooltip, Skeleton, Progress, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, addToast } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import { getKnowledgeItem, getSettings, getSelectedSmallModel, updateKnowledgeItem, deleteKnowledgeItem } from '@/lib/storage'
 import {

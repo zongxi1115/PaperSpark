@@ -402,6 +402,26 @@ function blockExists(editor: NonNullable<ReturnType<typeof getEditor>>, blockId:
   return editor.document.some((block: any) => block.id === blockId)
 }
 
+/**
+ * 从块中提取纯文本用于预览
+ * 递归遍历 content 数组，提取所有 text 节点的文本
+ */
+function extractBlockPreviewText(block: any): string {
+  if (!block) return ''
+  const content = block.content
+  if (!content) return ''
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) {
+    return content.map((c: any) => {
+      if (typeof c === 'string') return c
+      if (c?.text) return c.text
+      if (c?.content) return extractBlockPreviewText(c)
+      return ''
+    }).join('')
+  }
+  return ''
+}
+
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
 const jitter = () => Math.random() * 0.3 + 0.85
 
@@ -452,17 +472,26 @@ function markBlockAsInsertion(
 
   if (blockFrom < 0) return
 
+  // Collect all inner block positions first to avoid stale-position issues
+  const innerBlockPositions: number[] = []
+  const innerFrom = blockFrom + 1
+  const innerTo = blockTo - 1
+
+  if (innerFrom < innerTo) {
+    doc.nodesBetween(innerFrom, innerTo, (node, pos) => {
+      if (node.isBlock) innerBlockPositions.push(pos)
+      return true
+    })
+  }
+
   editor.transact((tr) => {
     tr.setMeta('addToHistory', false)
     tr.addNodeMark(blockFrom, insertionMark.create())
-    const innerFrom = blockFrom + 1
-    const innerTo = blockTo - 1
     if (innerFrom < innerTo) {
       tr.addMark(innerFrom, innerTo, insertionMark.create())
-      doc.nodesBetween(innerFrom, innerTo, (node, pos) => {
-        if (node.isBlock) tr.addNodeMark(pos, insertionMark.create())
-        return true
-      })
+      for (const pos of innerBlockPositions) {
+        tr.addNodeMark(pos, insertionMark.create())
+      }
     }
   })
 }
@@ -511,6 +540,8 @@ async function animateInsertWithMark(
 
 // 按操作 key 存储插入的块ID，用于后续按操作接受/撤销
 const operationBlockIds = new Map<string, Set<string>>()
+// 按操作 key 存储更新操作的旧块内容，用于撤销恢复
+const operationOldBlocks = new Map<string, Array<{ blockId: string; oldBlock: any }>>()
 
 function registerOperationBlockId(opKey: string, blockId: string) {
   if (!operationBlockIds.has(opKey)) {
@@ -532,55 +563,114 @@ export function acceptInsertionChanges(opKey?: string): void {
   if (opKey && operationBlockIds.has(opKey)) {
     // 按操作作用域移除标记
     const blockIds = operationBlockIds.get(opKey)!
+
+    // Pass 1: collect all positions that need mark removal (node marks + inline ranges)
+    const nodeMarkPositions: number[] = []
+    const inlineRanges: Array<{ from: number; to: number }> = []
+
+    editor.prosemirrorState.doc.descendants((node, pos) => {
+      if (node.isBlock && node.attrs?.id && blockIds.has(node.attrs.id)) {
+        const hasMark = (node.marks || []).some((m: any) => m.type === insertionMark)
+        if (hasMark) {
+          nodeMarkPositions.push(pos)
+        }
+        // Collect inline range for this block
+        const innerFrom = pos + 1
+        const innerTo = pos + node.nodeSize - 1
+        if (innerFrom < innerTo) {
+          inlineRanges.push({ from: innerFrom, to: innerTo })
+        }
+      }
+      return true
+    })
+
+    // Pass 2: apply changes in reverse order to avoid position shifts
     editor.transact((tr) => {
       tr.setMeta('addToHistory', false)
-      tr.doc.descendants((node, pos) => {
-        if (node.isBlock && node.attrs?.id && blockIds.has(node.attrs.id)) {
+      // Remove inline marks first (doesn't affect block positions)
+      for (const range of inlineRanges) {
+        tr.removeMark(range.from, range.to, insertionMark)
+      }
+      // Remove node marks in reverse order
+      for (let i = nodeMarkPositions.length - 1; i >= 0; i--) {
+        const pos = nodeMarkPositions[i]
+        const node = tr.doc.nodeAt(pos)
+        if (node) {
           const filteredMarks = (node.marks || []).filter((m: any) => m.type !== insertionMark)
-          if (filteredMarks.length !== (node.marks || []).length) {
-            tr.setNodeMarkup(pos, undefined, undefined, filteredMarks)
-          }
-          // 移除块内的 inline mark
-          const innerFrom = pos + 1
-          const innerTo = pos + node.nodeSize - 1
-          if (innerFrom < innerTo) {
-            tr.removeMark(innerFrom, innerTo, insertionMark)
-          }
+          tr.setNodeMarkup(pos, undefined, undefined, filteredMarks)
         }
-        return true
-      })
+      }
     })
     operationBlockIds.delete(opKey)
+    operationOldBlocks.delete(opKey)
   } else {
-    // 全局回退
+    // 全局回退：先移除所有 inline mark，再移除 node mark
+    const nodeMarkPositions: number[] = []
+
+    editor.prosemirrorState.doc.descendants((node, pos) => {
+      if (node.isBlock && node.marks?.length) {
+        const hasMark = node.marks.some((m: any) => m.type === insertionMark)
+        if (hasMark) nodeMarkPositions.push(pos)
+      }
+      return true
+    })
+
     editor.transact((tr) => {
       tr.setMeta('addToHistory', false)
+      // Remove all inline marks first
       tr.removeMark(0, tr.doc.content.size, insertionMark)
-      tr.doc.descendants((node, pos) => {
-        if (node.isBlock && node.marks?.length) {
-          const filteredMarks = node.marks.filter((m: any) => m.type !== insertionMark)
-          if (filteredMarks.length !== node.marks.length) {
-            tr.setNodeMarkup(pos, undefined, undefined, filteredMarks)
-          }
+      // Remove node marks in reverse order
+      for (let i = nodeMarkPositions.length - 1; i >= 0; i--) {
+        const pos = nodeMarkPositions[i]
+        const node = tr.doc.nodeAt(pos)
+        if (node) {
+          const filteredMarks = (node.marks || []).filter((m: any) => m.type !== insertionMark)
+          tr.setNodeMarkup(pos, undefined, undefined, filteredMarks)
         }
-        return true
-      })
+      }
     })
     operationBlockIds.clear()
+    operationOldBlocks.clear()
   }
 }
 
-// 删除带 insertionMark 的块（撤销更改时调用）
-// 传入 opKey 时只删除该操作插入的块，否则删除所有
+// 撤销操作（撤销更改时调用）
+// insert 操作：删除插入的块
+// update 操作：恢复旧块内容
 export function rejectInsertionChanges(opKey?: string): void {
   const editor = getEditor()
   if (!editor) return
 
-  if (opKey && operationBlockIds.has(opKey)) {
-    const blockIds = operationBlockIds.get(opKey)!
-    editor.removeBlocks([...blockIds])
-    operationBlockIds.delete(opKey)
+  if (opKey) {
+    // Revert update operations: restore old block content
+    if (operationOldBlocks.has(opKey)) {
+      const oldBlocks = operationOldBlocks.get(opKey)!
+      for (const { blockId, oldBlock } of oldBlocks) {
+        if (blockExists(editor, blockId)) {
+          editor.updateBlock(blockId, oldBlock)
+        }
+      }
+      operationOldBlocks.delete(opKey)
+    }
+
+    // Remove inserted blocks
+    if (operationBlockIds.has(opKey)) {
+      const blockIds = operationBlockIds.get(opKey)!
+      editor.removeBlocks([...blockIds])
+      operationBlockIds.delete(opKey)
+    }
   } else {
+    // Global fallback: revert all updates
+    for (const [, oldBlocks] of operationOldBlocks) {
+      for (const { blockId, oldBlock } of oldBlocks) {
+        if (blockExists(editor, blockId)) {
+          editor.updateBlock(blockId, oldBlock)
+        }
+      }
+    }
+    operationOldBlocks.clear()
+
+    // Remove all inserted blocks
     const schema = editor.prosemirrorState.schema
     const insertionMark = schema.marks['insertion']
     if (!insertionMark) return
@@ -601,6 +691,105 @@ export function rejectInsertionChanges(opKey?: string): void {
     }
     operationBlockIds.clear()
   }
+}
+
+// 获取某个操作的旧块文本（用于 diff 预览）
+export function getOldBlockText(opKey: string): string | null {
+  const oldBlocks = operationOldBlocks.get(opKey)
+  if (!oldBlocks || oldBlocks.length === 0) return null
+  return oldBlocks.map(({ oldBlock }) => {
+    const content = oldBlock?.content
+    if (!content) return ''
+    if (Array.isArray(content)) {
+      return content.map((c: any) => (typeof c === 'string' ? c : c?.text || '')).join('')
+    }
+    return ''
+  }).join('\n')
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Diff 算法（字符级）
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface DiffSegment {
+  type: 'equal' | 'delete' | 'insert'
+  text: string
+}
+
+/**
+ * 简单 diff：基于最长公共子序列（LCS）计算差异
+ * 用于短文本对比（update 操作预览）
+ */
+export function computeDiff(oldText: string, newText: string): DiffSegment[] {
+  // 快速路径
+  if (oldText === newText) return [{ type: 'equal', text: oldText }]
+  if (!oldText) return [{ type: 'insert', text: newText }]
+  if (!newText) return [{ type: 'delete', text: oldText }]
+
+  // 按词级别分词以获得更好的可读性
+  const oldWords = tokenize(oldText)
+  const newWords = tokenize(newText)
+
+  // LCS DP
+  const m = oldWords.length
+  const n = newWords.length
+
+  // 对超长文本做简单截断避免 O(n*m) 爆内存
+  if (m * n > 50000) {
+    return [
+      { type: 'delete', text: oldText },
+      { type: 'insert', text: newText },
+    ]
+  }
+
+  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0))
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (oldWords[i - 1] === newWords[j - 1]) {
+        dp[i][j] = dp[i - 1][j - 1] + 1
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
+      }
+    }
+  }
+
+  // Backtrack
+  const segments: DiffSegment[] = []
+  let i = m
+  let j = n
+
+  const rawSegments: DiffSegment[] = []
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldWords[i - 1] === newWords[j - 1]) {
+      rawSegments.push({ type: 'equal', text: oldWords[i - 1] })
+      i--
+      j--
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      rawSegments.push({ type: 'insert', text: newWords[j - 1] })
+      j--
+    } else {
+      rawSegments.push({ type: 'delete', text: oldWords[i - 1] })
+      i--
+    }
+  }
+
+  rawSegments.reverse()
+
+  // Merge consecutive segments of same type
+  for (const seg of rawSegments) {
+    if (segments.length > 0 && segments[segments.length - 1].type === seg.type) {
+      segments[segments.length - 1].text += seg.text
+    } else {
+      segments.push({ ...seg })
+    }
+  }
+
+  return segments
+}
+
+function tokenize(text: string): string[] {
+  // Split into words and whitespace, keeping delimiters
+  return text.match(/\S+|\s+/g) || []
 }
 
 export async function applyEditOperations(
@@ -638,6 +827,16 @@ export async function applyEditOperations(
       if (!blockExists(editor, op.blockId)) {
         onProgress(`块 ${op.blockId.slice(0, 8)} 不存在，跳过更新`)
         continue
+      }
+      // Save old block content for undo
+      if (opKey) {
+        const oldBlock = editor.getBlock(op.blockId)
+        if (oldBlock) {
+          if (!operationOldBlocks.has(opKey)) {
+            operationOldBlocks.set(opKey, [])
+          }
+          operationOldBlocks.get(opKey)!.push({ blockId: op.blockId, oldBlock: JSON.parse(JSON.stringify(oldBlock)) })
+        }
       }
       onProgress('更新中…')
       editor.updateBlock(op.blockId, op.block as any)
@@ -792,9 +991,10 @@ interface SimpleToolProps {
   error: string
   onAccept: () => void
   onReject: () => void
+  opKey?: string
 }
 
-export function SimpleTool({ type, params, content, status, progress, error, onAccept, onReject }: SimpleToolProps) {
+export function SimpleTool({ type, params, content, status, progress, error, onAccept, onReject, opKey }: SimpleToolProps) {
   const typeLabel = {
     insert: '插入内容',
     delete: '删除块',
@@ -849,44 +1049,45 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
         {status === 'idle' && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>等待中…</span>}
       </div>
       
-      {/* 显示内容预览 - 解析并显示块类型 */}
-      {type !== 'delete' && content && (
+      {/* 内容预览 */}
+      {type === 'insert' && content && (
         <div style={{
           padding: '6px 12px',
           background: 'var(--bg-primary)',
           fontSize: 11,
           color: 'var(--text-secondary)',
-          maxHeight: 100,
+          maxHeight: 120,
           overflow: 'hidden',
         }}>
           {(() => {
             const blocks = textToBlocks(content)
-            return blocks.slice(0, 3).map((block, i) => {
+            return blocks.slice(0, 4).map((block, i) => {
               const blockType = block.type || 'paragraph'
-              const text = Array.isArray(block.content) 
-                ? block.content.map((c: any) => c?.text || '').join('') 
-                : ''
+              const text = extractBlockPreviewText(block)
               const level = (block as any).props?.level
-              
+
               let typeLabel = ''
               let prefix = ''
               if (blockType === 'heading') {
                 typeLabel = `H${level}`
-                prefix = `${'#'.repeat(level)} `
+                prefix = `${'#'.repeat(level || 1)} `
               } else if (blockType === 'bulletListItem') {
                 typeLabel = '列表'
-                prefix = '• '
+                prefix = '- '
               } else if (blockType === 'numberedListItem') {
                 typeLabel = '编号'
-                prefix = '1. '
+                prefix = `${i + 1}. `
+              } else if (blockType === 'codeBlock') {
+                typeLabel = '代码'
+                prefix = ''
               }
-              
+
               return (
                 <div key={i} style={{ marginBottom: 2, display: 'flex', gap: 6 }}>
                   {typeLabel && (
-                    <span style={{ 
-                      color: 'var(--accent-color)', 
-                      fontSize: 9, 
+                    <span style={{
+                      color: 'var(--accent-color)',
+                      fontSize: 9,
                       padding: '1px 4px',
                       background: 'rgba(0, 153, 255, 0.1)',
                       borderRadius: 3,
@@ -895,9 +1096,9 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
                       {typeLabel}
                     </span>
                   )}
-                  <span style={{ 
-                    overflow: 'hidden', 
-                    textOverflow: 'ellipsis', 
+                  <span style={{
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
                   }}>
                     {prefix}{text.slice(0, 80)}{text.length > 80 && '…'}
@@ -906,11 +1107,73 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
               )
             })
           })()}
-          {textToBlocks(content).length > 3 && (
-            <div style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 2 }}>
-              + 还有 {textToBlocks(content).length - 3} 个块
-            </div>
-          )}
+          {(() => {
+            const blocks = textToBlocks(content)
+            return blocks.length > 4 ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 2 }}>
+                + 还有 {blocks.length - 4} 个块
+              </div>
+            ) : null
+          })()}
+        </div>
+      )}
+
+      {/* Update diff 预览 */}
+      {type === 'update' && content && (
+        <div style={{
+          padding: '6px 12px',
+          background: 'var(--bg-primary)',
+          fontSize: 11,
+          color: 'var(--text-secondary)',
+          maxHeight: 150,
+          overflow: 'auto',
+        }}>
+          {(() => {
+            const oldText = opKey ? getOldBlockText(opKey) : null
+            const newText = extractBlockPreviewText(textToBlocks(content)[0])
+            if (!oldText) {
+              // No old text available, just show new content
+              return (
+                <span style={{ color: '#10b981' }}>
+                  {newText.slice(0, 200)}{newText.length > 200 && '…'}
+                </span>
+              )
+            }
+            const diff = computeDiff(oldText, newText)
+            return (
+              <div style={{ lineHeight: 1.8, wordBreak: 'break-all' }}>
+                {diff.map((seg, i) => {
+                  if (seg.type === 'equal') {
+                    return <span key={i}>{seg.text}</span>
+                  }
+                  if (seg.type === 'delete') {
+                    return (
+                      <span key={i} style={{
+                        textDecoration: 'line-through',
+                        color: '#ef4444',
+                        background: 'rgba(239, 68, 68, 0.08)',
+                        borderRadius: 2,
+                        padding: '0 1px',
+                      }}>
+                        {seg.text}
+                      </span>
+                    )
+                  }
+                  // insert
+                  return (
+                    <span key={i} style={{
+                      color: '#10b981',
+                      background: 'rgba(16, 185, 129, 0.08)',
+                      borderRadius: 2,
+                      padding: '0 1px',
+                    }}>
+                      {seg.text}
+                    </span>
+                  )
+                })}
+              </div>
+            )
+          })()}
         </div>
       )}
 
@@ -980,13 +1243,3 @@ function UpdateIcon() {
   )
 }
 
-function DocIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: 'var(--accent-color)', flexShrink: 0 }}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-      <polyline points="14 2 14 8 20 8"/>
-      <line x1="16" y1="13" x2="8" y2="13"/>
-      <line x1="16" y1="17" x2="8" y2="17"/>
-    </svg>
-  )
-}

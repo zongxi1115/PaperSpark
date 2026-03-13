@@ -1494,6 +1494,7 @@ export function AssistantChatPanel() {
                               error={state.error}
                               onAccept={handleAccept}
                               onReject={handleReject}
+                              opKey={key}
                             />
                           )
                         })

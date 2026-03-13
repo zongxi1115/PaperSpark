@@ -413,8 +413,23 @@ export default function ImmersiveReaderPage() {
     if (hasCompletedSuryaCache) {
       if (item.ragStatus !== 'indexed' || item.ragDocumentUpdatedAt !== existingDoc.updatedAt) {
         const cachedBlocks = existingPages.flatMap(p => attachPageMetrics(p.blocks, p.width, p.height))
-        void buildRAGIndex(cachedBlocks, existingDoc.updatedAt)
+      void buildRAGIndex(cachedBlocks, existingDoc.updatedAt)
       }
+
+      // 自动构建知识图谱（如果还没有构建过）
+      void (async () => {
+        const { autoGraphBuild, shouldAutoGraphBuild } = await import('@/lib/autoGraph')
+        const fullTextContent = await getFullTextByKnowledgeId(knowledgeId)
+        if (shouldAutoGraphBuild(item)) {
+        const graphResult = await autoGraphBuild(item, fullTextContent || undefined)
+        if (graphResult.success) {
+            console.log('[AutoGraph] Knowledge graph built successfully')
+          } else {
+            console.warn('[AutoGraph] Failed to build graph:', graphResult.error)
+       }
+        }
+      })()
+
       return
     }
 
@@ -529,6 +544,20 @@ export default function ImmersiveReaderPage() {
         extractedMetadata: mergedMetadata,
       })
       void buildRAGIndex(allBlocks, parsedAt)
+
+      // 自动构建知识图谱
+      void (async () => {
+        const { autoGraphBuild, shouldAutoGraphBuild } = await import('@/lib/autoGraph')
+        if (shouldAutoGraphBuild(item)) {
+          const graphResult = await autoGraphBuild(item, result.fullText)
+          if (graphResult.success) {
+       console.log('[AutoGraph] Knowledge graph built successfully')
+          } else {
+         console.warn('[AutoGraph] Failed to build graph:', graphResult.error)
+          }
+        }
+      })()
+
       setMetadataLoading(false)
 
     } catch (err) {

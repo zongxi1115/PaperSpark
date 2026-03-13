@@ -624,3 +624,100 @@ export interface RAGEmbedRequest {
   modelConfig?: ModelConfig | null
   forceLocal?: boolean
 }
+
+// ============ 知识图谱相关类型 ============
+
+// 知识图谱节点类型
+export type KnowledgeNodeType = 'paper' | 'concept' | 'author' | 'method' | 'dataset' | 'keyword'
+
+// 知识图谱关系类型
+export type KnowledgeRelationType = 'cites' | 'extends' | 'uses' | 'similar_to' | 'authored_by' | 'contains_concept' | 'applies_method'
+
+// 知识图谱节点
+export interface KnowledgeGraphNode {
+  id: string
+  type: KnowledgeNodeType
+  label: string
+  description?: string
+  // 关联的知识库条目ID（如果是论文节点）
+  knowledgeItemId?: string
+  // 节点属性
+  properties: Record<string, unknown>
+  // 可视化位置
+  position?: { x: number; y: number }
+  // 节点权重（影响大小）
+  weight: number
+  createdAt: string
+  updatedAt: string
+}
+
+// 知识图谱边
+export interface KnowledgeGraphEdge {
+  id: string
+  sourceId: string
+  targetId: string
+  type: KnowledgeRelationType
+  label?: string
+  // 关系强度 0-1
+  strength: number
+  // 关系属性
+  properties: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+// 知识图谱
+export interface KnowledgeGraph {
+  id: string
+  name: string
+  description?: string
+  nodes: KnowledgeGraphNode[]
+  edges: KnowledgeGraphEdge[]
+  createdAt: string
+  updatedAt: string
+}
+
+// 自动图谱分析结果
+export interface AutoGraphAnalysis {
+  // 提取的概念
+  concepts: Array<{
+    name: string
+    description: string
+    confidence: number
+  }>
+  // 提取的方法
+  methods: Array<{
+    name: string
+    description: string
+    confidence: number
+  }>
+  // 建议的标签
+  suggestedTags: string[]
+  // 潜在关联的论文ID
+  relatedPapers: Array<{
+    knowledgeItemId: string
+    relationshipType: KnowledgeRelationType
+    confidence: number
+    reason: string
+  }>
+}
+
+// 图谱构建请求
+export interface GraphBuildRequest {
+  knowledgeItemId: string
+  title: string
+  abstract: string
+  authors: string[]
+  keywords?: string[]
+  fullText?: string
+  modelConfig: ModelConfig
+}
+
+// 图谱构建响应
+export interface GraphBuildResponse {
+  success: boolean
+  analysis?: AutoGraphAnalysis
+  nodesCreated: number
+  edgesCreated: number
+  error?: string
+}

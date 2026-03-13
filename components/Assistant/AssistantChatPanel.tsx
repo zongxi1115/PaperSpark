@@ -1,9 +1,26 @@
 'use client'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Button, Tooltip, Switch, Chip, Select, SelectItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure } from '@heroui/react'
+import { Button, Tooltip, Switch, Chip, Select, SelectItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure, Spinner } from '@heroui/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { readDocument } from './tools/ReadDocumentTool'
+
+// Python 运行结果接口
+interface PythonRunResult {
+  success: boolean
+  stdout: string
+  stderr: string
+  exitCode: number | null
+  executionTime: number
+  images: string[]
+}
+
+// 代码块运行状态
+interface CodeBlockState {
+  isRunning: boolean
+  result: PythonRunResult | null
+  showOutput: boolean
+}
 import {
   EditDocumentTool,
   SimpleTool,
@@ -70,6 +87,9 @@ export function AssistantChatPanel() {
     toolCall?: ParsedToolCall;
   }>>({})
   const editAbortRefs = useRef<Record<string, AbortController>>({})
+  
+  // Python 代码块运行状态: key = `${msgId}:${blockIdx}`
+  const [codeBlockStates, setCodeBlockStates] = useState<Record<string, CodeBlockState>>({})
 
   const { isOpen: isNoteModalOpen, onOpen: onNoteModalOpen, onClose: onNoteModalClose } = useDisclosure()
   
@@ -538,6 +558,110 @@ export function AssistantChatPanel() {
       .sort((left, right) => right.score - left.score)
       .slice(0, 8)
   }, [mentions, buildTextBlocks, extractBlockNoteText])
+
+  // 运行 Python 代码
+  const runPythonCode = useCallback(async (code: string, blockKey: string) => {
+    setCodeBlockStates(prev => ({
+      ...prev,
+      [blockKey]: { isRunning: true, result: null, showOutput: true }
+    }))
+
+    try {
+      const response = await fetch('/api/python/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, timeout: 60000 })
+      })
+
+      const result: PythonRunResult = await response.json()
+      
+      setCodeBlockStates(prev => ({
+        ...prev,
+        [blockKey]: { isRunning: false, result, showOutput: true }
+      }))
+
+      if (!result.success) {
+        addToast({ title: 'Python 执行失败', description: result.stderr.slice(0, 100), color: 'danger' })
+      }
+    } catch (error) {
+      setCodeBlockStates(prev => ({
+        ...prev,
+        [blockKey]: { 
+          isRunning: false, 
+          result: { 
+            success: false, 
+            stdout: '', 
+            stderr: error instanceof Error ? error.message : '网络错误',
+            exitCode: -1,
+            executionTime: 0,
+            images: []
+          },
+          showOutput: true 
+        }
+      }))
+      addToast({ title: '执行失败', color: 'danger' })
+    }
+  }, [])
+
+  // 将图片插入编辑器
+  const insertImageToEditor = useCallback((imageData: string) => {
+    const editor = getEditor()
+    if (!editor) {
+      addToast({ title: '编辑器未就绪', color: 'warning' })
+      return
+    }
+
+    // 使用 BlockNote API 插入图片块
+    try {
+      editor.insertBlocks([
+        {
+          type: 'image',
+          props: {
+            src: imageData,
+            alt: 'AI 生成的图片',
+          },
+        }
+      ], editor.getTextCursorPosition().block, 'after')
+      addToast({ title: '图片已插入编辑器', color: 'success' })
+    } catch (error) {
+      console.error('插入图片失败:', error)
+      addToast({ title: '插入图片失败', description: '请确保编辑器支持图片块', color: 'danger' })
+    }
+  }, [])
+
+  // 将图片添加到资产库
+  const addImageToAssets = useCallback((imageData: string, title?: string) => {
+    const assetTypes = getAssetTypes()
+    const preferredTypeId = assetTypes.some(t => t.id === 'image') 
+      ? 'image' 
+      : (assetTypes[0]?.id ?? 'note')
+
+    const now = new Date().toISOString()
+    const asset: AssetItem = {
+      id: generateId(),
+      title: title || `AI生成图片 ${new Date().toLocaleString('zh-CN')}`,
+      typeId: preferredTypeId,
+      summary: '由 Python 代码生成的图片',
+      content: [{
+        type: 'paragraph',
+        content: [
+          { type: 'text', text: '', styles: {} },
+        ],
+      }, {
+        type: 'image',
+        props: {
+          src: imageData,
+          alt: 'Python 生成的图片',
+        },
+      }],
+      tags: ['python', 'generated', 'image'],
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    saveAsset(asset)
+    addToast({ title: '图片已添加到资产库', color: 'success' })
+  }, [])
 
   // 复制内容
   const handleCopy = async (content: string) => {
@@ -1239,15 +1363,15 @@ export function AssistantChatPanel() {
               <Button
                 size="sm"
                 variant="flat"
+                isIconOnly
                 onPress={() => setShowHistory(!showHistory)}
                 style={{ minWidth: 'auto' }}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ marginRight: 6 }}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 3v5h5" />
                   <path d="M3.05 13a9 9 0 1 0 .5-4" />
                   <path d="M12 7v6l4 2" />
                 </svg>
-                {showHistory ? '隐藏' : '历史'}
               </Button>
             </Tooltip>
 
@@ -1406,13 +1530,14 @@ export function AssistantChatPanel() {
                         remarkPlugins={[remarkGfm]}
                         components={{
                           code({ node, className, children, ...props }: any) {
-                            const isBlock = node?.position?.start?.line !== node?.position?.end?.line || String(children).includes('\n')
+                            const codeContent = String(children).replace(/\n$/, '')
+                            const isBlock = node?.position?.start?.line !== node?.position?.end?.line || codeContent.includes('\n')
                             const lang = /language-(\w+)/.exec(className || '')?.[1]
                             
                             // Handle legacy edit_document format
                             if (isBlock && lang === 'edit_document') {
                               try {
-                                const req: EditDocumentRequest = JSON.parse(String(children).trim())
+                                const req: EditDocumentRequest = JSON.parse(codeContent.trim())
                                 // find which index this block is in the message
                                 const allBlocks = parseEditBlocks(message.content)
                                 const blockIdx = allBlocks.requests.findIndex(b => JSON.stringify(b) === JSON.stringify(req))
@@ -1426,7 +1551,6 @@ export function AssistantChatPanel() {
                                     // ignore errors
                                   }
                                   setEditStates(prev => ({ ...prev, [key]: { status: 'accepted', progress: '', error: '' } }))
-                                  // 强制刷新编辑器视图
                                   const editor = getEditor()
                                   if (editor) {
                                     editor._tiptapEditor.view.dispatch(
@@ -1441,7 +1565,6 @@ export function AssistantChatPanel() {
                                     console.warn('Reject changes failed:', e)
                                   }
                                   setEditStates(prev => ({ ...prev, [key]: { status: 'rejected', progress: '', error: '' } }))
-                                  // 强制刷新编辑器视图
                                   const editor = getEditor()
                                   if (editor) {
                                     editor._tiptapEditor.view.dispatch(
@@ -1465,8 +1588,329 @@ export function AssistantChatPanel() {
                               }
                             }
                             
-                            return <code className={className} {...props}>{children}</code>
-                          }
+                            // 行内代码
+                            if (!isBlock) {
+                              return <code className={className} {...props}>{children}</code>
+                            }
+                            
+                            // 代码块 - 添加复制按钮和运行按钮
+                            // 使用代码内容的 hash 作为 key 的一部分，确保每个代码块有唯一的状态
+                            const getCodeHash = (str: string) => {
+                              let hash = 0
+                              for (let i = 0; i < str.length; i++) {
+                                hash = ((hash << 5) - hash) + str.charCodeAt(i)
+                                hash |= 0
+                              }
+                              return Math.abs(hash).toString(36)
+                            }
+                            const blockKey = `${message.id}:codeblock:${getCodeHash(codeContent)}`
+                            const blockState = codeBlockStates[blockKey]
+                            const isPython = lang === 'python' || lang === 'py'
+                            
+                            return (
+                              <div style={{ position: 'relative', margin: '8px 0' }}>
+                                {/* 代码块头部 */}
+                                <div style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  background: 'var(--bg-secondary)',
+                                  borderBottom: '1px solid var(--border-color)',
+                                  padding: '4px 12px',
+                                  borderRadius: '6px 6px 0 0',
+                                  fontSize: 11,
+                                  color: 'var(--text-muted)',
+                                }}>
+                                  <span>{lang || '代码'}</span>
+                                  <div style={{ display: 'flex', gap: 6 }}>
+                                    {isPython && (
+                                      <button
+                                        onClick={() => runPythonCode(codeContent, blockKey)}
+                                        disabled={blockState?.isRunning}
+                                        style={{
+                                          background: 'transparent',
+                                          border: '1px solid var(--border-color)',
+                                          borderRadius: 4,
+                                          padding: '2px 8px',
+                                          fontSize: 10,
+                                          color: blockState?.isRunning ? 'var(--text-muted)' : '#10b981',
+                                          cursor: blockState?.isRunning ? 'not-allowed' : 'pointer',
+                                          display: 'flex',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                        }}
+                                        onMouseEnter={(e) => {
+                                          if (!blockState?.isRunning) {
+                                            e.currentTarget.style.borderColor = '#10b981'
+                                            e.currentTarget.style.background = 'rgba(16, 185, 129, 0.1)'
+                                          }
+                                        }}
+                                        onMouseLeave={(e) => {
+                                          e.currentTarget.style.borderColor = 'var(--border-color)'
+                                          e.currentTarget.style.background = 'transparent'
+                                        }}
+                                      >
+                                        {blockState?.isRunning ? (
+                                          <Spinner size="sm" color="success" />
+                                        ) : (
+                                          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M8 5v14l11-7z"/>
+                                          </svg>
+                                        )}
+                                        运行
+                                      </button>
+                                    )}
+                                    <button
+                                      onClick={() => handleCopy(codeContent)}
+                                      style={{
+                                        background: 'transparent',
+                                        border: '1px solid var(--border-color)',
+                                        borderRadius: 4,
+                                        padding: '2px 8px',
+                                        fontSize: 10,
+                                        color: 'var(--text-muted)',
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                      }}
+                                      onMouseEnter={(e) => {
+                                        e.currentTarget.style.borderColor = 'var(--accent-color)'
+                                        e.currentTarget.style.color = 'var(--accent-color)'
+                                      }}
+                                      onMouseLeave={(e) => {
+                                        e.currentTarget.style.borderColor = 'var(--border-color)'
+                                        e.currentTarget.style.color = 'var(--text-muted)'
+                                      }}
+                                    >
+                                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                      </svg>
+                                      复制
+                                    </button>
+                                  </div>
+                                </div>
+                                
+                                {/* 代码内容 */}
+                                <pre style={{
+                                  background: 'var(--bg-secondary)',
+                                  padding: 12,
+                                  margin: 0,
+                                  borderRadius: '0 0 6px 6px',
+                                  overflow: 'auto',
+                                  fontSize: 12,
+                                  lineHeight: 1.5,
+                                }}>
+                                  <code className={className} {...props}>{children}</code>
+                                </pre>
+                                
+                                {/* 运行结果 */}
+                                {blockState?.showOutput && blockState.result && (
+                                  <div style={{
+                                    marginTop: 8,
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: 6,
+                                    overflow: 'hidden',
+                                  }}>
+                                    <div style={{
+                                      background: 'var(--bg-secondary)',
+                                      padding: '4px 12px',
+                                      borderBottom: '1px solid var(--border-color)',
+                                      display: 'flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'space-between',
+                                      fontSize: 11,
+                                    }}>
+                                      <span style={{ 
+                                        color: blockState.result.success ? '#10b981' : '#ef4444',
+                                        fontWeight: 500,
+                                      }}>
+                                        {blockState.result.success ? '✓ 执行成功' : '✗ 执行失败'}
+                                      </span>
+                                      <span style={{ color: 'var(--text-muted)' }}>
+                                        耗时 {blockState.result.executionTime}ms
+                                      </span>
+                                    </div>
+                                    
+                                    {/* 标准输出 */}
+                                    {blockState.result.stdout && (
+                                      <div style={{
+                                        padding: 12,
+                                        background: 'var(--bg-primary)',
+                                        borderBottom: '1px solid var(--border-color)',
+                                      }}>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 4 }}>输出</div>
+                                        <pre style={{
+                                          margin: 0,
+                                          fontSize: 12,
+                                          whiteSpace: 'pre-wrap',
+                                          wordBreak: 'break-word',
+                                          color: 'var(--text-primary)',
+                                        }}>{blockState.result.stdout}</pre>
+                                      </div>
+                                    )}
+                                    
+                                    {/* 错误输出 */}
+                                    {blockState.result.stderr && (
+                                      <div style={{
+                                        padding: 12,
+                                        background: 'rgba(239, 68, 68, 0.05)',
+                                      }}>
+                                        <div style={{ fontSize: 10, color: '#ef4444', marginBottom: 4 }}>错误</div>
+                                        <pre style={{
+                                          margin: 0,
+                                          fontSize: 12,
+                                          whiteSpace: 'pre-wrap',
+                                          wordBreak: 'break-word',
+                                          color: '#ef4444',
+                                        }}>{blockState.result.stderr}</pre>
+                                      </div>
+                                    )}
+                                    
+                                    {/* 输出的图片 */}
+                                    {blockState.result.images.length > 0 && (
+                                      <div style={{
+                                        padding: 12,
+                                        background: 'var(--bg-primary)',
+                                      }}>
+                                        <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
+                                          生成图片 ({blockState.result.images.length})
+                                        </div>
+                                        {blockState.result.images.map((img, imgIdx) => (
+                                          <div key={imgIdx} style={{ marginBottom: 12 }}>
+                                            <img 
+                                              src={img} 
+                                              alt={`输出图片 ${imgIdx + 1}`}
+                                              style={{
+                                                maxWidth: '100%',
+                                                borderRadius: 4,
+                                                border: '1px solid var(--border-color)',
+                                              }}
+                                            />
+                                            <div style={{ 
+                                              display: 'flex', 
+                                              gap: 6, 
+                                              marginTop: 6,
+                                            }}>
+                                              <button
+                                                onClick={() => insertImageToEditor(img)}
+                                                style={{
+                                                  background: 'var(--bg-secondary)',
+                                                  border: '1px solid var(--border-color)',
+                                                  borderRadius: 4,
+                                                  padding: '4px 10px',
+                                                  fontSize: 10,
+                                                  color: 'var(--text-muted)',
+                                                  cursor: 'pointer',
+                                                }}
+                                              >
+                                                插入编辑器
+                                              </button>
+                                              <button
+                                                onClick={() => addImageToAssets(img)}
+                                                style={{
+                                                  background: 'var(--bg-secondary)',
+                                                  border: '1px solid var(--border-color)',
+                                                  borderRadius: 4,
+                                                  padding: '4px 10px',
+                                                  fontSize: 10,
+                                                  color: 'var(--text-muted)',
+                                                  cursor: 'pointer',
+                                                }}
+                                              >
+                                                添加到资产库
+                                              </button>
+                                            </div>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          },
+                          // 图片组件
+                          img({ src, alt }) {
+                            if (!src || typeof src !== 'string') return null
+                            
+                            return (
+                              <div style={{ 
+                                position: 'relative', 
+                                display: 'inline-block',
+                                margin: '8px 0',
+                              }}>
+                                <img 
+                                  src={src} 
+                                  alt={alt || ''}
+                                  style={{
+                                    maxWidth: '100%',
+                                    borderRadius: 6,
+                                    border: '1px solid var(--border-color)',
+                                  }}
+                                />
+                                {/* 图片操作按钮 */}
+                                <div style={{
+                                  position: 'absolute',
+                                  top: 8,
+                                  right: 8,
+                                  display: 'flex',
+                                  gap: 4,
+                                  opacity: 0,
+                                  transition: 'opacity 0.2s',
+                                }}
+                                onMouseEnter={(e) => {
+                                  (e.currentTarget as HTMLElement).style.opacity = '1'
+                                }}
+                                onMouseLeave={(e) => {
+                                  (e.currentTarget as HTMLElement).style.opacity = '0'
+                                }}
+                                >
+                                  <Tooltip content="插入编辑器">
+                                    <button
+                                      onClick={() => insertImageToEditor(src)}
+                                      style={{
+                                        background: 'rgba(0, 0, 0, 0.7)',
+                                        border: 'none',
+                                        borderRadius: 4,
+                                        padding: 6,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                      }}
+                                    >
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                                        <path d="M12 5v14M5 12h14"/>
+                                      </svg>
+                                    </button>
+                                  </Tooltip>
+                                  <Tooltip content="添加到资产库">
+                                    <button
+                                      onClick={() => addImageToAssets(src, alt || undefined)}
+                                      style={{
+                                        background: 'rgba(0, 0, 0, 0.7)',
+                                        border: 'none',
+                                        borderRadius: 4,
+                                        padding: 6,
+                                        cursor: 'pointer',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                      }}
+                                    >
+                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                        <polyline points="17 8 12 3 7 8"/>
+                                        <line x1="12" y1="3" x2="12" y2="15"/>
+                                      </svg>
+                                    </button>
+                                  </Tooltip>
+                                </div>
+                              </div>
+                            )
+                          },
                         }}
                       >
                         {removeToolCallsFromContent(message.content)}

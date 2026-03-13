@@ -37,6 +37,7 @@ import { FormulaInputExtension } from '@/lib/formulaInputExtension'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
 import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
 import { registerEditor, unregisterEditor } from '@/lib/editorContext'
+import { exportToLatex } from '@/lib/latexExporter'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -731,6 +732,25 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     URL.revokeObjectURL(url)
   }, [doc, editor])
 
+  const handleExportLatex = useCallback(async () => {
+    if (!doc) return
+
+    try {
+      const citationList = Array.from(citations.values()).sort((a, b) => a.index - b.index)
+      const zipBlob = await exportToLatex(editor as unknown as { document: unknown[] }, doc, citationList)
+      const url = URL.createObjectURL(zipBlob)
+      const a = document.createElement('a')
+      const baseName = (doc.title || 'document').replace(/[\\/:*?"<>|]/g, '_')
+      a.href = url
+      a.download = `${baseName}_latex.zip`
+      a.click()
+      URL.revokeObjectURL(url)
+      addToast({ title: 'LaTeX 导出成功', color: 'success' })
+    } catch (err) {
+      addToast({ title: `导出失败: ${err instanceof Error ? err.message : '未知错误'}`, color: 'danger' })
+    }
+  }, [citations, doc, editor])
+
   const handleManualCorrect = useCallback(async () => {
     const smallModelConfig = getSelectedSmallModel(settings)
     if (!smallModelConfig.apiKey) {
@@ -854,6 +874,18 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               onPress={handleExport}
             >
               导出 MD
+            </Button>
+          </Tooltip>
+
+          <Tooltip content="导出为 LaTeX Zip" placement="bottom">
+            <Button
+              size="sm"
+              color="primary"
+              variant="flat"
+              startContent={<LatexIcon />}
+              onPress={handleExportLatex}
+            >
+              导出 TeX
             </Button>
           </Tooltip>
 
@@ -1256,6 +1288,19 @@ function ExportIcon() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7,10 12,15 17,10" />
       <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+function LatexIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M4 4h16v16H4z" />
+      <path d="M8 9l2 6" />
+      <path d="M8 15h4" />
+      <path d="M13 9h4" />
+      <path d="M13 15h4" />
+      <path d="M15 9v6" />
     </svg>
   )
 }

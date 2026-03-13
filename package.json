@@ -12,6 +12,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.2.1",
+    "@types/jszip": "^3.4.1",
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
@@ -30,6 +31,7 @@
     "chromadb": "^3.3.3",
     "dexie": "^4.3.0",
     "framer-motion": "^12.35.2",
+    "jszip": "^3.10.1",
     "mathlive": "^0.108.3",
     "next": "^15.3.0",
     "openai": "^6.27.0",

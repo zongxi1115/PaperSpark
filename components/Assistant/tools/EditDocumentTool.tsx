@@ -80,9 +80,114 @@ export function getDocumentStructure(): DocumentBlockInfo[] | null {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface ParsedToolCall {
-  type: 'insert' | 'delete' | 'update' | 'read_document'
+  type: 'insert' | 'delete' | 'update'
   params: Record<string, string>
   content: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 流式工具检测器
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface StreamingToolState {
+  type: 'insert' | 'delete' | 'update'
+  params: Record<string, string>
+  contentSoFar: string
+  isComplete: boolean
+}
+
+export class StreamingToolDetector {
+  private prevCompleted = new Set<number>()
+
+  /**
+   * 增量扫描全文，检测 ::insert/::update/::delete 模式
+   * 返回检测到的工具列表和新完成的工具索引
+   */
+  process(fullText: string): {
+    detected: StreamingToolState[]
+    completedIndices: number[]
+  } {
+    const detected: StreamingToolState[] = []
+    const completedIndices: number[] = []
+
+    // 匹配完成的 ::insert ... ::
+    const insertRegex = /::insert\s+(before|after)?\s*(\S*)?\n([\s\S]*?)\n::/g
+    let match
+    while ((match = insertRegex.exec(fullText)) !== null) {
+      const idx = detected.length
+      detected.push({
+        type: 'insert',
+        params: { position: match[1] || 'after', referenceId: match[2] || '' },
+        contentSoFar: match[3].trim(),
+        isComplete: true,
+      })
+      if (!this.prevCompleted.has(idx)) {
+        this.prevCompleted.add(idx)
+        completedIndices.push(idx)
+      }
+    }
+
+    // 匹配完成的 ::update blockId ... ::
+    const updateRegex = /::update\s+(\S+)\n([\s\S]*?)\n::/g
+    while ((match = updateRegex.exec(fullText)) !== null) {
+      const idx = detected.length
+      detected.push({
+        type: 'update',
+        params: { blockId: match[1] },
+        contentSoFar: match[2].trim(),
+        isComplete: true,
+      })
+      if (!this.prevCompleted.has(idx)) {
+        this.prevCompleted.add(idx)
+        completedIndices.push(idx)
+      }
+    }
+
+    // 匹配 ::delete blockId（单行，总是完成的）
+    const deleteRegex = /^::delete\s+(\S+)\s*$/gm
+    while ((match = deleteRegex.exec(fullText)) !== null) {
+      const idx = detected.length
+      detected.push({
+        type: 'delete',
+        params: { blockId: match[1] },
+        contentSoFar: '',
+        isComplete: true,
+      })
+      if (!this.prevCompleted.has(idx)) {
+        this.prevCompleted.add(idx)
+        completedIndices.push(idx)
+      }
+    }
+
+    // 检测尾部不完整的 ::insert（正在流式输出中）
+    // 先移除所有已完成的 tool call，检查剩余文本
+    let remaining = fullText
+      .replace(/::insert\s+(before|after)?\s*(\S*)?\n[\s\S]*?\n::/g, '')
+      .replace(/::update\s+\S+\n[\s\S]*?\n::/g, '')
+      .replace(/^::delete\s+\S+\s*$/gm, '')
+
+    const trailingInsert = remaining.match(/::insert\s+(before|after)?\s*(\S*)?\n([\s\S]*)$/)
+    if (trailingInsert) {
+      detected.push({
+        type: 'insert',
+        params: { position: trailingInsert[1] || 'after', referenceId: trailingInsert[2] || '' },
+        contentSoFar: trailingInsert[3].trim(),
+        isComplete: false,
+      })
+    }
+
+    const trailingUpdate = remaining.match(/::update\s+(\S+)\n([\s\S]*)$/)
+    if (trailingUpdate) {
+      detected.push({
+        type: 'update',
+        params: { blockId: trailingUpdate[1] },
+        contentSoFar: trailingUpdate[2].trim(),
+        isComplete: false,
+      })
+    }
+
+    return { detected, completedIndices }
+  }
 }
 
 /**
@@ -98,23 +203,11 @@ export interface ParsedToolCall {
  * ::update block-123
  * 更新后的内容
  * ::
- * 
- * ::read_document
  */
 export function parseSimpleToolCalls(text: string): ParsedToolCall[] {
   const results: ParsedToolCall[] = []
-  
-  // 匹配 ::read_document
-  const readRegex = /::read_document\b/g
   let match
-  while ((match = readRegex.exec(text)) !== null) {
-    results.push({
-      type: 'read_document',
-      params: {},
-      content: '',
-    })
-  }
-  
+
   // 匹配 ::insert [position] [referenceId]
   const insertRegex = /::insert\s+(before|after)?\s*(\S*)?\n([\s\S]*?)::/g
   while ((match = insertRegex.exec(text)) !== null) {
@@ -183,6 +276,15 @@ export function convertToolCallsToRequest(toolCalls: ParsedToolCall[]): EditDocu
           blockId: call.params.blockId,
           block: blocks[0],
         })
+        // Multi-block update: insert extra blocks after the updated one
+        if (blocks.length > 1) {
+          operations.push({
+            type: 'insert',
+            position: 'after',
+            referenceId: call.params.blockId,
+            blocks: blocks.slice(1),
+          })
+        }
       }
     }
   }
@@ -192,9 +294,27 @@ export function convertToolCallsToRequest(toolCalls: ParsedToolCall[]): EditDocu
 
 /**
  * 将文本转换为 BlockNote 块数组
- * 支持 Markdown 格式：标题 (#)、无序列表 (-)、有序列表 (1.)
+ * 优先使用 BlockNote 内置的 tryParseMarkdownToBlocks（支持完整 Markdown 语法）
+ * 回退到简易解析器
  */
 export function textToBlocks(text: string): PartialBlock<any, any, any>[] {
+  const editor = getEditor()
+  if (editor) {
+    try {
+      const blocks = editor.tryParseMarkdownToBlocks(text)
+      if (blocks && blocks.length > 0) return blocks
+    } catch {
+      // Fallback to simple parser
+    }
+  }
+  return simpleTextToBlocks(text)
+}
+
+/**
+ * 简易 Markdown 解析器（fallback）
+ * 支持基础语法：标题 (#)、无序列表 (-)、有序列表 (1.)、代码块
+ */
+function simpleTextToBlocks(text: string): PartialBlock<any, any, any>[] {
   const lines = text.split('\n')
   const blocks: PartialBlock<any, any, any>[] = []
   let currentParagraph: string[] = []
@@ -278,6 +398,10 @@ export function textToBlocks(text: string): PartialBlock<any, any, any>[] {
 // 核心操作逻辑
 // ─────────────────────────────────────────────────────────────────────────────
 
+function blockExists(editor: NonNullable<ReturnType<typeof getEditor>>, blockId: string): boolean {
+  return editor.document.some((block: any) => block.id === blockId)
+}
+
 const delay = (ms: number) => new Promise(r => setTimeout(r, ms))
 const jitter = () => Math.random() * 0.3 + 0.85
 
@@ -349,6 +473,7 @@ async function animateInsertWithMark(
   referenceId: string,
   position: 'before' | 'after',
   signal: AbortSignal,
+  opKey?: string,
 ): Promise<string | null> {
   const emptyBlock: PartialBlock<any, any, any> = { type: block.type || 'paragraph', content: [] }
   let insertedId: string | null = null
@@ -365,7 +490,7 @@ async function animateInsertWithMark(
 
   if (!fullText) {
     markBlockAsInsertion(editor, insertedId)
-    insertedBlockIds.add(insertedId)
+    if (opKey) registerOperationBlockId(opKey, insertedId)
     return insertedId
   }
 
@@ -380,15 +505,23 @@ async function animateInsertWithMark(
 
   editor.updateBlock(insertedId, block as any)
   markBlockAsInsertion(editor, insertedId)
-  insertedBlockIds.add(insertedId)
+  if (opKey) registerOperationBlockId(opKey, insertedId)
   return insertedId
 }
 
-// 存储插入的块ID，用于后续接受/撤销
-const insertedBlockIds = new Set<string>()
+// 按操作 key 存储插入的块ID，用于后续按操作接受/撤销
+const operationBlockIds = new Map<string, Set<string>>()
 
-// 移除所有 insertionMark 标记（接受更改时调用）
-export function acceptInsertionChanges(): void {
+function registerOperationBlockId(opKey: string, blockId: string) {
+  if (!operationBlockIds.has(opKey)) {
+    operationBlockIds.set(opKey, new Set())
+  }
+  operationBlockIds.get(opKey)!.add(blockId)
+}
+
+// 移除 insertionMark 标记（接受更改时调用）
+// 传入 opKey 时只影响该操作的块，否则影响所有
+export function acceptInsertionChanges(opKey?: string): void {
   const editor = getEditor()
   if (!editor) return
 
@@ -396,63 +529,85 @@ export function acceptInsertionChanges(): void {
   const insertionMark = schema.marks['insertion']
   if (!insertionMark) return
 
-  // 使用事务移除所有 insertionMark
-  editor.transact((tr) => {
-    tr.setMeta('addToHistory', false)
-    
-    // 移除文本级别的 mark
-    tr.removeMark(0, tr.doc.content.size, insertionMark)
-    
-    // 移除块节点上的 nodeMark
-    tr.doc.descendants((node, pos) => {
-      if (node.isBlock && node.marks?.length) {
-        const filteredMarks = node.marks.filter((m: any) => m.type !== insertionMark)
-        if (filteredMarks.length !== node.marks.length) {
-          tr.setNodeMarkup(pos, undefined, undefined, filteredMarks)
+  if (opKey && operationBlockIds.has(opKey)) {
+    // 按操作作用域移除标记
+    const blockIds = operationBlockIds.get(opKey)!
+    editor.transact((tr) => {
+      tr.setMeta('addToHistory', false)
+      tr.doc.descendants((node, pos) => {
+        if (node.isBlock && node.attrs?.id && blockIds.has(node.attrs.id)) {
+          const filteredMarks = (node.marks || []).filter((m: any) => m.type !== insertionMark)
+          if (filteredMarks.length !== (node.marks || []).length) {
+            tr.setNodeMarkup(pos, undefined, undefined, filteredMarks)
+          }
+          // 移除块内的 inline mark
+          const innerFrom = pos + 1
+          const innerTo = pos + node.nodeSize - 1
+          if (innerFrom < innerTo) {
+            tr.removeMark(innerFrom, innerTo, insertionMark)
+          }
+        }
+        return true
+      })
+    })
+    operationBlockIds.delete(opKey)
+  } else {
+    // 全局回退
+    editor.transact((tr) => {
+      tr.setMeta('addToHistory', false)
+      tr.removeMark(0, tr.doc.content.size, insertionMark)
+      tr.doc.descendants((node, pos) => {
+        if (node.isBlock && node.marks?.length) {
+          const filteredMarks = node.marks.filter((m: any) => m.type !== insertionMark)
+          if (filteredMarks.length !== node.marks.length) {
+            tr.setNodeMarkup(pos, undefined, undefined, filteredMarks)
+          }
+        }
+        return true
+      })
+    })
+    operationBlockIds.clear()
+  }
+}
+
+// 删除带 insertionMark 的块（撤销更改时调用）
+// 传入 opKey 时只删除该操作插入的块，否则删除所有
+export function rejectInsertionChanges(opKey?: string): void {
+  const editor = getEditor()
+  if (!editor) return
+
+  if (opKey && operationBlockIds.has(opKey)) {
+    const blockIds = operationBlockIds.get(opKey)!
+    editor.removeBlocks([...blockIds])
+    operationBlockIds.delete(opKey)
+  } else {
+    const schema = editor.prosemirrorState.schema
+    const insertionMark = schema.marks['insertion']
+    if (!insertionMark) return
+
+    const blocksToRemove: string[] = []
+    editor.prosemirrorState.doc.descendants((node) => {
+      if (node.isBlock && node.attrs?.id) {
+        const hasMark = node.marks?.some((m: any) => m.type === insertionMark)
+        if (hasMark) {
+          blocksToRemove.push(node.attrs.id as string)
         }
       }
       return true
     })
-  })
 
-  // 清空记录
-  insertedBlockIds.clear()
-}
-
-// 删除所有带 insertionMark 的块（撤销更改时调用）
-export function rejectInsertionChanges(): void {
-  const editor = getEditor()
-  if (!editor) return
-
-  const schema = editor.prosemirrorState.schema
-  const insertionMark = schema.marks['insertion']
-  if (!insertionMark) return
-
-  const blocksToRemove: string[] = []
-
-  editor.prosemirrorState.doc.descendants((node) => {
-    if (node.isBlock && node.attrs?.id) {
-      // 检查块本身是否有 insertionMark
-      const hasMark = node.marks?.some((m: any) => m.type === insertionMark)
-      if (hasMark) {
-        blocksToRemove.push(node.attrs.id as string)
-      }
+    if (blocksToRemove.length > 0) {
+      editor.removeBlocks(blocksToRemove)
     }
-    return true
-  })
-
-  if (blocksToRemove.length > 0) {
-    editor.removeBlocks(blocksToRemove)
+    operationBlockIds.clear()
   }
-
-  // 清空记录
-  insertedBlockIds.clear()
 }
 
 export async function applyEditOperations(
   request: EditDocumentRequest,
   onProgress: (msg: string) => void,
   signal: AbortSignal,
+  opKey?: string,
 ): Promise<{ success: boolean; error?: string }> {
   const editor = getEditor()
   if (!editor) return { success: false, error: '未找到编辑器，请先打开一个文档' }
@@ -464,21 +619,34 @@ export async function applyEditOperations(
     if (signal.aborted) break
 
     if (op.type === 'insert') {
-      const refId = op.referenceId || lastBlockId
+      let refId = op.referenceId || lastBlockId
+      // Validate referenceId exists, fallback to last block
+      if (refId && refId !== lastBlockId && !blockExists(editor, refId)) {
+        refId = lastBlockId
+        onProgress('引用块不存在，将在文档末尾插入')
+      }
       if (!refId) return { success: false, error: '文档为空，无法插入' }
       let prevId = refId
       for (const block of op.blocks) {
         if (signal.aborted) break
         onProgress('正在写入…')
-        const newId = await animateInsertWithMark(editor, block, prevId, op.position, signal)
+        const newId = await animateInsertWithMark(editor, block, prevId, op.position, signal, opKey)
         if (newId) prevId = newId
         await delay(60 * jitter())
       }
     } else if (op.type === 'update') {
+      if (!blockExists(editor, op.blockId)) {
+        onProgress(`块 ${op.blockId.slice(0, 8)} 不存在，跳过更新`)
+        continue
+      }
       onProgress('更新中…')
       editor.updateBlock(op.blockId, op.block as any)
       await delay(120 * jitter())
     } else if (op.type === 'delete') {
+      if (!blockExists(editor, op.blockId)) {
+        onProgress(`块 ${op.blockId.slice(0, 8)} 不存在，跳过删除`)
+        continue
+      }
       onProgress('删除中…')
       editor.removeBlocks([op.blockId])
       await delay(80 * jitter())
@@ -616,7 +784,7 @@ function EditIcon() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface SimpleToolProps {
-  type: 'insert' | 'delete' | 'update' | 'read_document'
+  type: 'insert' | 'delete' | 'update'
   params: Record<string, string>
   content: string
   status: EditStatus
@@ -624,25 +792,22 @@ interface SimpleToolProps {
   error: string
   onAccept: () => void
   onReject: () => void
-  readResult?: { blockCount: number; charCount: number } | null
 }
 
-export function SimpleTool({ type, params, content, status, progress, error, onAccept, onReject, readResult }: SimpleToolProps) {
+export function SimpleTool({ type, params, content, status, progress, error, onAccept, onReject }: SimpleToolProps) {
   const typeLabel = {
     insert: '插入内容',
     delete: '删除块',
     update: '更新块',
-    read_document: '读取文档',
   }[type]
-  
+
   const typeIcon = {
     insert: <InsertIcon />,
     delete: <DeleteIcon />,
     update: <UpdateIcon />,
-    read_document: <DocIcon />,
   }[type]
-  
-  const isSettled = status === 'accepted' || status === 'rejected' || status === 'success'
+
+  const isSettled = status === 'accepted' || status === 'rejected'
   
   return (
     <div style={{
@@ -680,27 +845,12 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
         </span>
         {status === 'accepted' && <span style={{ color: '#10b981', fontSize: 11 }}>✓ 已接受</span>}
         {status === 'rejected' && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>已撤销</span>}
-        {status === 'success' && type === 'read_document' && readResult && (
-          <span style={{ color: '#10b981', fontSize: 11 }}>✓ {readResult.blockCount} 块 / {readResult.charCount} 字</span>
-        )}
         {status === 'error' && <span style={{ color: '#ef4444', fontSize: 11 }}>✗ 失败</span>}
         {status === 'idle' && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>等待中…</span>}
       </div>
       
-      {/* read_document 特殊显示 */}
-      {type === 'read_document' && status === 'success' && readResult && (
-        <div style={{
-          padding: '6px 12px',
-          background: 'var(--bg-primary)',
-          fontSize: 11,
-          color: 'var(--text-secondary)',
-        }}>
-          文档已读取：{readResult.blockCount} 个块，共 {readResult.charCount} 字符
-        </div>
-      )}
-      
       {/* 显示内容预览 - 解析并显示块类型 */}
-      {type !== 'delete' && type !== 'read_document' && content && (
+      {type !== 'delete' && content && (
         <div style={{
           padding: '6px 12px',
           background: 'var(--bg-primary)',

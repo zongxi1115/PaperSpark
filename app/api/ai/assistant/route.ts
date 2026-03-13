@@ -182,10 +182,14 @@ ${blockList}
 新的内容
 ::
 
-支持 Markdown 语法：
-- # 标题 → heading
+支持完整 Markdown 语法：
+- # 标题 → heading（支持 # 到 ######）
+- **粗体**、*斜体*、\`行内代码\` → 富文本样式
 - - 列表项 → bulletListItem
 - 1. 编号 → numberedListItem
+- \`\`\`语言 代码 \`\`\` → codeBlock
+- [链接](url) → 链接
+- > 引用 → 引用块
 - 普通文本 → paragraph
 
 示例：在文档末尾插入一个二级标题和段落：

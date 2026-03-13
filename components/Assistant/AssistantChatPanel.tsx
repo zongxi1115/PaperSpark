@@ -3,22 +3,22 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Button, Tooltip, Switch, Chip, Select, SelectItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure } from '@heroui/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { readDocument, type DocumentReadResult } from './tools/ReadDocumentTool'
-import { 
-  EditDocumentTool, 
+import { readDocument } from './tools/ReadDocumentTool'
+import {
+  EditDocumentTool,
   SimpleTool,
-  applyEditOperations, 
-  acceptInsertionChanges, 
-  rejectInsertionChanges, 
+  applyEditOperations,
+  acceptInsertionChanges,
+  rejectInsertionChanges,
   parseSimpleToolCalls,
   convertToolCallsToRequest,
   getDocumentStructure,
-  type EditDocumentRequest, 
+  StreamingToolDetector,
+  type EditDocumentRequest,
   type EditStatus,
   type ParsedToolCall,
 } from './tools/EditDocumentTool'
 import { getEditor } from '@/lib/editorContext'
-import { AIExtension } from '@blocknote/xl-ai'
 import { 
   getAgents, 
   getSettings, 
@@ -61,15 +61,13 @@ export function AssistantChatPanel() {
   const [noteContent, setNoteContent] = useState('')
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
   const [showNotesList, setShowNotesList] = useState(false)
-  const [docContext, setDocContext] = useState<DocumentReadResult | null>(null)
-  const [useDocContext, setUseDocContext] = useState(false)
+  const [useDocEditing, setUseDocEditing] = useState(false)
   // edit tool state: key = `${msgId}:${blockIdx}` or `${msgId}:simple:${idx}`
-  const [editStates, setEditStates] = useState<Record<string, { 
-    status: EditStatus; 
-    progress: string; 
-    error: string; 
+  const [editStates, setEditStates] = useState<Record<string, {
+    status: EditStatus;
+    progress: string;
+    error: string;
     toolCall?: ParsedToolCall;
-    readResult?: { blockCount: number; charCount: number } | null;
   }>>({})
   const editAbortRefs = useRef<Record<string, AbortController>>({})
 
@@ -713,9 +711,15 @@ export function AssistantChatPanel() {
       const systemPrompt = selectedAgent?.prompt || ''
       let knowledgeCandidates: AssistantCitation[] = []
       const assetContext = useAssets ? buildAssetContext(content) : ''
-      const docContextText = useDocContext && docContext
-        ? `\n\n当前编辑器文档内容（Markdown格式）：\n\`\`\`\n${docContext.markdown.slice(0, 8000)}\n\`\`\``
-        : ''
+
+      // Auto-read document content when doc editing is enabled
+      let docContextText = ''
+      if (useDocEditing) {
+        const freshDoc = readDocument()
+        if (freshDoc) {
+          docContextText = `\n\n当前编辑器文档内容（Markdown格式）：\n\`\`\`\n${freshDoc.markdown.slice(0, 8000)}\n\`\`\``
+        }
+      }
       const mentionCandidates = mentions.length > 0
         ? await buildMentionKnowledgeCandidates(content, { allowIndexing: useKnowledge })
         : []
@@ -772,8 +776,8 @@ export function AssistantChatPanel() {
 
       abortControllerRef.current = new AbortController()
 
-      // 自动获取文档结构
-      const docStructure = getDocumentStructure()
+      // 仅在文档编辑模式时获取文档结构
+      const docStructure = useDocEditing ? getDocumentStructure() : null
 
       const response = await fetch('/api/ai/assistant', {
         method: 'POST',
@@ -801,6 +805,38 @@ export function AssistantChatPanel() {
       const decoder = new TextDecoder()
       let fullContent = ''
       let buffer = ''
+
+      // Streaming tool detection
+      const detector = useDocEditing ? new StreamingToolDetector() : null
+      const executedToolIndices = new Set<number>()
+      const shownToolIndices = new Set<number>()
+      let streamDeltaCount = 0
+
+      const executeDetectedTool = (idx: number, tool: { type: 'insert' | 'delete' | 'update'; params: Record<string, string>; contentSoFar: string }) => {
+        if (executedToolIndices.has(idx)) return
+        executedToolIndices.add(idx)
+
+        const key = `${assistantMessage.id}:simple:${idx}`
+        const call: ParsedToolCall = { type: tool.type, params: tool.params, content: tool.contentSoFar }
+        const abort = new AbortController()
+        editAbortRefs.current[key] = abort
+
+        setEditStates(prev => ({ ...prev, [key]: { status: 'running', progress: '准备中…', error: '', toolCall: call } }))
+
+        const req = convertToolCallsToRequest([call])
+        applyEditOperations(
+          req,
+          (msg) => setEditStates(prev => ({ ...prev, [key]: { ...prev[key], progress: msg } })),
+          abort.signal,
+          key,
+        ).then(result => {
+          if (result.success) {
+            setEditStates(prev => ({ ...prev, [key]: { status: 'reviewing', progress: '', error: '' } }))
+          } else {
+            setEditStates(prev => ({ ...prev, [key]: { status: 'error', progress: '', error: result.error || '操作失败' } }))
+          }
+        })
+      }
 
       const applyAssistantUpdate = (updater: (draft: AssistantMessage) => void) => {
         updater(assistantMessage)
@@ -864,6 +900,30 @@ export function AssistantChatPanel() {
           applyAssistantUpdate(draft => {
             draft.content = fullContent
           })
+
+          // Streaming tool detection (every 5 deltas to avoid thrashing)
+          if (detector) {
+            streamDeltaCount++
+            if (streamDeltaCount % 5 === 0 || payload.delta.includes('::')) {
+              const { detected, completedIndices } = detector.process(fullContent)
+              // Show in-progress tool cards
+              detected.forEach((tool, idx) => {
+                const key = `${assistantMessage.id}:simple:${idx}`
+                if (!tool.isComplete && !executedToolIndices.has(idx) && !shownToolIndices.has(idx)) {
+                  shownToolIndices.add(idx)
+                  setEditStates(prev => ({
+                    ...prev,
+                    [key]: { status: 'running', progress: '正在接收内容…', error: '', toolCall: { type: tool.type, params: tool.params, content: tool.contentSoFar } }
+                  }))
+                }
+              })
+              // Execute newly completed tools
+              completedIndices.forEach(idx => {
+                const tool = detected[idx]
+                if (tool) executeDetectedTool(idx, tool)
+              })
+            }
+          }
           return
         }
 
@@ -907,8 +967,16 @@ export function AssistantChatPanel() {
       setCurrentConversation(finalConv)
       setMentions([])
 
-      // Auto-trigger edit_document blocks in the last assistant message
-      triggerEditBlocks(assistantMessage.id, assistantMessage.content)
+      // Final detection pass for any tools that completed at the very end
+      if (detector) {
+        const { detected } = detector.process(assistantMessage.content)
+        detected.forEach((tool, idx) => {
+          if (tool.isComplete) executeDetectedTool(idx, tool)
+        })
+      } else {
+        // Fallback: non-doc-editing mode, still handle legacy edit_document blocks
+        triggerEditBlocks(assistantMessage.id, assistantMessage.content)
+      }
 
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
@@ -923,7 +991,7 @@ export function AssistantChatPanel() {
       setIsLoading(false)
       abortControllerRef.current = null
     }
-  }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates])
+  }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, useDocEditing, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates])
 
   // Parse both simplified format (::insert, ::delete, ::update) and legacy edit_document JSON blocks
   const parseEditBlocks = useCallback((content: string): { requests: EditDocumentRequest[]; toolCalls: ParsedToolCall[] } => {
@@ -952,14 +1020,14 @@ export function AssistantChatPanel() {
   
   // Remove tool call syntax from content for display
   const removeToolCallsFromContent = useCallback((content: string): string => {
-    // Remove ::insert ... ::
-    let result = content.replace(/::insert\s+(before|after)?\s*(\S*)?\n[\s\S]*?::/g, '')
+    // Remove complete ::insert ... ::
+    let result = content.replace(/::insert\s+(before|after)?\s*(\S*)?\n[\s\S]*?\n::/g, '')
+    // Remove complete ::update blockId ... ::
+    result = result.replace(/::update\s+\S+\n[\s\S]*?\n::/g, '')
     // Remove ::delete blockId
-    result = result.replace(/::delete\s+\S+/g, '')
-    // Remove ::update blockId ... ::
-    result = result.replace(/::update\s+\S+\n[\s\S]*?::/g, '')
-    // Remove ::read_document
-    result = result.replace(/::read_document\b/g, '')
+    result = result.replace(/^::delete\s+\S+\s*$/gm, '')
+    // Remove trailing incomplete tool calls (during streaming)
+    result = result.replace(/::(?:insert|update)\s+[^\n]*(?:\n[\s\S]*)?$/, '')
     // Clean up extra whitespace
     result = result.replace(/\n{3,}/g, '\n\n').trim()
     return result
@@ -973,23 +1041,7 @@ export function AssistantChatPanel() {
     if (toolCalls.length > 0) {
       toolCalls.forEach((call, idx) => {
         const key = `${msgId}:simple:${idx}`
-        
-        // Handle read_document specially
-        if (call.type === 'read_document') {
-          const docResult = readDocument()
-          setEditStates(prev => ({ 
-            ...prev, 
-            [key]: { 
-              status: 'success', 
-              progress: '', 
-              error: '', 
-              toolCall: call,
-              readResult: docResult ? { blockCount: docResult.blockCount, charCount: docResult.charCount } : null,
-            } 
-          }))
-          return
-        }
-        
+
         const abort = new AbortController()
         editAbortRefs.current[key] = abort
 
@@ -997,11 +1049,12 @@ export function AssistantChatPanel() {
 
         // Convert single tool call to request
         const req = convertToolCallsToRequest([call])
-        
+
         applyEditOperations(
           req,
           (msg) => setEditStates(prev => ({ ...prev, [key]: { ...prev[key], progress: msg } })),
           abort.signal,
+          key,
         ).then(result => {
           if (result.success) {
             setEditStates(prev => ({ ...prev, [key]: { status: 'reviewing', progress: '', error: '' } }))
@@ -1011,7 +1064,7 @@ export function AssistantChatPanel() {
         })
       })
     }
-    
+
     // Handle legacy format
     if (requests.length > 0) {
       requests.forEach((req, idx) => {
@@ -1025,6 +1078,7 @@ export function AssistantChatPanel() {
           req,
           (msg) => setEditStates(prev => ({ ...prev, [key]: { ...prev[key], progress: msg } })),
           abort.signal,
+          key,
         ).then(result => {
           if (result.success) {
             setEditStates(prev => ({ ...prev, [key]: { status: 'reviewing', progress: '', error: '' } }))
@@ -1263,40 +1317,10 @@ export function AssistantChatPanel() {
 
             {getEditor() && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <Tooltip content="AI 已自动获取文档结构，可随时编辑。开启此项可额外提供完整文档内容作为上下文。">
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>发送完整文档内容</span>
+                <Tooltip content="开启后，AI 自动获取文档结构和内容，可读取和编辑当前文档">
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>可编辑文档内容</span>
                 </Tooltip>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  {docContext && (
-                    <span style={{ fontSize: 10, color: '#10b981' }}>
-                      {docContext.blockCount}块/{docContext.charCount}字
-                    </span>
-                  )}
-                  <button
-                    onClick={() => {
-                      const result = readDocument()
-                      if (result) {
-                        setDocContext(result)
-                        setUseDocContext(true)
-                        addToast({ title: `已读取文档 (${result.blockCount} 块)`, color: 'success' })
-                      } else {
-                        addToast({ title: '未找到编辑器', color: 'warning' })
-                      }
-                    }}
-                    style={{
-                      background: 'transparent',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: 4,
-                      padding: '2px 7px',
-                      fontSize: 11,
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    读取
-                  </button>
-                  <Switch size="sm" isSelected={useDocContext} onValueChange={setUseDocContext} isDisabled={!docContext} />
-                </div>
+                <Switch size="sm" isSelected={useDocEditing} onValueChange={setUseDocEditing} />
               </div>
             )}
           </div>
@@ -1397,13 +1421,7 @@ export function AssistantChatPanel() {
 
                                 const handleAccept = () => {
                                   try {
-                                    const editor = getEditor()
-                                    // 先尝试 AIExtension，再用手动移除标记
-                                    const ext = editor?.getExtension(AIExtension)
-                                    if (ext) {
-                                      try { ext.acceptChanges() } catch { /* ignore */ }
-                                    }
-                                    acceptInsertionChanges()
+                                    acceptInsertionChanges(key)
                                   } catch {
                                     // ignore errors
                                   }
@@ -1411,13 +1429,7 @@ export function AssistantChatPanel() {
                                 }
                                 const handleReject = () => {
                                   try {
-                                    const editor = getEditor()
-                                    const ext = editor?.getExtension(AIExtension)
-                                    if (ext) {
-                                      try { ext.rejectChanges() } catch { /* ignore */ }
-                                    }
-                                    // 手动删除带 insertionMark 的块
-                                    rejectInsertionChanges()
+                                    rejectInsertionChanges(key)
                                   } catch (e) {
                                     console.warn('Reject changes failed:', e)
                                   }
@@ -1453,33 +1465,10 @@ export function AssistantChatPanel() {
                         return toolCalls.map((call, callIdx) => {
                           const key = `${message.id}:simple:${callIdx}`
                           const state = editStates[key] ?? { status: 'idle' as EditStatus, progress: '', error: '' }
-                          
-                          // read_document 不需要接受/拒绝按钮
-                          if (call.type === 'read_document') {
-                            return (
-                              <SimpleTool
-                                key={key}
-                                type={call.type}
-                                params={call.params}
-                                content={call.content}
-                                status={state.status}
-                                progress={state.progress}
-                                error={state.error}
-                                onAccept={() => {}}
-                                onReject={() => {}}
-                                readResult={state.readResult}
-                              />
-                            )
-                          }
-                          
+
                           const handleAccept = () => {
                             try {
-                              const editor = getEditor()
-                              const ext = editor?.getExtension(AIExtension)
-                              if (ext) {
-                                try { ext.acceptChanges() } catch { /* ignore */ }
-                              }
-                              acceptInsertionChanges()
+                              acceptInsertionChanges(key)
                             } catch {
                               // ignore errors
                             }
@@ -1487,12 +1476,7 @@ export function AssistantChatPanel() {
                           }
                           const handleReject = () => {
                             try {
-                              const editor = getEditor()
-                              const ext = editor?.getExtension(AIExtension)
-                              if (ext) {
-                                try { ext.rejectChanges() } catch { /* ignore */ }
-                              }
-                              rejectInsertionChanges()
+                              rejectInsertionChanges(key)
                             } catch (e) {
                               console.warn('Reject changes failed:', e)
                             }
@@ -1510,7 +1494,6 @@ export function AssistantChatPanel() {
                               error={state.error}
                               onAccept={handleAccept}
                               onReject={handleReject}
-                              readResult={state.readResult}
                             />
                           )
                         })

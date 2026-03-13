@@ -595,6 +595,24 @@ function AssetEditorModal({
   const [summary, setSummary] = useState(asset.summary || '')
   const [tags, setTags] = useState<string[]>(asset.tags || [])
 
+  // 图片上传函数
+  const uploadFile = useCallback(async (file: File): Promise<string> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    
+    const response = await fetch('/api/upload/image', {
+      method: 'POST',
+      body: formData,
+    })
+    
+    if (!response.ok) {
+      throw new Error('上传失败')
+    }
+    
+    const data = await response.json()
+    return data.url
+  }, [])
+
   const editor = useCreateBlockNote({
     dictionary: {
       ...zh,
@@ -606,6 +624,7 @@ function AssetEditorModal({
     initialContent: Array.isArray(asset.content) && asset.content.length > 0
       ? (asset.content as Block[])
       : undefined,
+    uploadFile,
   })
 
   const currentType = assetTypes.find(t => t.id === asset.typeId)

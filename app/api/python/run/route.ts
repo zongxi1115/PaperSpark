@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
+import crypto from 'crypto'
 
 interface RunRequest {
   code: string
@@ -14,11 +15,30 @@ interface RunResult {
   stderr: string
   exitCode: number | null
   executionTime: number
-  images: string[]
+  images: string[]  // URL 列表
+}
+
+// 图片存储目录
+const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'python_images')
+
+// 确保上传目录存在
+function ensureUploadDir() {
+  if (!fs.existsSync(UPLOAD_DIR)) {
+    fs.mkdirSync(UPLOAD_DIR, { recursive: true })
+  }
+}
+
+// 生成唯一文件名
+function generateFileName(): string {
+  const timestamp = Date.now()
+  const randomStr = crypto.randomBytes(4).toString('hex')
+  return `${timestamp}_${randomStr}.png`
 }
 
 export async function POST(request: NextRequest) {
   try {
+    ensureUploadDir()
+
     const body = await request.json() as RunRequest
     const { code, timeout = 60000 } = body
 
@@ -37,7 +57,7 @@ export async function POST(request: NextRequest) {
 
     // 生成唯一文件名
     const timestamp = Date.now()
-    const randomId = Math.random().toString(36).substring(7)
+    const randomId = crypto.randomBytes(4).toString('hex')
     const scriptFile = path.join(tempDir, `script_${timestamp}_${randomId}.py`)
     const outputDir = path.join(tempDir, `output_${timestamp}_${randomId}`)
     fs.mkdirSync(outputDir, { recursive: true })
@@ -157,17 +177,23 @@ if _image_counter > 0:
         clearTimeout(timeoutId)
         const executionTime = Date.now() - startTime
 
-        // 收集图片 - 从输出目录读取所有 PNG 文件
+        // 收集图片 - 从输出目录读取所有 PNG 文件并保存到 public
         const images: string[] = []
         try {
           const files = fs.readdirSync(outputDir)
           // 按文件名排序，确保顺序正确
           const pngFiles = files.filter(f => f.toLowerCase().endsWith('.png')).sort()
+          
           for (const file of pngFiles) {
-            const imgPath = path.join(outputDir, file)
-            const imgData = fs.readFileSync(imgPath)
-            const base64 = imgData.toString('base64')
-            images.push(`data:image/png;base64,${base64}`)
+            const srcPath = path.join(outputDir, file)
+            const newFileName = generateFileName()
+            const destPath = path.join(UPLOAD_DIR, newFileName)
+            
+            // 复制文件到 public 目录
+            fs.copyFileSync(srcPath, destPath)
+            
+            // 返回公开 URL
+            images.push(`/uploads/python_images/${newFileName}`)
           }
         } catch {
           // 忽略读取错误

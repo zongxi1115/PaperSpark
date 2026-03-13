@@ -27,3 +27,4 @@ public/fonts
 .next/
 out/
 *.pyc
+**/uploads/**

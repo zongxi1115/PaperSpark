@@ -1,8 +1,10 @@
 <div align="center">
 
-# ⚡ PaperSpark
+<img src="md_assets/banner.png" alt="PaperSpark Banner" width="100%" />
 
-**点燃学术灵感 · AI 驱动的论文阅读与写作助手**
+# PaperSpark
+
+AI 驱动的论文阅读、知识沉淀与学术写作工作台
 
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=nextdotjs)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
@@ -11,157 +13,290 @@
 
 </div>
 
----
+## 项目概览
 
-## ✨ 项目简介
+PaperSpark 面向科研与高阶学习场景，提供从文献导入、沉浸式阅读、知识图谱构建到论文编辑导出的完整闭环。
 
-PaperSpark 是一款 AI 驱动的学术论文阅读与写作工具，帮助研究者更高效地阅读文献、整理知识库、撰写高质量学术内容。
+| 能力模块 | 说明 |
+| --- | --- |
+| 文献与知识库 | 本地文献管理、Zotero 同步、资产库归档、引用追踪 |
+| AI 学术助手 | 多智能体协作、内容检索、段落改写、文段纠错、翻译与摘要 |
+| 沉浸式阅读 | 双栏对照阅读、重点提取、章节导图、批注与跳转 |
+| 写作编辑器 | 富文本 + 可视化公式 + 引用系统 + 结构化写作辅助 |
+| 结构化理解 | 自动知识图谱生成、跨文献概念关系可视化 |
+| 导出交付 | 支持 Markdown、TeX 以及最终 LaTeX Zip 交付 |
 
-- 📚 **知识库管理** — 集中管理文献，一键同步 Zotero
-- ✍️ **智能写作编辑器** — 基于 BlockNote 的富文本编辑，写作流畅不中断
-- 🤖 **AI 语法纠错** — 实时检测并修正英文写作错误，段落切换时自动触发
-- 🌐 **AI 翻译** — 中英文一键互译，支持学术风格
-- 📝 **论文摘要生成** — 大模型自动提炼文献核心内容
-- 🗂️ **目录导航** — 右侧边栏实时生成文档目录，快速定位章节
-
----
-
-## 🖼️ 功能一览
-
-| 模块 | 功能 |
-|------|------|
-| 文档列表 | 创建、管理、删除文档，快速跳转 |
-| 编辑器 | 富文本写作 + 段落 AI 纠错 + 自动保存 |
-| 知识库 | 上传文献 / Zotero 同步 / AI 摘要 / 翻译 |
-| 设置 | 配置大模型与小模型（兼容 OpenAI 格式接口） |
-
----
-
-## 🚀 快速开始
+## 快速开始
 
 ### 环境要求
 
-- Node.js >= 18
-- pnpm >= 8（推荐）
+- Node.js 18+
+- pnpm 8+
+- Python 3.10+（用于微服务）
 
-### 安装依赖
+### 安装与运行
 
 ```bash
 pnpm install
-```
-
-### 启动开发服务器
-
-```bash
 pnpm dev
 ```
 
-访问 [http://localhost:3000](http://localhost:3000) 即可使用。
+默认访问地址为 http://localhost:3000。
 
----
+### 微服务依赖安装
 
-## ⚙️ 配置 AI 模型
-
-进入 **设置** 页面，分别配置以下两个模型：
-
-### 小模型（语法纠错）
-负责实时英文语法检查，建议使用响应快、成本低的模型，例如 `gpt-4o-mini`。
-
-### 大模型（翻译 / 摘要）
-负责文献翻译与摘要生成，建议使用能力强的模型，例如 `gpt-4o`、`claude-3-5-sonnet`。
-
-> 两个模型均支持任意兼容 OpenAI 格式的 API（如 Ollama、DeepSeek、硅基流动等），API Key 仅存储在本地浏览器，不会上传服务器。
-
----
-
-## 📖 Zotero 集成
-
-1. 前往 [Zotero 账户设置](https://www.zotero.org/settings/keys) 获取 User ID 和 API Key
-2. 在 PaperSpark 知识库面板中填入配置并点击同步
-3. 文献条目将自动导入本地知识库，支持 AI 摘要与翻译
-
----
-
-## 🛠️ 技术栈
-
-| 技术 | 用途 |
-|------|------|
-| [Next.js 15](https://nextjs.org/) | 全栈框架 |
-| [React 19](https://react.dev/) | UI 框架 |
-| [BlockNote](https://www.blocknotejs.org/) | 富文本编辑器 |
-| [HeroUI](https://www.heroui.com/) | 组件库 |
-| [Vercel AI SDK](https://sdk.vercel.ai/) | AI 接口调用 |
-| [Framer Motion](https://www.framer.motion.com/) | 动画效果 |
-| [Tailwind CSS v4](https://tailwindcss.com/) | 样式系统 |
-
----
-
-## 📁 项目结构
-
+```bash
+cd services/surya_ocr_service
+pip install -r requirements.txt
 ```
+
+### 微服务启动路径
+
+```powershell
+.\scripts\start-surya-service.ps1
+```
+
+默认服务地址为 http://127.0.0.1:8765。若需在 Next.js 侧代理，请设置环境变量：
+
+```env
+SURYA_OCR_SERVICE_URL=http://127.0.0.1:8765
+```
+
+### GPU 加速建议
+
+- 推荐在支持 CUDA 的环境中运行微服务，以获得更快的文档解析与推理速度。
+- 建议先安装与你本机 CUDA 版本匹配的 PyTorch（GPU 版），再安装其余依赖。
+- 若无 GPU，会自动以 CPU 方式运行，但大文件处理耗时会明显增加。
+
+## 功能详解
+
+### 1) 文献接入与知识库管理
+
+- 支持本地上传、URL 导入、Zotero 同步，统一进入知识库。
+- 条目支持摘要翻译、引用信息保留、标签管理与删除联动清理。
+- 知识项可与后续助手检索、导读、编辑器引用形成闭环。
+
+### 2) 沉浸式阅读与导读系统
+
+- 提供文档信息、翻译、笔记、导读、问答等多侧栏协同模式。
+- 支持重点提取与跳转，降低长文定位成本。
+- 支持章节结构导图、段落关联视角与阅读进度式浏览。
+- 支持文献阅读中的 paper ref 链接定位与上下文回看。
+
+### 3) AI 助手协同工作流
+
+- 支持多智能体切换，适配不同任务（检索、改写、纠错、结构化输出等）。
+- 支持引用知识库、引用资产库、快速笔记与会话历史回溯。
+- 支持代码块运行反馈与结果回填，便于实验性分析任务。
+
+### 4) 写作编辑与公式能力
+
+- 富文本编辑器支持结构化写作、引用插入、目录导航。
+- 内置可视化公式编辑与 LaTeX 输入，兼容常见数学表达场景。
+- 支持文段纠错与改写辅助，减少学术英文表达阻力。
+
+### 5) 知识图谱自动构建
+
+- 面向论文、作者、概念、方法、关键词构建多类型节点关系。
+- 在阅读流程中可触发自动分析与图谱增量构建。
+- 提供图谱可视化浏览，支持节点关系理解与论文间关联探索。
+
+### 6) 导出与交付
+
+- 支持 Markdown、TeX、LaTeX Zip 等导出形态。
+- 覆盖作者信息、摘要、关键词、引用与图片资源路径。
+- 适配学术写作后续排版与投稿流程。
+
+## 界面与能力实录
+
+以下展示按任务流重新编排，便于读者从「阅读 -> 理解 -> 写作 -> 交付」连续浏览。
+
+### 1) 核心工作区与编辑体验
+
+<table>
+    <tr>
+        <td width="62%" valign="top">
+            <img src="md_assets/file_basic_界面_带一个可视化公式编辑器演示.png" alt="基础界面与公式编辑器" width="100%" />
+            <p align="center">主编辑区与可视化公式编辑</p>
+        </td>
+        <td width="38%" valign="top">
+            <img src="md_assets/file_智能体设定.png" alt="智能体设定" width="100%" />
+            <p align="center">智能体配置面板</p>
+        </td>
+    </tr>
+    <tr>
+        <td width="62%" valign="top">
+            <img src="md_assets/file_导出_支持tex基本导出_基本数学环境支持.png" alt="TeX 导出能力" width="100%" />
+            <p align="center">TeX 导出与数学环境兼容</p>
+        </td>
+        <td width="38%" valign="top">
+            <img src="md_assets/file_沉浸式阅读_paper ref链接指引.png" alt="参考文献链接指引" width="100%" />
+            <p align="center">文献阅读中的链接定位</p>
+        </td>
+    </tr>
+</table>
+
+### 2) 文献阅读与知识提取
+
+<table>
+    <tr>
+        <td width="50%" valign="top">
+            <img src="md_assets/file_沉浸式阅读_翻译.png" alt="沉浸式翻译" width="100%" />
+            <p align="center">双栏翻译与阅读联动</p>
+        </td>
+        <td width="50%" valign="top">
+            <img src="md_assets/file_沉浸式阅读_文章重点提取并跳转到对应部分.png" alt="重点提取与跳转" width="100%" />
+            <p align="center">重点提取并跳转原文位置</p>
+        </td>
+    </tr>
+    <tr>
+        <td width="50%" valign="top">
+            <img src="md_assets/file_沉浸式阅读_文章结构导图.png" alt="文章结构导图" width="100%" />
+            <p align="center">章节结构导图</p>
+        </td>
+        <td width="50%" valign="top">
+            <img src="md_assets/file_沉浸式阅读_高亮和批注.png" alt="高亮与批注" width="100%" />
+            <p align="center">高亮与批注工作流</p>
+        </td>
+    </tr>
+</table>
+
+### 3) 知识库与知识图谱
+
+<table>
+    <tr>
+        <td width="50%" valign="top">
+            <img src="md_assets/file_zotero批量导入到知识库.png" alt="Zotero 批量导入" width="100%" />
+            <p align="center">Zotero 批量同步入库</p>
+        </td>
+        <td width="50%" valign="top">
+            <img src="md_assets/file_多论文知识图谱构建.png" alt="多论文知识图谱" width="100%" />
+            <p align="center">多论文知识图谱构建</p>
+        </td>
+    </tr>
+</table>
+
+### 4) 助手协同与资产管理
+
+<table>
+    <tr>
+        <td width="45%" valign="top">
+            <img src="md_assets/file_主编辑区AI交互栏操作指引_引用知识库_快速笔记_在线代码执行和图片绘制.png" alt="主编辑区 AI 助手协同" width="100%" />
+            <p align="center">引用知识库、快速笔记、代码执行与绘图</p>
+        </td>
+        <td width="55%" valign="top">
+            <img src="md_assets/file_资产库管理_富文本支持_如图中表格.png" alt="资产库管理" width="100%" />
+            <p align="center">资产标签体系与富文本内容归档</p>
+        </td>
+    </tr>
+</table>
+
+### 5) 视频演示
+
+
+<table>
+    <tr>
+        <td width="50%" valign="top">
+            <a href="md_assets/file_AI交互协同操作文档.mp4">
+                <img src="md_assets/file_主编辑区AI交互栏操作指引_引用知识库_快速笔记_在线代码执行和图片绘制.png" alt="AI 交互协同操作文档" width="100%" />
+            </a>
+            <p align="center">AI 交互协同操作文档</p>
+        </td>
+        <td width="50%" valign="top">
+            <a href="md_assets/file_文献多智能体全方位检索.mp4">
+                <img src="md_assets/file_沉浸式阅读_文章重点提取并跳转到对应部分.png" alt="文献多智能体全方位检索" width="100%" />
+            </a>
+            <p align="center">文献多智能体全方位检索</p>
+        </td>
+    </tr>
+    <tr>
+        <td width="50%" valign="top">
+            <a href="md_assets/file_文献智能引用.mp4">
+                <img src="md_assets/file_zotero批量导入到知识库.png" alt="文献智能引用" width="100%" />
+            </a>
+            <p align="center">文献智能引用</p>
+        </td>
+        <td width="50%" valign="top">
+            <a href="md_assets/file_智能文段纠错.mp4">
+                <img src="md_assets/file_basic_界面_带一个可视化公式编辑器演示.png" alt="智能文段纠错" width="100%" />
+            </a>
+            <p align="center">智能文段纠错</p>
+        </td>
+    </tr>
+</table>
+
+## 架构与代码组织
+
+```text
 paper_reader/
-├── app/                   # Next.js App Router 页面与 API
-│   ├── api/
-│   │   ├── ai/            # AI 纠错 / 翻译接口
-│   │   ├── knowledge/     # 知识库摘要 / 上传接口
-│   │   └── zotero/        # Zotero 同步接口
-│   ├── documents/         # 文档列表页
-│   ├── editor/[id]/       # 编辑器页面
-│   └── settings/          # 设置页面
-├── components/            # React 组件
-│   ├── Editor/            # 编辑器核心组件
-│   ├── Knowledge/         # 知识库面板
-│   ├── Sidebar/           # 目录 / 右侧边栏
-│   └── Settings/          # 设置表单
-└── lib/                   # 工具函数
-    ├── ai.ts              # AI 调用封装
-    ├── storage.ts         # 本地存储操作
-    └── types.ts           # TypeScript 类型定义
+├─ app/
+│  ├─ api/
+│  │  ├─ ai/                    # 助手、纠错、翻译、检索等 AI 接口
+│  │  ├─ knowledge/             # 知识摘要、上传与处理
+│  │  ├─ knowledge-graph/       # 图谱分析与构建
+│  │  ├─ pdf/                   # PDF 与 OCR 处理链路
+│  │  └─ zotero/                # Zotero 同步
+│  ├─ documents/                # 文档列表
+│  ├─ editor/[id]/              # 编辑器主页面
+│  ├─ immersive/[id]/           # 沉浸式阅读
+│  └─ knowledge-graph/          # 图谱可视化页面
+├─ components/                  # 业务组件
+│  ├─ Assistant/                # 助手与工具调用面板
+│  ├─ Editor/                   # 编辑器、公式、引用等核心组件
+│  ├─ Knowledge/                # 知识库面板
+│  ├─ Search/                   # 文献检索模块
+│  └─ Thought/                  # 随记与思维辅助
+├─ lib/                         # 核心能力封装（RAG、导出、图谱、存储等）
+├─ services/surya_ocr_service/  # Python OCR 服务
+└─ md_assets/                   # README 演示素材
 ```
 
----
+## 技术栈
 
-## �️ Roadmap
+| 类别 | 技术 |
+| --- | --- |
+| 应用框架 | Next.js 15, React 19, TypeScript |
+| 编辑与交互 | BlockNote, HeroUI, Framer Motion |
+| AI 与推理 | Vercel AI SDK, OpenAI 兼容接口, ChromaDB |
+| 文档处理 | pdfjs-dist, mathlive, JSZip |
+| 图谱可视化 | @xyflow/react |
+| 样式系统 | Tailwind CSS v4 |
 
-以下是计划中的功能方向，欢迎社区参与讨论与贡献：
+## Roadmap
 
-
-- [ ] 精读文章列表利用RAG生成一个知识图谱
-- [ ] 助手交互端要能生成图片、mermaid这类图并且一键添加到资产库
-- [ ] 助手生成大纲，并且在主界面需要有进行中的过程查看
-- [ ] 选中文本内容，助手可以基于选中内容进行完成用户要求的操作
-- [ ] 可引用资产库
-
-
-todo:
-1. 文档工具调用要优化，降低调用门槛，提高调用精度
-2. 如果是py代码，提供可执行的环境
-3. 沉浸式阅读界面，AI助手徐娅优化
-
-> 💬 有新想法？欢迎提 [Issue](../../issues) 参与讨论！
-
-
+- [ ] 基于精读文章列表的 RAG 图谱增强
+- [ ] 助手端生成图片与 Mermaid，并一键入资产库
+- [ ] 助手大纲生成与过程可视化
+- [ ] 选中文本后按意图执行定向 AI 操作
+- [ ] 资产库引用体系进一步完善
+- [ ] 文档工具调用门槛与准确率持续优化
+- [ ] Python 代码执行环境体验增强
 
 ## 致谢
-感谢以下项目与资源的支持：
-- [Next.js](https://nextjs.org/) — 强大的 React 全栈框架
-- [BlockNote](https://www.blocknotejs.org/) — 灵活的富文本编辑器
-- [Vercel AI SDK](https://sdk.vercel.ai/) — 便捷的 AI 接口调用工具
-- [HeroUI](https://www.heroui.com/) — 美观的 React 组件库
-- [Framer Motion](https://www.framer.motion.com/) — 流畅的动画效果
-- [Tailwind CSS](https://tailwindcss.com/) — 高效的实用类 CSS 框架
-- [Zotero](https://www.zotero.org/) — 强大的文献管理工具
-- [surya-ocr](https://github.com/surya-ocr/surya) — 论文 OCR 解析服务
 
+- [Next.js](https://nextjs.org/)
+- [React](https://react.dev/)
+- [BlockNote](https://www.blocknotejs.org/)
+- [Vercel AI SDK](https://sdk.vercel.ai/)
+- [HeroUI](https://www.heroui.com/)
+- [Tailwind CSS](https://tailwindcss.com/)
+- [Zotero](https://www.zotero.org/)
+- [surya-ocr](https://github.com/surya-ocr/surya)
 
+## License
 
----
+本项目基于 CC BY-NC 4.0 协议开源。
 
-## 📄 License
+- 允许：学习、研究、个人使用、署名转载
+- 禁止：商业化使用、付费分发、集成至商业产品
 
-本项目基于 **CC BY-NC 4.0** 协议开源。
+详见 [LICENSE](LICENSE)。
 
-- ✅ 允许：学习、研究、个人使用、署名转载
-- ❌ 禁止：任何形式的商业化使用、付费分发、集成至商业产品
+## LaTeX 导出
 
-详见 [LICENSE](LICENSE) 文件。
+PaperSpark 已提供基本 LaTeX 导出能力，步骤如下
+
+1. 在编辑器中点击导出按钮，选择导出语言（中文或英文）。
+2. 系统会生成一个 LaTeX Zip 包，内含 main.tex、图片资源、参考文献和编译说明。
+3. 解压后可直接使用 xelatex 或 pdflatex 编译。
+4. 含公式、图片、引用的论文草稿可保持较高一致性，后续可进一步使用模板调整格式。

@@ -1,5 +1,40 @@
-import type { KnowledgeItem, ModelConfig, AutoGraphAnalysis } from './types'
-import { getSettings, getSelectedSmallModel, updateKnowledgeItem, getSelectedLargeModel } from './storage'
+import type { KnowledgeItem, AutoGraphAnalysis } from './types'
+import { getSettings, getSelectedSmallModel, updateKnowledgeItem } from './storage'
+import { buildKnowledgeGraphFromAnalysis } from './knowledgeGraph'
+
+const AUTO_GRAPH_FINGERPRINT_KEY = 'paper_reader_graph_build_fingerprints'
+
+function getBuildFingerprints(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(AUTO_GRAPH_FINGERPRINT_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw) as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+
+function saveBuildFingerprints(fingerprints: Record<string, string>): void {
+  if (typeof window === 'undefined') return
+  localStorage.setItem(AUTO_GRAPH_FINGERPRINT_KEY, JSON.stringify(fingerprints))
+}
+
+function buildContentFingerprint(knowledgeItem: KnowledgeItem, fullText?: string): string {
+  const normalized = [
+    knowledgeItem.title,
+    knowledgeItem.abstract || '',
+    knowledgeItem.authors.join('|'),
+    (knowledgeItem.tags || []).join('|'),
+    fullText?.slice(0, 3000) || '',
+  ]
+    .join('::')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  return normalized
+}
 
 /**
  * 自动构建知识图谱
@@ -8,14 +43,20 @@ import { getSettings, getSelectedSmallModel, updateKnowledgeItem, getSelectedLar
 export async function autoGraphBuild(
   knowledgeItem: KnowledgeItem,
   fullText?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; skipped?: boolean }> {
   try {
     const settings = getSettings()
-    const modelConfig = getSelectedLargeModel(settings)
+    const modelConfig = getSelectedSmallModel(settings)
 
     if (!modelConfig) {
-      console.warn('No small model configured for auto graph build')
+      console.warn('No model configured for auto graph build')
       return { success: false, error: 'No model configured' }
+    }
+
+    const fingerprint = buildContentFingerprint(knowledgeItem, fullText)
+    const fingerprints = getBuildFingerprints()
+    if (fingerprints[knowledgeItem.id] === fingerprint) {
+      return { success: true, skipped: true }
     }
 
     // 1. 分析论文，提取概念、方法、标签和关联
@@ -44,30 +85,20 @@ export async function autoGraphBuild(
 
     const analysis: AutoGraphAnalysis = analysisResult.analysis
 
-    // 2. 构建图谱节点和边
-    const buildResponse = await fetch('/api/knowledge-graph/build', {
-   method: 'POST',
-   headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        knowledgeItemId: knowledgeItem.id,
-        title: knowledgeItem.title,
-        authors: knowledgeItem.authors,
-        analysis,
-      }),
+    // 2. 在前端本地增量融合到已有图谱（localStorage）
+    const buildResult = buildKnowledgeGraphFromAnalysis({
+      knowledgeItemId: knowledgeItem.id,
+      title: knowledgeItem.title,
+      authors: knowledgeItem.authors,
+      analysis,
     })
-
-    if (!buildResponse.ok) {
-      throw new Error('Build failed')
-    }
-
-    const buildResult = await buildResponse.json()
-    if (!buildResult.success) {
-      throw new Error(buildResult.error || 'Build failed')
-    }
 
     console.log(
       `[AutoGraph] Built graph for "${knowledgeItem.title}": ${buildResult.nodesCreated} nodes, ${buildResult.edgesCreated} edges`
     )
+
+    fingerprints[knowledgeItem.id] = fingerprint
+    saveBuildFingerprints(fingerprints)
 
     // 3. 标记知识库条目已构建图谱
     updateKnowledgeItem(knowledgeItem.id, {

@@ -8,12 +8,10 @@ interface TocEntry {
   id: string
   text: string
   level: number
-  number: string
 }
 
 function extractToc(blocks: Block[]): TocEntry[] {
   const entries: TocEntry[] = []
-  const counters = [0, 0, 0] // 对应 level 1, 2, 3
   
   for (const block of blocks) {
     if (block.type === 'heading') {
@@ -25,24 +23,7 @@ function extractToc(blocks: Block[]): TocEntry[] {
       
       if (text.trim()) {
         const level = b.props.level ?? 1
-        // 重置当前层级以下的计数器
-        for (let i = level; i < 3; i++) {
-          counters[i] = 0
-        }
-        // 增加当前层级计数
-        counters[level - 1]++
-        
-        // 生成编号
-        let number: string
-        if (level === 1) {
-          number = `${counters[0]}`
-        } else if (level === 2) {
-          number = `${counters[0]}.${counters[1]}`
-        } else {
-          number = `${counters[0]}.${counters[1]}.${counters[2]}`
-        }
-        
-        entries.push({ id: b.id, text: text.trim(), level, number })
+        entries.push({ id: b.id, text: text.trim(), level })
       }
     }
   }
@@ -175,16 +156,6 @@ export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
                         e.currentTarget.style.background = 'none'
                       }}
                     >
-                      {/* 编号 */}
-                      <span style={{
-                        minWidth: entry.level === 1 ? 24 : 44,
-                        fontWeight: entry.level === 1 ? 600 : 400,
-                        color: entry.level === 1 ? 'var(--primary)' : 'var(--text-muted)',
-                        marginRight: 8,
-                        fontSize: entry.level === 1 ? 13 : 12,
-                      }}>
-                        {entry.number}
-                      </span>
                       <span style={{ 
                         flex: 1, 
                         overflow: 'hidden', 

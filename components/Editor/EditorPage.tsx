@@ -37,7 +37,7 @@ import { FormulaInputExtension } from '@/lib/formulaInputExtension'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
 import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
 import { registerEditor, unregisterEditor } from '@/lib/editorContext'
-import { exportToLatex } from '@/lib/latexExporter'
+import { exportToLatex, type LatexExportLanguage } from '@/lib/latexExporter'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -169,8 +169,10 @@ export function EditorPageContent({ docId }: EditorPageProps) {
 
   // 作者编辑弹窗
   const { isOpen: isAuthorModalOpen, onOpen: onAuthorModalOpen, onClose: onAuthorModalClose } = useDisclosure()
+  const { isOpen: isLatexModalOpen, onOpen: onLatexModalOpen, onClose: onLatexModalClose } = useDisclosure()
   const [editingAuthor, setEditingAuthor] = useState<ArticleAuthor | null>(null)
   const [authorForm, setAuthorForm] = useState({ name: '', affiliation: '', email: '' })
+  const [latexLanguage, setLatexLanguage] = useState<Exclude<LatexExportLanguage, 'auto'>>('zh')
 
   // 当前主题配置，动态更新
   const activeThemeConfig = getThemeById(settings.editorThemeId ?? 'default')
@@ -732,12 +734,20 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     URL.revokeObjectURL(url)
   }, [doc, editor])
 
-  const handleExportLatex = useCallback(async () => {
+  const handleExportLatex = useCallback(() => {
+    onLatexModalOpen()
+  }, [onLatexModalOpen])
+
+  const doExportLatex = useCallback(async (language: Exclude<LatexExportLanguage, 'auto'>) => {
     if (!doc) return
 
     try {
+      const markdown = await editor.blocksToMarkdownLossy(editor.document)
       const citationList = Array.from(citations.values()).sort((a, b) => a.index - b.index)
-      const zipBlob = await exportToLatex(editor as unknown as { document: unknown[] }, doc, citationList)
+      const zipBlob = await exportToLatex(editor as unknown as { document: unknown[] }, doc, citationList, {
+        language,
+        markdownContent: markdown,
+      })
       const url = URL.createObjectURL(zipBlob)
       const a = document.createElement('a')
       const baseName = (doc.title || 'document').replace(/[\\/:*?"<>|]/g, '_')
@@ -745,11 +755,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       a.download = `${baseName}_latex.zip`
       a.click()
       URL.revokeObjectURL(url)
+      onLatexModalClose()
       addToast({ title: 'LaTeX 导出成功', color: 'success' })
     } catch (err) {
       addToast({ title: `导出失败: ${err instanceof Error ? err.message : '未知错误'}`, color: 'danger' })
     }
-  }, [citations, doc, editor])
+  }, [citations, doc, editor, onLatexModalClose])
 
   const handleManualCorrect = useCallback(async () => {
     const smallModelConfig = getSelectedSmallModel(settings)
@@ -1275,6 +1286,40 @@ export function EditorPageContent({ docId }: EditorPageProps) {
             <div style={{ flex: 1 }} />
             <Button variant="light" onPress={onAuthorModalClose}>取消</Button>
             <Button color="primary" onPress={handleSaveAuthor}>保存</Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
+      {/* LaTeX 导出语言选择弹窗 */}
+      <Modal isOpen={isLatexModalOpen} onClose={onLatexModalClose} size="sm">
+        <ModalContent>
+          <ModalHeader>选择 LaTeX 导出语言</ModalHeader>
+          <ModalBody>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <Button
+                variant={latexLanguage === 'zh' ? 'solid' : 'flat'}
+                color={latexLanguage === 'zh' ? 'primary' : 'default'}
+                onPress={() => setLatexLanguage('zh')}
+              >
+                中文模板（ctex）
+              </Button>
+              <Button
+                variant={latexLanguage === 'en' ? 'solid' : 'flat'}
+                color={latexLanguage === 'en' ? 'primary' : 'default'}
+                onPress={() => setLatexLanguage('en')}
+              >
+                English template (article)
+              </Button>
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              导出 zip 将自动包含 main.tex、images/ 和 document.md。
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="light" onPress={onLatexModalClose}>取消</Button>
+            <Button color="primary" onPress={() => doExportLatex(latexLanguage)}>
+              开始导出
+            </Button>
           </ModalFooter>
         </ModalContent>
       </Modal>

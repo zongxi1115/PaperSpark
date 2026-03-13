@@ -603,21 +603,54 @@ export function AssistantChatPanel() {
     }
   }, [])
 
+  // 上传图片到服务器（支持 URL 或 base64）
+  const uploadImageToServer = useCallback(async (imageSource: string): Promise<string> => {
+    // 如果已经是服务器 URL，直接返回
+    if (imageSource.startsWith('/uploads/')) {
+      return imageSource
+    }
+    
+    // 如果是 base64，上传到服务器
+    if (imageSource.startsWith('data:image')) {
+      const response = await fetch('/api/upload/image', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base64: imageSource,
+          mimeType: imageSource.match(/data:(image\/\w+);/)?.[1] || 'image/png',
+        }),
+      })
+      
+      if (!response.ok) {
+        throw new Error('图片上传失败')
+      }
+      
+      const data = await response.json()
+      return data.url
+    }
+    
+    // 如果是其他 URL，直接返回
+    return imageSource
+  }, [])
+
   // 将图片插入编辑器
-  const insertImageToEditor = useCallback((imageData: string) => {
+  const insertImageToEditor = useCallback(async (imageSource: string) => {
     const editor = getEditor()
     if (!editor) {
       addToast({ title: '编辑器未就绪', color: 'warning' })
       return
     }
 
-    // 使用 BlockNote API 插入图片块
     try {
+      // 确保图片是服务器 URL
+      const imageUrl = await uploadImageToServer(imageSource)
+      
+      // 使用 BlockNote API 插入图片块
       editor.insertBlocks([
         {
           type: 'image',
           props: {
-            src: imageData,
+            src: imageUrl,
             alt: 'AI 生成的图片',
           },
         }
@@ -627,41 +660,49 @@ export function AssistantChatPanel() {
       console.error('插入图片失败:', error)
       addToast({ title: '插入图片失败', description: '请确保编辑器支持图片块', color: 'danger' })
     }
-  }, [])
+  }, [uploadImageToServer])
 
   // 将图片添加到资产库
-  const addImageToAssets = useCallback((imageData: string, title?: string) => {
-    const assetTypes = getAssetTypes()
-    const preferredTypeId = assetTypes.some(t => t.id === 'image') 
-      ? 'image' 
-      : (assetTypes[0]?.id ?? 'note')
+  const addImageToAssets = useCallback(async (imageSource: string, title?: string) => {
+    try {
+      // 确保图片是服务器 URL
+      const imageUrl = await uploadImageToServer(imageSource)
+      
+      const assetTypes = getAssetTypes()
+      const preferredTypeId = assetTypes.some(t => t.id === 'image') 
+        ? 'image' 
+        : (assetTypes[0]?.id ?? 'note')
 
-    const now = new Date().toISOString()
-    const asset: AssetItem = {
-      id: generateId(),
-      title: title || `AI生成图片 ${new Date().toLocaleString('zh-CN')}`,
-      typeId: preferredTypeId,
-      summary: '由 Python 代码生成的图片',
-      content: [{
-        type: 'paragraph',
-        content: [
-          { type: 'text', text: '', styles: {} },
-        ],
-      }, {
-        type: 'image',
-        props: {
-          src: imageData,
-          alt: 'Python 生成的图片',
-        },
-      }],
-      tags: ['python', 'generated', 'image'],
-      createdAt: now,
-      updatedAt: now,
+      const now = new Date().toISOString()
+      const asset: AssetItem = {
+        id: generateId(),
+        title: title || `AI生成图片 ${new Date().toLocaleString('zh-CN')}`,
+        typeId: preferredTypeId,
+        summary: '由 Python 代码生成的图片',
+        content: [{
+          type: 'paragraph',
+          content: [
+            { type: 'text', text: '', styles: {} },
+          ],
+        }, {
+          type: 'image',
+          props: {
+            src: imageUrl,
+            alt: 'Python 生成的图片',
+          },
+        }],
+        tags: ['python', 'generated', 'image'],
+        createdAt: now,
+        updatedAt: now,
+      }
+
+      saveAsset(asset)
+      addToast({ title: '图片已添加到资产库', color: 'success' })
+    } catch (error) {
+      console.error('添加到资产库失败:', error)
+      addToast({ title: '添加失败', color: 'danger' })
     }
-
-    saveAsset(asset)
-    addToast({ title: '图片已添加到资产库', color: 'success' })
-  }, [])
+  }, [uploadImageToServer])
 
   // 复制内容
   const handleCopy = async (content: string) => {

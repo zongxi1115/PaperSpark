@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import type { GraphBuildRequest, GraphBuildResponse, AutoGraphAnalysis, ModelConfig } from '@/lib/types'
+import type { GraphBuildRequest, GraphBuildResponse, AutoGraphAnalysis } from '@/lib/types'
 import { getKnowledgeItems } from '@/lib/storage'
 
 export async function POST(request: NextRequest) {
@@ -127,7 +127,7 @@ ${fullText ? `\n全文片段：${fullText.slice(0, 1500)}...` : ''}
 
     for (const item of existingItems) {
       let relationshipScore = 0
-      let relationshipType: 'similar_to' | 'cites' | 'extends' = 'similar_to'
+      let relationshipType: AutoGraphAnalysis['relatedPapers'][number]['relationshipType'] = 'similar_to'
       let reason = ''
 
       // 基于作者的关联

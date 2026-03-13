@@ -4,7 +4,19 @@ import { Button, Tooltip, Switch, Chip, Select, SelectItem, addToast, Modal, Mod
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { readDocument, type DocumentReadResult } from './tools/ReadDocumentTool'
-import { EditDocumentTool, applyEditOperations, acceptInsertionChanges, rejectInsertionChanges, type EditDocumentRequest, type EditStatus } from './tools/EditDocumentTool'
+import { 
+  EditDocumentTool, 
+  SimpleTool,
+  applyEditOperations, 
+  acceptInsertionChanges, 
+  rejectInsertionChanges, 
+  parseSimpleToolCalls,
+  convertToolCallsToRequest,
+  getDocumentStructure,
+  type EditDocumentRequest, 
+  type EditStatus,
+  type ParsedToolCall,
+} from './tools/EditDocumentTool'
 import { getEditor } from '@/lib/editorContext'
 import { AIExtension } from '@blocknote/xl-ai'
 import { 
@@ -51,8 +63,14 @@ export function AssistantChatPanel() {
   const [showNotesList, setShowNotesList] = useState(false)
   const [docContext, setDocContext] = useState<DocumentReadResult | null>(null)
   const [useDocContext, setUseDocContext] = useState(false)
-  // edit tool state: key = `${msgId}:${blockIdx}`
-  const [editStates, setEditStates] = useState<Record<string, { status: EditStatus; progress: string; error: string }>>({})
+  // edit tool state: key = `${msgId}:${blockIdx}` or `${msgId}:simple:${idx}`
+  const [editStates, setEditStates] = useState<Record<string, { 
+    status: EditStatus; 
+    progress: string; 
+    error: string; 
+    toolCall?: ParsedToolCall;
+    readResult?: { blockCount: number; charCount: number } | null;
+  }>>({})
   const editAbortRefs = useRef<Record<string, AbortController>>({})
 
   const { isOpen: isNoteModalOpen, onOpen: onNoteModalOpen, onClose: onNoteModalClose } = useDisclosure()
@@ -754,6 +772,9 @@ export function AssistantChatPanel() {
 
       abortControllerRef.current = new AbortController()
 
+      // 自动获取文档结构
+      const docStructure = getDocumentStructure()
+
       const response = await fetch('/api/ai/assistant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -767,6 +788,7 @@ export function AssistantChatPanel() {
           useKnowledge: shouldSendKnowledgeContext,
           knowledgeCandidates,
           assetContext,
+          documentStructure: docStructure || undefined,
         }),
         signal: abortControllerRef.current.signal,
       })
@@ -903,44 +925,115 @@ export function AssistantChatPanel() {
     }
   }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates])
 
-  // Parse all edit_document JSON blocks from message content
-  const parseEditBlocks = useCallback((content: string): EditDocumentRequest[] => {
-    const results: EditDocumentRequest[] = []
+  // Parse both simplified format (::insert, ::delete, ::update) and legacy edit_document JSON blocks
+  const parseEditBlocks = useCallback((content: string): { requests: EditDocumentRequest[]; toolCalls: ParsedToolCall[] } => {
+    const requests: EditDocumentRequest[] = []
+    const toolCalls: ParsedToolCall[] = []
+    
+    // Parse simplified format first
+    const simpleCalls = parseSimpleToolCalls(content)
+    if (simpleCalls.length > 0) {
+      toolCalls.push(...simpleCalls)
+      // Don't add to requests - toolCalls will be handled separately
+    }
+    
+    // Parse legacy format for backwards compatibility
     const regex = /```edit_document\s*([\s\S]*?)```/g
     let match
     while ((match = regex.exec(content)) !== null) {
       try {
         const req = JSON.parse(match[1].trim()) as EditDocumentRequest
-        if (req.operations) results.push(req)
+        if (req.operations) requests.push(req)
       } catch { /* skip invalid */ }
     }
-    return results
+    
+    return { requests, toolCalls }
+  }, [])
+  
+  // Remove tool call syntax from content for display
+  const removeToolCallsFromContent = useCallback((content: string): string => {
+    // Remove ::insert ... ::
+    let result = content.replace(/::insert\s+(before|after)?\s*(\S*)?\n[\s\S]*?::/g, '')
+    // Remove ::delete blockId
+    result = result.replace(/::delete\s+\S+/g, '')
+    // Remove ::update blockId ... ::
+    result = result.replace(/::update\s+\S+\n[\s\S]*?::/g, '')
+    // Remove ::read_document
+    result = result.replace(/::read_document\b/g, '')
+    // Clean up extra whitespace
+    result = result.replace(/\n{3,}/g, '\n\n').trim()
+    return result
   }, [])
 
   // Auto-run edit blocks from a completed assistant message
   const triggerEditBlocks = useCallback((msgId: string, content: string) => {
-    const blocks = parseEditBlocks(content)
-    if (blocks.length === 0) return
-
-    blocks.forEach((req, idx) => {
-      const key = `${msgId}:${idx}`
-      const abort = new AbortController()
-      editAbortRefs.current[key] = abort
-
-      setEditStates(prev => ({ ...prev, [key]: { status: 'running', progress: '准备中…', error: '' } }))
-
-      applyEditOperations(
-        req,
-        (msg) => setEditStates(prev => ({ ...prev, [key]: { ...prev[key], progress: msg } })),
-        abort.signal,
-      ).then(result => {
-        if (result.success) {
-          setEditStates(prev => ({ ...prev, [key]: { status: 'reviewing', progress: '', error: '' } }))
-        } else {
-          setEditStates(prev => ({ ...prev, [key]: { status: 'error', progress: '', error: result.error || '操作失败' } }))
+    const { requests, toolCalls } = parseEditBlocks(content)
+    
+    // Handle simplified tool calls
+    if (toolCalls.length > 0) {
+      toolCalls.forEach((call, idx) => {
+        const key = `${msgId}:simple:${idx}`
+        
+        // Handle read_document specially
+        if (call.type === 'read_document') {
+          const docResult = readDocument()
+          setEditStates(prev => ({ 
+            ...prev, 
+            [key]: { 
+              status: 'success', 
+              progress: '', 
+              error: '', 
+              toolCall: call,
+              readResult: docResult ? { blockCount: docResult.blockCount, charCount: docResult.charCount } : null,
+            } 
+          }))
+          return
         }
+        
+        const abort = new AbortController()
+        editAbortRefs.current[key] = abort
+
+        setEditStates(prev => ({ ...prev, [key]: { status: 'running', progress: '准备中…', error: '', toolCall: call } }))
+
+        // Convert single tool call to request
+        const req = convertToolCallsToRequest([call])
+        
+        applyEditOperations(
+          req,
+          (msg) => setEditStates(prev => ({ ...prev, [key]: { ...prev[key], progress: msg } })),
+          abort.signal,
+        ).then(result => {
+          if (result.success) {
+            setEditStates(prev => ({ ...prev, [key]: { status: 'reviewing', progress: '', error: '' } }))
+          } else {
+            setEditStates(prev => ({ ...prev, [key]: { status: 'error', progress: '', error: result.error || '操作失败' } }))
+          }
+        })
       })
-    })
+    }
+    
+    // Handle legacy format
+    if (requests.length > 0) {
+      requests.forEach((req, idx) => {
+        const key = `${msgId}:${idx}`
+        const abort = new AbortController()
+        editAbortRefs.current[key] = abort
+
+        setEditStates(prev => ({ ...prev, [key]: { status: 'running', progress: '准备中…', error: '' } }))
+
+        applyEditOperations(
+          req,
+          (msg) => setEditStates(prev => ({ ...prev, [key]: { ...prev[key], progress: msg } })),
+          abort.signal,
+        ).then(result => {
+          if (result.success) {
+            setEditStates(prev => ({ ...prev, [key]: { status: 'reviewing', progress: '', error: '' } }))
+          } else {
+            setEditStates(prev => ({ ...prev, [key]: { status: 'error', progress: '', error: result.error || '操作失败' } }))
+          }
+        })
+      })
+    }
   }, [parseEditBlocks])
 
   // 停止生成
@@ -1170,8 +1263,8 @@ export function AssistantChatPanel() {
 
             {getEditor() && (
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <Tooltip content="读取当前编辑器文档内容，作为对话上下文">
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>引用当前文档</span>
+                <Tooltip content="AI 已自动获取文档结构，可随时编辑。开启此项可额外提供完整文档内容作为上下文。">
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>发送完整文档内容</span>
                 </Tooltip>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   {docContext && (
@@ -1291,12 +1384,14 @@ export function AssistantChatPanel() {
                           code({ node, className, children, ...props }: any) {
                             const isBlock = node?.position?.start?.line !== node?.position?.end?.line || String(children).includes('\n')
                             const lang = /language-(\w+)/.exec(className || '')?.[1]
+                            
+                            // Handle legacy edit_document format
                             if (isBlock && lang === 'edit_document') {
                               try {
                                 const req: EditDocumentRequest = JSON.parse(String(children).trim())
                                 // find which index this block is in the message
                                 const allBlocks = parseEditBlocks(message.content)
-                                const blockIdx = allBlocks.findIndex(b => JSON.stringify(b) === JSON.stringify(req))
+                                const blockIdx = allBlocks.requests.findIndex(b => JSON.stringify(b) === JSON.stringify(req))
                                 const key = `${message.id}:${blockIdx >= 0 ? blockIdx : 0}`
                                 const state = editStates[key] ?? { status: 'idle' as EditStatus, progress: '', error: '' }
 
@@ -1343,12 +1438,83 @@ export function AssistantChatPanel() {
                                 // fall through to normal code block
                               }
                             }
+                            
                             return <code className={className} {...props}>{children}</code>
                           }
                         }}
                       >
-                        {message.content}
+                        {removeToolCallsFromContent(message.content)}
                       </ReactMarkdown>
+                      {/* Render simplified tool calls (::insert, ::delete, ::update) - 过滤掉工具调用格式 */}
+                      {(() => {
+                        const { toolCalls } = parseEditBlocks(message.content)
+                        if (toolCalls.length === 0) return null
+                        
+                        return toolCalls.map((call, callIdx) => {
+                          const key = `${message.id}:simple:${callIdx}`
+                          const state = editStates[key] ?? { status: 'idle' as EditStatus, progress: '', error: '' }
+                          
+                          // read_document 不需要接受/拒绝按钮
+                          if (call.type === 'read_document') {
+                            return (
+                              <SimpleTool
+                                key={key}
+                                type={call.type}
+                                params={call.params}
+                                content={call.content}
+                                status={state.status}
+                                progress={state.progress}
+                                error={state.error}
+                                onAccept={() => {}}
+                                onReject={() => {}}
+                                readResult={state.readResult}
+                              />
+                            )
+                          }
+                          
+                          const handleAccept = () => {
+                            try {
+                              const editor = getEditor()
+                              const ext = editor?.getExtension(AIExtension)
+                              if (ext) {
+                                try { ext.acceptChanges() } catch { /* ignore */ }
+                              }
+                              acceptInsertionChanges()
+                            } catch {
+                              // ignore errors
+                            }
+                            setEditStates(prev => ({ ...prev, [key]: { status: 'accepted', progress: '', error: '' } }))
+                          }
+                          const handleReject = () => {
+                            try {
+                              const editor = getEditor()
+                              const ext = editor?.getExtension(AIExtension)
+                              if (ext) {
+                                try { ext.rejectChanges() } catch { /* ignore */ }
+                              }
+                              rejectInsertionChanges()
+                            } catch (e) {
+                              console.warn('Reject changes failed:', e)
+                            }
+                            setEditStates(prev => ({ ...prev, [key]: { status: 'rejected', progress: '', error: '' } }))
+                          }
+                          
+                          return (
+                            <SimpleTool
+                              key={key}
+                              type={call.type}
+                              params={call.params}
+                              content={call.content}
+                              status={state.status}
+                              progress={state.progress}
+                              error={state.error}
+                              onAccept={handleAccept}
+                              onReject={handleReject}
+                              readResult={state.readResult}
+                            />
+                          )
+                        })
+                      })()}
                       {idx === messages.length - 1 && isLoading && (
                         <span 
                           style={{

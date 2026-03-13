@@ -46,6 +46,50 @@ interface ImmersiveChatPanelProps {
   onCitationClick: (target: GuideFocusTarget) => void
 }
 
+function splitIntoSentences(text: string) {
+  const normalized = (text || '').replace(/\s+/g, ' ').trim()
+  if (!normalized) return []
+  // Rough sentence split for zh/en mixed content (avoid regex lookbehind for compatibility).
+  const sentences: string[] = []
+  let buffer = ''
+  for (const ch of Array.from(normalized)) {
+    buffer += ch
+    if (/[。！？!?]/.test(ch)) {
+      const trimmed = buffer.trim()
+      if (trimmed) sentences.push(trimmed)
+      buffer = ''
+    }
+  }
+  const rest = buffer.trim()
+  if (rest) sentences.push(rest)
+  return sentences.length ? sentences : [normalized]
+}
+
+function pickBestSentence(blockText: string, preferredText?: string) {
+  const sentences = splitIntoSentences(blockText)
+  if (!sentences.length) return { sentence: '', sentenceIndex: -1 }
+
+  const preferred = (preferredText || '').replace(/\s+/g, ' ').trim()
+  if (!preferred) return { sentence: sentences[0], sentenceIndex: 0 }
+
+  // Prefer a sentence that contains an excerpt from preferred text.
+  const probe = preferred.slice(0, 64)
+  const idx = sentences.findIndex(s => s.includes(probe) || probe.includes(s.slice(0, 32)))
+  if (idx >= 0) return { sentence: sentences[idx], sentenceIndex: idx }
+  return { sentence: sentences[0], sentenceIndex: 0 }
+}
+
+function injectCitationLinks(markdown: string, maxIndex: number) {
+  if (!markdown || maxIndex <= 0) return markdown
+  return markdown.replace(/\[(\d{1,3})\]/g, (match, num, offset, full) => {
+    const index = Number(num)
+    if (!Number.isFinite(index) || index < 1 || index > maxIndex) return match
+    // Skip if it's already a markdown link like [1](...)
+    if (full[offset + match.length] === '(') return match
+    return `[${num}](cite:${num})`
+  })
+}
+
 export default function ImmersiveChatPanel({
   knowledgeItemId,
   title,
@@ -57,10 +101,17 @@ export default function ImmersiveChatPanel({
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [isGeneratingFollowUp, setIsGeneratingFollowUp] = useState(false)
+  const [quoteContext, setQuoteContext] = useState<{ text: string; source: 'chat' | 'pdf'; meta?: string; messageId: string } | null>(null)
 
+  const messageListRef = useRef<HTMLDivElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+
+  const blockById = useRef<Map<string, TextBlock>>(new Map())
+  useEffect(() => {
+    blockById.current = new Map(blocks.map(block => [block.id, block]))
+  }, [blocks])
 
   // 滚动到底部
   useEffect(() => {
@@ -70,10 +121,41 @@ export default function ImmersiveChatPanel({
   // 处理选中文字提问
   useEffect(() => {
     if (selectionContext && selectionContext.text) {
-      setInputValue(`关于选中的内容："${selectionContext.text.slice(0, 100)}${selectionContext.text.length > 100 ? '...' : ''}"\n\n请解释一下这段内容的含义。`)
+      setQuoteContext({
+        text: selectionContext.text.length > 420 ? `${selectionContext.text.slice(0, 420)}…` : selectionContext.text,
+        source: 'pdf',
+        meta: selectionContext.pageNum ? `第${selectionContext.pageNum}页` : undefined,
+        messageId: selectionContext.id,
+      })
       inputRef.current?.focus()
     }
   }, [selectionContext])
+
+  const handleMessageSelection = useCallback(() => {
+    if (!messageListRef.current) return
+    const selection = window.getSelection()
+    if (!selection || selection.isCollapsed) return
+
+    const anchorNode = selection.anchorNode
+    const focusNode = selection.focusNode
+    const anchorEl = (anchorNode instanceof HTMLElement) ? anchorNode : anchorNode?.parentElement
+    const focusEl = (focusNode instanceof HTMLElement) ? focusNode : focusNode?.parentElement
+    if (!anchorEl || !focusEl) return
+    if (!messageListRef.current.contains(anchorEl) || !messageListRef.current.contains(focusEl)) return
+
+    const text = selection.toString().trim().replace(/\s+/g, ' ')
+    if (!text) return
+
+    // Try to attach to nearest message container.
+    const msgEl = anchorEl.closest('[data-chat-message-id]') as HTMLElement | null
+    const messageId = msgEl?.dataset.chatMessageId || 'unknown'
+    setQuoteContext({
+      text: text.length > 420 ? `${text.slice(0, 420)}…` : text,
+      source: 'chat',
+      messageId,
+    })
+    inputRef.current?.focus()
+  }, [])
 
   // RAG 搜索
   const searchRelevantBlocks = useCallback(async (query: string): Promise<ChatCitation[]> => {
@@ -108,8 +190,8 @@ export default function ImmersiveChatPanel({
       return result.results.map((r: RAGSearchResult) => ({
         id: r.blockId,
         blockId: r.blockId,
-        pageNum: r.pageNum,
-        text: r.text,
+        pageNum: r.pageNum || blockById.current.get(r.blockId)?.pageNum || 0,
+        text: r.text || blockById.current.get(r.blockId)?.text || '',
         score: r.score,
       }))
     } catch (error) {
@@ -220,6 +302,11 @@ AI回答：${assistantResponse.slice(0, 500)}
         selectionText = `\n\n用户选中的内容（第${selectionContext.pageNum}页）：\n"${selectionContext.text}"`
       }
 
+      let quoteText = ''
+      if (quoteContext?.text) {
+        quoteText = `\n\n用户引用的内容：\n"${quoteContext.text}"`
+      }
+
       abortControllerRef.current = new AbortController()
 
       const response = await fetch('/api/ai/assistant', {
@@ -233,7 +320,7 @@ AI回答：${assistantResponse.slice(0, 500)}
 
 文档标题：${title}
 
-${selectionText}${contextText}
+${selectionText}${quoteText}${contextText}
 
 用户问题：${content}
 
@@ -319,8 +406,9 @@ ${selectionText}${contextText}
       setMessages(prev => [...prev, assistantMessage])
     } finally {
       setIsLoading(false)
+      setQuoteContext(null)
     }
-  }, [inputValue, isLoading, title, selectionContext, searchRelevantBlocks, generateFollowUpQuestions])
+  }, [inputValue, isLoading, title, selectionContext, quoteContext, searchRelevantBlocks, generateFollowUpQuestions])
 
   // 停止生成
   const handleStop = useCallback(() => {
@@ -344,7 +432,11 @@ ${selectionText}${contextText}
       </div>
 
       {/* 消息列表 */}
-      <div className="flex-1 overflow-auto p-4 space-y-4">
+      <div
+        ref={messageListRef}
+        className="flex-1 overflow-auto p-4 space-y-4"
+        onMouseUp={handleMessageSelection}
+      >
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
             <Icon icon="mdi:chat-question-outline" className="text-4xl mb-3 text-gray-600" />
@@ -369,6 +461,7 @@ ${selectionText}${contextText}
                 className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
               >
                 <div
+                  data-chat-message-id={message.id}
                   className={`max-w-[90%] rounded-xl px-3 py-2 ${
                     message.role === 'user'
                       ? 'bg-blue-600 text-white'
@@ -377,8 +470,44 @@ ${selectionText}${contextText}
                 >
                   {message.role === 'assistant' ? (
                     <div className="prose prose-invert prose-sm max-w-none">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                        {message.content || '...'}
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          a: ({ href, children }) => {
+                            if (href?.startsWith('cite:')) {
+                              const index = Number(href.slice('cite:'.length))
+                              return (
+                                <button
+                                  type="button"
+                                  className="text-sky-300 hover:text-sky-200 hover:underline"
+                                  onClick={() => {
+                                    const citation = message.citations?.[index - 1]
+                                    if (!citation) return
+
+                                    const block = blockById.current.get(citation.blockId)
+                                    const pageNum = citation.pageNum || block?.pageNum || 0
+                                    const { sentence, sentenceIndex } = pickBestSentence(block?.text || citation.text, citation.text)
+                                    onCitationClick({
+                                      blockId: citation.blockId,
+                                      pageNum: pageNum || 1,
+                                      title: pageNum ? `第${pageNum}页 · 第${Math.max(sentenceIndex + 1, 1)}句` : `第${Math.max(sentenceIndex + 1, 1)}句`,
+                                      note: sentence || citation.text.slice(0, 120),
+                                    })
+                                  }}
+                                >
+                                  [{children}]
+                                </button>
+                              )
+                            }
+                            return (
+                              <a href={href} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline">
+                                {children}
+                              </a>
+                            )
+                          },
+                        }}
+                      >
+                        {injectCitationLinks(message.content || '...', message.citations?.length || 0)}
                       </ReactMarkdown>
                     </div>
                   ) : (
@@ -396,13 +525,29 @@ ${selectionText}${contextText}
                             className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[#1a1a1a] text-blue-400 rounded hover:bg-blue-500/10 transition-colors"
                             onClick={() => onCitationClick({
                               blockId: citation.blockId,
-                              pageNum: citation.pageNum,
-                              title: `第${citation.pageNum}页`,
-                              note: citation.text.slice(0, 100),
+                              pageNum: (citation.pageNum || blockById.current.get(citation.blockId)?.pageNum || 0) || 1,
+                              title: (() => {
+                                const pageNum = citation.pageNum || blockById.current.get(citation.blockId)?.pageNum || 0
+                                const { sentenceIndex } = pickBestSentence(blockById.current.get(citation.blockId)?.text || citation.text, citation.text)
+                                const sentenceNo = Math.max(sentenceIndex + 1, 1)
+                                return pageNum ? `第${pageNum}页 · 第${sentenceNo}句` : `第${sentenceNo}句`
+                              })(),
+                              note: (() => {
+                                const block = blockById.current.get(citation.blockId)
+                                const { sentence } = pickBestSentence(block?.text || citation.text, citation.text)
+                                return (sentence || citation.text).slice(0, 140)
+                              })(),
                             })}
                           >
                             <Icon icon="mdi:file-document-outline" className="text-[10px]" />
-                            <span>第{citation.pageNum}页</span>
+                            <span>
+                              {(() => {
+                                const pageNum = citation.pageNum || blockById.current.get(citation.blockId)?.pageNum || 0
+                                const { sentenceIndex } = pickBestSentence(blockById.current.get(citation.blockId)?.text || citation.text, citation.text)
+                                const sentenceNo = Math.max(sentenceIndex + 1, 1)
+                                return pageNum ? `第${pageNum}页·第${sentenceNo}句` : `第${sentenceNo}句`
+                              })()}
+                            </span>
                           </button>
                         ))}
                       </div>
@@ -458,6 +603,27 @@ ${selectionText}${contextText}
 
       {/* 输入区域 */}
       <div className="p-3 border-t border-[#333]">
+        {quoteContext && (
+          <div className="mb-2 rounded-lg border border-[#333] bg-[#121212] px-3 py-2">
+            <div className="flex items-start gap-2">
+              <Icon icon="mdi:format-quote-close" className="text-gray-500 text-sm mt-0.5 shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-[11px] text-gray-400 mb-0.5">
+                  引用{quoteContext.meta ? ` · ${quoteContext.meta}` : ''}
+                </p>
+                <p className="text-xs text-gray-200 leading-relaxed line-clamp-3 wrap-break-word">{quoteContext.text}</p>
+              </div>
+              <button
+                type="button"
+                className="text-gray-500 hover:text-gray-300"
+                onClick={() => setQuoteContext(null)}
+                aria-label="clear-quote"
+              >
+                <Icon icon="mdi:close" className="text-base" />
+              </button>
+            </div>
+          </div>
+        )}
         <div className="flex gap-2">
           <textarea
             ref={inputRef}

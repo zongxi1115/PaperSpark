@@ -8,6 +8,13 @@ type ChatMessage = {
   content: string
 }
 
+type DocumentBlockInfo = {
+  id: string
+  type: string
+  text: string
+  level?: number
+}
+
 type ToolStatusEvent = {
   type: 'tool-status'
   id: string
@@ -41,6 +48,7 @@ export async function POST(req: Request) {
     useKnowledge,
     knowledgeCandidates,
     assetContext,
+    documentStructure,
   } = await req.json() as {
     messages: ChatMessage[]
     modelConfig?: ModelConfig
@@ -48,6 +56,7 @@ export async function POST(req: Request) {
     useKnowledge?: boolean
     knowledgeCandidates?: AssistantCitation[]
     assetContext?: string
+    documentStructure?: DocumentBlockInfo[]
   }
 
   if (!modelConfig?.apiKey || !modelConfig?.modelName) {
@@ -142,8 +151,51 @@ export async function POST(req: Request) {
           fullSystemPrompt += `\n\n你还可以参考用户资产库中的材料。若资产库内容与问题直接相关，请优先结合这些材料回答；如果资产库不足，再说明不足。资产库材料如下：\n${assetContext}`
         }
 
-        // 如果 systemPrompt 中包含文档内容，说明用户开启了文档引用，告知 AI 可以编辑文档
-        if (systemPrompt && systemPrompt.includes('当前编辑器文档内容')) {
+        // 如果有文档结构，告知 AI 可以编辑文档
+        if (documentStructure && documentStructure.length > 0) {
+          const blockList = documentStructure.map((b, i) => {
+            const typeLabel = b.type === 'heading' ? `H${b.level || 1}` : b.type
+            const textPreview = b.text.slice(0, 50) + (b.text.length > 50 ? '…' : '')
+            return `${i + 1}. [${b.id}] ${typeLabel}: ${textPreview}`
+          }).join('\n')
+
+          fullSystemPrompt += `\n\n当前文档结构（共 ${documentStructure.length} 个块）：
+${blockList}
+
+你可以使用简化格式编辑文档：
+
+**插入内容**（在文档末尾追加）：
+::insert after
+要插入的内容
+::
+
+**插入内容**（在特定块后）：
+::insert after 块ID
+要插入的内容
+::
+
+**删除块**：
+::delete 块ID
+
+**更新块**：
+::update 块ID
+新的内容
+::
+
+支持 Markdown 语法：
+- # 标题 → heading
+- - 列表项 → bulletListItem
+- 1. 编号 → numberedListItem
+- 普通文本 → paragraph
+
+示例：在文档末尾插入一个二级标题和段落：
+::insert after
+## 新章节
+
+这是新段落内容。
+::`
+        } else if (systemPrompt && systemPrompt.includes('当前编辑器文档内容')) {
+          // 兼容旧格式
           fullSystemPrompt += `\n\n你可以通过输出特殊代码块来编辑用户的文档。当用户要求你在文档中添加、修改内容时，输出如下格式的代码块（语言标识为 edit_document），内容为 JSON：
 \`\`\`edit_document
 {

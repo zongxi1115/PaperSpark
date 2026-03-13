@@ -1422,14 +1422,6 @@ export default function ImmersiveReaderPage() {
                   blockId: selection.blockId,
                 })
                 setSidebarTab('qa')
-                if (selection.blockId) {
-                  setFocusedGuideTarget({
-                    blockId: selection.blockId,
-                    pageNum: selection.pageNum,
-                    title: '当前选中段落',
-                    note: selection.text,
-                  })
-                }
               }}
               jumpToBlock={jumpToBlock}
               focusTarget={focusedGuideTarget}

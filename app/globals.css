@@ -87,6 +87,24 @@ math-field:focus-within {
   animation: block-pulse 2s ease-in-out;
 }
 
+/* PDF 句子级高亮（text layer span） */
+.sentence-highlight {
+  animation: sentence-pulse 2s ease-in-out;
+  border-radius: 3px;
+}
+
+@keyframes sentence-pulse {
+  0% {
+    background-color: rgba(59, 130, 246, 0.22);
+  }
+  50% {
+    background-color: rgba(59, 130, 246, 0.14);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
 @keyframes block-pulse {
   0% {
     background-color: rgba(59, 130, 246, 0.3);

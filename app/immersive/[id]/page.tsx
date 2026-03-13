@@ -158,6 +158,7 @@ export default function ImmersiveReaderPage() {
   // 跳转控制
   const [jumpToBlock, setJumpToBlock] = useState<{ blockId: string; pageNum: number } | null>(null)
   const [focusedGuideTarget, setFocusedGuideTarget] = useState<GuideFocusTarget | null>(null)
+  const [focusOverlayMode, setFocusOverlayMode] = useState<'block' | 'sentence'>('block')
   const [selectionQuestionContext, setSelectionQuestionContext] = useState<{
     id: string
     text: string
@@ -1283,6 +1284,7 @@ export default function ImmersiveReaderPage() {
                 setCurrentPage(target.pageNum)
                 setJumpToBlock({ blockId: target.blockId, pageNum: target.pageNum })
                 setFocusedGuideTarget(target)
+                setFocusOverlayMode('block')
               }
             }}
           />
@@ -1298,6 +1300,7 @@ export default function ImmersiveReaderPage() {
               setCurrentPage(target.pageNum)
               setJumpToBlock({ blockId: target.blockId, pageNum: target.pageNum })
               setFocusedGuideTarget(target)
+              setFocusOverlayMode('sentence')
             }}
           />
         )}
@@ -1454,6 +1457,7 @@ export default function ImmersiveReaderPage() {
               }}
               jumpToBlock={jumpToBlock}
               focusTarget={focusedGuideTarget}
+              focusOverlayMode={focusOverlayMode}
             />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500">

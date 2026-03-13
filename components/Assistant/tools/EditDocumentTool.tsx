@@ -1,6 +1,8 @@
 'use client'
 import { useState, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { getEditor } from '@/lib/editorContext'
 import { AIExtension } from '@blocknote/xl-ai'
 import type { PartialBlock, Block } from '@blocknote/core'
@@ -98,6 +100,7 @@ export interface StreamingToolState {
 
 export class StreamingToolDetector {
   private prevCompleted = new Set<number>()
+  private prevDeleteCount = 0
 
   /**
    * 增量扫描全文，检测 ::insert/::update/::delete 模式
@@ -143,19 +146,32 @@ export class StreamingToolDetector {
       }
     }
 
-    // 匹配 ::delete blockId（单行，总是完成的）
+    // 匹配所有 ::delete blockId，合并为批量删除
+    const deleteBlockIds: string[] = []
     const deleteRegex = /^::delete\s+(\S+)\s*$/gm
     while ((match = deleteRegex.exec(fullText)) !== null) {
+      const blockId = match[1]
+      if (!deleteBlockIds.includes(blockId)) {
+        deleteBlockIds.push(blockId)
+      }
+    }
+    
+    // 如果有删除操作，创建一个批量删除的检测项
+    if (deleteBlockIds.length > 0) {
       const idx = detected.length
       detected.push({
         type: 'delete',
-        params: { blockId: match[1] },
+        params: { blockId: deleteBlockIds[0], blockIds: deleteBlockIds.join(',') },
         contentSoFar: '',
         isComplete: true,
       })
-      if (!this.prevCompleted.has(idx)) {
-        this.prevCompleted.add(idx)
-        completedIndices.push(idx)
+      // 当删除数量变化时，标记为完成
+      if (deleteBlockIds.length !== this.prevDeleteCount) {
+        this.prevDeleteCount = deleteBlockIds.length
+        if (!this.prevCompleted.has(idx)) {
+          this.prevCompleted.add(idx)
+          completedIndices.push(idx)
+        }
       }
     }
 
@@ -221,13 +237,20 @@ export function parseSimpleToolCalls(text: string): ParsedToolCall[] {
     })
   }
   
-  // 匹配 ::delete blockId
+  // 匹配所有 ::delete blockId，合并为批量删除
+  const deleteBlockIds: string[] = []
   const deleteRegex = /::delete\s+(\S+)/g
   while ((match = deleteRegex.exec(text)) !== null) {
     const blockId = match[1]
+    if (!deleteBlockIds.includes(blockId)) {
+      deleteBlockIds.push(blockId)
+    }
+  }
+  // 如果有删除操作，创建一个批量删除的 tool call
+  if (deleteBlockIds.length > 0) {
     results.push({
       type: 'delete',
-      params: { blockId },
+      params: { blockId: deleteBlockIds[0], blockIds: deleteBlockIds.join(',') },
       content: '',
     })
   }
@@ -264,10 +287,21 @@ export function convertToolCallsToRequest(toolCalls: ParsedToolCall[]): EditDocu
         blocks,
       })
     } else if (call.type === 'delete') {
-      operations.push({
-        type: 'delete',
-        blockId: call.params.blockId,
-      })
+      // 支持批量删除：检查是否有 blockIds 参数
+      if (call.params.blockIds) {
+        const blockIds = call.params.blockIds.split(',').filter(Boolean)
+        for (const blockId of blockIds) {
+          operations.push({
+            type: 'delete',
+            blockId,
+          })
+        }
+      } else if (call.params.blockId) {
+        operations.push({
+          type: 'delete',
+          blockId: call.params.blockId,
+        })
+      }
     } else if (call.type === 'update') {
       const blocks = textToBlocks(call.content)
       if (blocks.length > 0) {
@@ -564,71 +598,68 @@ export function acceptInsertionChanges(opKey?: string): void {
     // 按操作作用域移除标记
     const blockIds = operationBlockIds.get(opKey)!
 
-    // Pass 1: collect all positions that need mark removal (node marks + inline ranges)
-    const nodeMarkPositions: number[] = []
-    const inlineRanges: Array<{ from: number; to: number }> = []
+    // 收集需要处理的块位置信息
+    const blockInfos: Array<{ pos: number; node: any; innerFrom: number; innerTo: number }> = []
 
     editor.prosemirrorState.doc.descendants((node, pos) => {
       if (node.isBlock && node.attrs?.id && blockIds.has(node.attrs.id)) {
-        const hasMark = (node.marks || []).some((m: any) => m.type === insertionMark)
-        if (hasMark) {
-          nodeMarkPositions.push(pos)
-        }
-        // Collect inline range for this block
         const innerFrom = pos + 1
         const innerTo = pos + node.nodeSize - 1
-        if (innerFrom < innerTo) {
-          inlineRanges.push({ from: innerFrom, to: innerTo })
-        }
+        blockInfos.push({ pos, node, innerFrom, innerTo })
       }
       return true
     })
 
-    // Pass 2: apply changes in reverse order to avoid position shifts
+    // 使用单个事务处理所有标记移除
     editor.transact((tr) => {
       tr.setMeta('addToHistory', false)
-      // Remove inline marks first (doesn't affect block positions)
-      for (const range of inlineRanges) {
-        tr.removeMark(range.from, range.to, insertionMark)
+      
+      // 先移除所有内联标记
+      for (const info of blockInfos) {
+        if (info.innerFrom < info.innerTo) {
+          tr.removeMark(info.innerFrom, info.innerTo, insertionMark)
+        }
       }
-      // Remove node marks in reverse order
-      for (let i = nodeMarkPositions.length - 1; i >= 0; i--) {
-        const pos = nodeMarkPositions[i]
-        const node = tr.doc.nodeAt(pos)
-        if (node) {
-          const filteredMarks = (node.marks || []).filter((m: any) => m.type !== insertionMark)
-          tr.setNodeMarkup(pos, undefined, undefined, filteredMarks)
+      
+      // 然后移除节点标记（逆序处理避免位置偏移）
+      for (let i = blockInfos.length - 1; i >= 0; i--) {
+        const info = blockInfos[i]
+        const hasMark = (info.node.marks || []).some((m: any) => m.type === insertionMark)
+        if (hasMark) {
+          const filteredMarks = (info.node.marks || []).filter((m: any) => m.type !== insertionMark)
+          tr.setNodeMarkup(info.pos, undefined, undefined, filteredMarks)
         }
       }
     })
+    
     operationBlockIds.delete(opKey)
     operationOldBlocks.delete(opKey)
   } else {
-    // 全局回退：先移除所有 inline mark，再移除 node mark
-    const nodeMarkPositions: number[] = []
+    // 全局回退：移除所有 insertion 标记
+    const blockInfos: Array<{ pos: number; node: any }> = []
 
     editor.prosemirrorState.doc.descendants((node, pos) => {
       if (node.isBlock && node.marks?.length) {
         const hasMark = node.marks.some((m: any) => m.type === insertionMark)
-        if (hasMark) nodeMarkPositions.push(pos)
+        if (hasMark) {
+          blockInfos.push({ pos, node })
+        }
       }
       return true
     })
 
     editor.transact((tr) => {
       tr.setMeta('addToHistory', false)
-      // Remove all inline marks first
+      // 移除所有内联标记
       tr.removeMark(0, tr.doc.content.size, insertionMark)
-      // Remove node marks in reverse order
-      for (let i = nodeMarkPositions.length - 1; i >= 0; i--) {
-        const pos = nodeMarkPositions[i]
-        const node = tr.doc.nodeAt(pos)
-        if (node) {
-          const filteredMarks = (node.marks || []).filter((m: any) => m.type !== insertionMark)
-          tr.setNodeMarkup(pos, undefined, undefined, filteredMarks)
-        }
+      // 移除节点标记（逆序处理）
+      for (let i = blockInfos.length - 1; i >= 0; i--) {
+        const info = blockInfos[i]
+        const filteredMarks = (info.node.marks || []).filter((m: any) => m.type !== insertionMark)
+        tr.setNodeMarkup(info.pos, undefined, undefined, filteredMarks)
       }
     })
+    
     operationBlockIds.clear()
     operationOldBlocks.clear()
   }
@@ -642,7 +673,7 @@ export function rejectInsertionChanges(opKey?: string): void {
   if (!editor) return
 
   if (opKey) {
-    // Revert update operations: restore old block content
+    // 先恢复 update 操作的旧块内容
     if (operationOldBlocks.has(opKey)) {
       const oldBlocks = operationOldBlocks.get(opKey)!
       for (const { blockId, oldBlock } of oldBlocks) {
@@ -653,14 +684,24 @@ export function rejectInsertionChanges(opKey?: string): void {
       operationOldBlocks.delete(opKey)
     }
 
-    // Remove inserted blocks
+    // 删除插入的块
     if (operationBlockIds.has(opKey)) {
       const blockIds = operationBlockIds.get(opKey)!
+      // 先移除标记再删除
+      const schema = editor.prosemirrorState.schema
+      const insertionMark = schema.marks['insertion']
+      if (insertionMark) {
+        editor.transact((tr) => {
+          tr.setMeta('addToHistory', false)
+          tr.removeMark(0, tr.doc.content.size, insertionMark)
+        })
+      }
+      // 删除块
       editor.removeBlocks([...blockIds])
       operationBlockIds.delete(opKey)
     }
   } else {
-    // Global fallback: revert all updates
+    // 全局回退：恢复所有更新的块
     for (const [, oldBlocks] of operationOldBlocks) {
       for (const { blockId, oldBlock } of oldBlocks) {
         if (blockExists(editor, blockId)) {
@@ -670,7 +711,7 @@ export function rejectInsertionChanges(opKey?: string): void {
     }
     operationOldBlocks.clear()
 
-    // Remove all inserted blocks
+    // 删除所有插入的块
     const schema = editor.prosemirrorState.schema
     const insertionMark = schema.marks['insertion']
     if (!insertionMark) return
@@ -687,6 +728,12 @@ export function rejectInsertionChanges(opKey?: string): void {
     })
 
     if (blocksToRemove.length > 0) {
+      // 先移除标记
+      editor.transact((tr) => {
+        tr.setMeta('addToHistory', false)
+        tr.removeMark(0, tr.doc.content.size, insertionMark)
+      })
+      // 再删除块
       editor.removeBlocks(blocksToRemove)
     }
     operationBlockIds.clear()
@@ -838,8 +885,10 @@ export async function applyEditOperations(
           operationOldBlocks.get(opKey)!.push({ blockId: op.blockId, oldBlock: JSON.parse(JSON.stringify(oldBlock)) })
         }
       }
-      onProgress('更新中…')
+    onProgress('更新中…')
       editor.updateBlock(op.blockId, op.block as any)
+      markBlockAsInsertion(editor, op.blockId)
+      if (opKey) registerOperationBlockId(opKey, op.blockId)
       await delay(120 * jitter())
     } else if (op.type === 'delete') {
       if (!blockExists(editor, op.blockId)) {
@@ -847,7 +896,16 @@ export async function applyEditOperations(
         continue
       }
       onProgress('删除中…')
-      editor.removeBlocks([op.blockId])
+      // 使用 BlockNote 推荐的删除方式
+      try {
+        editor.removeBlocks([op.blockId])
+      } catch (error) {
+        // 如果直接删除失败，尝试获取块并删除
+        const block = editor.getBlock(op.blockId)
+      if (block) {
+          editor.removeBlocks([op.blockId])
+     }
+      }
       await delay(80 * jitter())
     }
   }
@@ -995,9 +1053,17 @@ interface SimpleToolProps {
 }
 
 export function SimpleTool({ type, params, content, status, progress, error, onAccept, onReject, opKey }: SimpleToolProps) {
+  // 检查是否为批量删除
+  const deleteBlockIds = type === 'delete' && params.blockIds 
+    ? params.blockIds.split(',').filter(Boolean) 
+    : type === 'delete' && params.blockId 
+      ? [params.blockId] 
+      : []
+  const isBatchDelete = type === 'delete' && deleteBlockIds.length > 1
+
   const typeLabel = {
     insert: '插入内容',
-    delete: '删除块',
+    delete: isBatchDelete ? `批量删除 ${deleteBlockIds.length} 个块` : '删除块',
     update: '更新块',
   }[type]
 
@@ -1037,7 +1103,12 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
               — {params.position === 'after' ? '之后' : '之前'}
             </span>
           )}
-          {(type === 'delete' || type === 'update') && params.blockId && (
+          {type === 'delete' && !isBatchDelete && params.blockId && (
+            <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 6, fontSize: 10, fontFamily: 'monospace' }}>
+              {params.blockId.slice(0, 8)}…
+            </span>
+          )}
+          {type === 'update' && params.blockId && (
             <span style={{ fontWeight: 400, color: 'var(--text-muted)', marginLeft: 6, fontSize: 10, fontFamily: 'monospace' }}>
               {params.blockId.slice(0, 8)}…
             </span>
@@ -1049,6 +1120,37 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
         {status === 'idle' && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>等待中…</span>}
       </div>
       
+      {/* 批量删除预览 */}
+      {type === 'delete' && isBatchDelete && (
+        <div style={{
+          padding: '6px 12px',
+          background: 'var(--bg-primary)',
+          fontSize: 11,
+          color: 'var(--text-secondary)',
+          maxHeight: 120,
+          overflow: 'auto',
+        }}>
+          <div style={{ marginBottom: 4, color: 'var(--text-muted)', fontSize: 10 }}>
+            将删除以下 {deleteBlockIds.length} 个块：
+          </div>
+          {deleteBlockIds.slice(0, 5).map((id, i) => (
+            <div key={i} style={{ 
+              fontFamily: 'monospace', 
+              fontSize: 10, 
+              color: '#ef4444',
+              marginBottom: 2,
+            }}>
+              • {id.slice(0, 12)}…
+            </div>
+          ))}
+          {deleteBlockIds.length > 5 && (
+            <div style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 4 }}>
+              …还有 {deleteBlockIds.length - 5} 个块
+            </div>
+          )}
+        </div>
+      )}
+      
       {/* 内容预览 */}
       {type === 'insert' && content && (
         <div style={{
@@ -1056,65 +1158,36 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
           background: 'var(--bg-primary)',
           fontSize: 11,
           color: 'var(--text-secondary)',
-          maxHeight: 120,
-          overflow: 'hidden',
-        }}>
-          {(() => {
-            const blocks = textToBlocks(content)
-            return blocks.slice(0, 4).map((block, i) => {
-              const blockType = block.type || 'paragraph'
-              const text = extractBlockPreviewText(block)
-              const level = (block as any).props?.level
-
-              let typeLabel = ''
-              let prefix = ''
-              if (blockType === 'heading') {
-                typeLabel = `H${level}`
-                prefix = `${'#'.repeat(level || 1)} `
-              } else if (blockType === 'bulletListItem') {
-                typeLabel = '列表'
-                prefix = '- '
-              } else if (blockType === 'numberedListItem') {
-                typeLabel = '编号'
-                prefix = `${i + 1}. `
-              } else if (blockType === 'codeBlock') {
-                typeLabel = '代码'
-                prefix = ''
-              }
-
-              return (
-                <div key={i} style={{ marginBottom: 2, display: 'flex', gap: 6 }}>
-                  {typeLabel && (
-                    <span style={{
-                      color: 'var(--accent-color)',
-                      fontSize: 9,
-                      padding: '1px 4px',
-                      background: 'rgba(0, 153, 255, 0.1)',
-                      borderRadius: 3,
-                      flexShrink: 0,
-                    }}>
-                      {typeLabel}
-                    </span>
-                  )}
-                  <span style={{
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {prefix}{text.slice(0, 80)}{text.length > 80 && '…'}
-                  </span>
-                </div>
-              )
-            })
-          })()}
-          {(() => {
-            const blocks = textToBlocks(content)
-            return blocks.length > 4 ? (
-              <div style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 2 }}>
-                + 还有 {blocks.length - 4} 个块
-              </div>
-            ) : null
-          })()}
+          maxHeight: 180,
+          overflow: 'auto',
+        }} className="markdown-content">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              h1: ({ children }) => <h1 style={{ fontSize: 14, margin: '6px 0 4px', color: 'var(--text-primary)' }}>{children}</h1>,
+              h2: ({ children }) => <h2 style={{ fontSize: 13, margin: '6px 0 4px', color: 'var(--text-primary)' }}>{children}</h2>,
+              h3: ({ children }) => <h3 style={{ fontSize: 12, margin: '4px 0 2px', color: 'var(--text-primary)' }}>{children}</h3>,
+              p: ({ children }) => <p style={{ margin: '4px 0', lineHeight: 1.5 }}>{children}</p>,
+              code: ({ className, children, ...props }) => {
+                const isInline = !className
+                if (isInline) {
+                  return <code style={{ background: 'var(--bg-secondary)', padding: '1px 4px', borderRadius: 3, fontSize: 10 }} {...props}>{children}</code>
+                }
+                return <code style={{ background: 'var(--bg-secondary)', padding: '4px 6px', borderRadius: 4, fontSize: 10, display: 'block' }} {...props}>{children}</code>
+              },
+              ul: ({ children }) => <ul style={{ margin: '4px 0', paddingLeft: 16 }}>{children}</ul>,
+              ol: ({ children }) => <ol style={{ margin: '4px 0', paddingLeft: 16 }}>{children}</ol>,
+              li: ({ children }) => <li style={{ margin: '2px 0' }}>{children}</li>,
+              blockquote: ({ children }) => <blockquote style={{ borderLeft: '2px solid var(--accent-color)', paddingLeft: 8, margin: '4px 0', color: 'var(--text-muted)' }}>{children}</blockquote>,
+            }}
+          >
+            {content.slice(0, 600)}
+          </ReactMarkdown>
+          {content.length > 600 && (
+            <div style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 4 }}>
+              …内容已截断
+            </div>
+          )}
         </div>
       )}
 

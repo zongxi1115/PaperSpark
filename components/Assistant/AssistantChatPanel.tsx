@@ -1426,6 +1426,13 @@ export function AssistantChatPanel() {
                                     // ignore errors
                                   }
                                   setEditStates(prev => ({ ...prev, [key]: { status: 'accepted', progress: '', error: '' } }))
+                                  // 强制刷新编辑器视图
+                                  const editor = getEditor()
+                                  if (editor) {
+                                    editor._tiptapEditor.view.dispatch(
+                                      editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                                    )
+                                  }
                                 }
                                 const handleReject = () => {
                                   try {
@@ -1434,6 +1441,13 @@ export function AssistantChatPanel() {
                                     console.warn('Reject changes failed:', e)
                                   }
                                   setEditStates(prev => ({ ...prev, [key]: { status: 'rejected', progress: '', error: '' } }))
+                                  // 强制刷新编辑器视图
+                                  const editor = getEditor()
+                                  if (editor) {
+                                    editor._tiptapEditor.view.dispatch(
+                                      editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                                    )
+                                  }
                                 }
 
                                 return (
@@ -1473,6 +1487,13 @@ export function AssistantChatPanel() {
                               // ignore errors
                             }
                             setEditStates(prev => ({ ...prev, [key]: { status: 'accepted', progress: '', error: '' } }))
+                            // 强制刷新编辑器视图
+                            const editor = getEditor()
+                            if (editor) {
+                              editor._tiptapEditor.view.dispatch(
+                                editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                              )
+                            }
                           }
                           const handleReject = () => {
                             try {
@@ -1481,6 +1502,13 @@ export function AssistantChatPanel() {
                               console.warn('Reject changes failed:', e)
                             }
                             setEditStates(prev => ({ ...prev, [key]: { status: 'rejected', progress: '', error: '' } }))
+                            // 强制刷新编辑器视图
+                            const editor = getEditor()
+                            if (editor) {
+                              editor._tiptapEditor.view.dispatch(
+                                editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                              )
+                            }
                           }
                           
                           return (

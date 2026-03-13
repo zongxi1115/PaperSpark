@@ -117,6 +117,7 @@ interface PDFViewerProps {
   onAskSelection?: (selection: { text: string; pageNum: number; blockId?: string }) => void
   jumpToBlock?: { blockId: string; pageNum: number } | null
   focusTarget?: GuideFocusTarget | null
+  focusOverlayMode?: 'none' | 'block' | 'sentence' | 'both'
   translationDisplayMode?: 'overlay' | 'parallel'
 }
 
@@ -332,6 +333,7 @@ function PDFPage({
   onAnnotationUpdate,
   onAskSelection,
   focusTarget,
+  focusOverlayMode = 'block',
 }: {
   page: PDFPageProxy
   scale: number
@@ -347,6 +349,7 @@ function PDFPage({
   onAnnotationUpdate?: (annotation: PDFAnnotation) => void
   onAskSelection?: (selection: { text: string; pageNum: number; blockId?: string }) => void
   focusTarget?: GuideFocusTarget | null
+  focusOverlayMode?: 'none' | 'block' | 'sentence' | 'both'
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textLayerRef = useRef<HTMLDivElement>(null)
@@ -377,6 +380,16 @@ function PDFPage({
     () => blocks?.filter(block => block.pageNum === page.pageNumber) || [],
     [blocks, page.pageNumber]
   )
+
+  const shouldShowBlockOverlay = focusOverlayMode === 'block' || focusOverlayMode === 'both'
+  const shouldShowSentenceOverlay = focusOverlayMode === 'sentence' || focusOverlayMode === 'both'
+
+  const focusedBlock = useMemo(() => {
+    if (!shouldShowBlockOverlay) return null
+    if (!focusTarget?.blockId) return null
+    if (focusTarget.pageNum !== page.pageNumber) return null
+    return pageBlocks.find(block => block.id === focusTarget.blockId) || null
+  }, [focusTarget?.blockId, focusTarget?.pageNum, page.pageNumber, pageBlocks, shouldShowBlockOverlay])
 
   const findBestMatchingBlockByPoint = useCallback((point: { x: number; y: number }) => {
     if (!pageBlocks.length) return null
@@ -742,6 +755,11 @@ function PDFPage({
   useEffect(() => {
     if (!rendered) return
 
+    if (!shouldShowSentenceOverlay) {
+      clearSentenceHighlight()
+      return
+    }
+
     if (!focusTarget || focusTarget.pageNum !== page.pageNumber) {
       clearSentenceHighlight()
       return
@@ -757,7 +775,7 @@ function PDFPage({
     window.requestAnimationFrame(() => {
       highlightSentenceInTextLayer(sentence)
     })
-  }, [clearSentenceHighlight, focusTarget, highlightSentenceInTextLayer, page.pageNumber, rendered])
+  }, [clearSentenceHighlight, focusTarget, highlightSentenceInTextLayer, page.pageNumber, rendered, shouldShowSentenceOverlay])
 
   const resetFreeNoteDraft = useCallback(() => {
     setFreeNoteDraft(null)
@@ -889,6 +907,10 @@ function PDFPage({
       layout: buildTranslationLayout(block, scale, viewport),
     }))
     : []
+
+  const focusedBlockRect = focusedBlock
+    ? buildBlockOverlayRect(focusedBlock, scale, viewport)
+    : null
 
   return (
     <div
@@ -1164,6 +1186,38 @@ function PDFPage({
         )
       })}
 
+      {shouldShowBlockOverlay && focusedBlockRect && (
+        <div
+          className="absolute pointer-events-none z-10"
+          style={{
+            left: focusedBlockRect.left,
+            top: focusedBlockRect.top,
+            width: focusedBlockRect.width,
+            height: focusedBlockRect.height,
+          }}
+        >
+          <div className="absolute inset-0 rounded-md border-2 border-sky-400/80 bg-sky-300/12 shadow-[0_0_0_4px_rgba(56,189,248,0.18)] animate-pulse" />
+          {(focusTarget?.title || focusTarget?.note) && (
+            <div
+              className="absolute left-0 max-w-72 rounded-xl border border-sky-400/30 bg-[#0f172ae6] px-3 py-2 text-white shadow-xl"
+              style={{
+                top: focusedBlockRect.top > 96
+                  ? -10
+                  : focusedBlockRect.height + 10,
+                transform: focusedBlockRect.top > 96 ? 'translateY(-100%)' : 'none',
+              }}
+            >
+              {focusTarget?.title && (
+                <p className="text-xs font-medium text-sky-200">{focusTarget.title}</p>
+              )}
+              {focusTarget?.note && (
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-200">{focusTarget.note}</p>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       {freeNoteDraft && (
         <div
           ref={menuRef}
@@ -1259,6 +1313,7 @@ export default function PDFViewer({
   onAskSelection,
   jumpToBlock,
   focusTarget,
+  focusOverlayMode = 'block',
   translationDisplayMode = 'overlay',
 }: PDFViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -1376,11 +1431,17 @@ export default function PDFViewer({
           const blockEl = pageEl.querySelector(`[data-block-id="${blockId}"]`)
           if (blockEl) {
             blockEl.scrollIntoView({ block: 'center' })
+
+            const shouldHighlightBlock = focusOverlayMode === 'block' || focusOverlayMode === 'both'
+            if (shouldHighlightBlock) {
+              blockEl.classList.add('block-highlight')
+              setTimeout(() => blockEl.classList.remove('block-highlight'), 2000)
+            }
           }
         }, 300)
       }
     }
-  }, [jumpToBlock, scrollToPage])
+  }, [focusOverlayMode, jumpToBlock, scrollToPage])
 
   useEffect(() => {
     return () => {
@@ -1426,6 +1487,7 @@ export default function PDFViewer({
               onAnnotationUpdate={onAnnotationUpdate}
               onAskSelection={onAskSelection}
               focusTarget={focusTarget}
+              focusOverlayMode={focusOverlayMode}
             />
 
             {showTranslation && translationDisplayMode === 'parallel' && (
@@ -1440,6 +1502,7 @@ export default function PDFViewer({
                 interactive={false}
                 annotations={[]}
                 focusTarget={focusTarget}
+                focusOverlayMode={focusOverlayMode}
               />
             )}
           </div>

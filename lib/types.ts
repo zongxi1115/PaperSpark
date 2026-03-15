@@ -44,6 +44,7 @@ export interface AIModel {
   modelId: string // API 调用使用的模型标识符
   providerId: string // 所属 provider 的 id
   type: 'small' | 'large' | 'both' // 模型类型：小参数、大参数或两者皆可
+  enabled?: boolean // 是否启用，默认为 true
 }
 
 /**

@@ -19,6 +19,7 @@ import {
   useDisclosure,
   addToast,
   Chip,
+  Tooltip,
 } from '@heroui/react'
 import { getSettings, saveSettings, generateId } from '@/lib/storage'
 import type { AppSettings, FeatureSelectItem, AIProvider, AIModel } from '@/lib/types'
@@ -26,12 +27,15 @@ import { defaultSettings, selectFeatures } from '@/lib/types'
 import { EDITOR_THEMES, injectGoogleFont } from '@/lib/editorThemes'
 import { Icon } from '@iconify/react'
 
-// 获取所有可用模型（用于下拉选择）
+// 获取所有可用模型（用于下拉选择，排除禁用的模型）
 function getAllModels(providers: AIProvider[]): { model: AIModel; provider: AIProvider }[] {
   const models: { model: AIModel; provider: AIProvider }[] = []
   for (const provider of providers) {
     for (const model of provider.models) {
-      models.push({ model, provider })
+      // 只返回启用的模型（enabled 为 undefined 或 true 时都算启用）
+      if (model.enabled !== false) {
+        models.push({ model, provider })
+      }
     }
   }
   return models
@@ -53,20 +57,35 @@ function ProviderModal({
   const [baseUrl, setBaseUrl] = useState('')
   const [apiKey, setApiKey] = useState('')
   const [models, setModels] = useState<AIModel[]>([])
+  const [isTesting, setIsTesting] = useState(false)
+  const [isFetching, setIsFetching] = useState(false)
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     if (provider) {
       setName(provider.name)
       setBaseUrl(provider.baseUrl)
       setApiKey(provider.apiKey)
-      setModels([...provider.models])
+      // 确保 enabled 字段存在，默认为 true
+      setModels(provider.models.map(m => ({ ...m, enabled: m.enabled ?? true })))
     } else {
       setName('')
       setBaseUrl('')
       setApiKey('')
       setModels([])
     }
+    setSearchQuery('')
   }, [provider, isOpen])
+
+  // 过滤模型列表
+  const filteredModels = models.filter(m => {
+    if (!searchQuery.trim()) return true
+    const query = searchQuery.toLowerCase()
+    return m.name.toLowerCase().includes(query) || m.modelId.toLowerCase().includes(query)
+  })
+
+  const enabledCount = models.filter(m => m.enabled !== false).length
+  const disabledCount = models.length - enabledCount
 
   const handleAddModel = () => {
     const newModel: AIModel = {
@@ -75,6 +94,7 @@ function ProviderModal({
       modelId: '',
       providerId: provider?.id || `provider-${generateId()}`,
       type: 'both',
+      enabled: true,
     }
     setModels([...models, newModel])
   }
@@ -87,6 +107,140 @@ function ProviderModal({
 
   const handleRemoveModel = (index: number) => {
     setModels(models.filter((_, i) => i !== index))
+  }
+
+  // 切换单个模型启用状态
+  const handleToggleModel = (index: number) => {
+    const newModels = [...models]
+    newModels[index] = { ...newModels[index], enabled: !newModels[index].enabled }
+    setModels(newModels)
+  }
+
+  // 一键启用所有
+  const handleEnableAll = () => {
+    setModels(models.map(m => ({ ...m, enabled: true })))
+  }
+
+  // 一键禁用所有
+  const handleDisableAll = () => {
+    setModels(models.map(m => ({ ...m, enabled: false })))
+  }
+
+  // 测试连接
+  const handleTestConnection = async () => {
+    if (!apiKey.trim()) {
+      addToast({ title: '请先输入 API Key', color: 'warning' })
+      return
+    }
+    if (!baseUrl.trim()) {
+      addToast({ title: '请先输入 Base URL', color: 'warning' })
+      return
+    }
+    
+    setIsTesting(true)
+    try {
+      const url = baseUrl.replace(/\/$/, '')
+      const response = await fetch(`${url}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: models.find(m => m.enabled !== false)?.modelId || 'gpt-3.5-turbo',
+          messages: [{ role: 'user', content: 'Hi' }],
+          max_tokens: 5,
+        }),
+      })
+      
+      if (response.ok) {
+        addToast({ title: '连接成功！', color: 'success' })
+      } else {
+        const error = await response.json().catch(() => ({}))
+        addToast({ 
+          title: '连接失败', 
+          description: error.error?.message || `HTTP ${response.status}`,
+          color: 'danger' 
+        })
+      }
+    } catch (error) {
+      addToast({ 
+        title: '连接失败', 
+        description: error instanceof Error ? error.message : '网络错误',
+        color: 'danger' 
+      })
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
+  // 获取模型列表
+  const handleFetchModels = async () => {
+    if (!apiKey.trim()) {
+      addToast({ title: '请先输入 API Key', color: 'warning' })
+      return
+    }
+    if (!baseUrl.trim()) {
+      addToast({ title: '请先输入 Base URL', color: 'warning' })
+      return
+    }
+    
+    setIsFetching(true)
+    try {
+      const url = baseUrl.replace(/\/$/, '')
+      const response = await fetch(`${url}/models`, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+        },
+      })
+      
+      if (response.ok) {
+        const data = await response.json()
+        const modelList = data.data || []
+        
+        if (modelList.length === 0) {
+          addToast({ title: '未找到可用模型', color: 'warning' })
+          return
+        }
+        
+        // 去重：已存在的 modelId
+        const existingIds = new Set(models.map(m => m.modelId))
+        const providerId = provider?.id || `provider-${generateId()}`
+        
+        const newModels: AIModel[] = modelList
+          .filter((m: { id: string }) => !existingIds.has(m.id))
+          .map((m: { id: string }) => ({
+            id: `model-${generateId()}`,
+            name: m.id,
+            modelId: m.id,
+            providerId,
+            type: 'both' as const,
+            enabled: true,
+          }))
+        
+        if (newModels.length === 0) {
+          addToast({ title: '所有模型已存在', color: 'default' })
+        } else {
+          setModels(prev => [...prev, ...newModels])
+          addToast({ title: `已获取 ${newModels.length} 个模型`, color: 'success' })
+        }
+      } else {
+        const error = await response.json().catch(() => ({}))
+        addToast({ 
+          title: '获取模型列表失败', 
+          description: error.error?.message || `HTTP ${response.status}`,
+          color: 'danger' 
+        })
+      }
+    } catch (error) {
+      addToast({ 
+        title: '获取模型列表失败', 
+        description: error instanceof Error ? error.message : '网络错误',
+        color: 'danger' 
+      })
+    } finally {
+      setIsFetching(false)
+    }
   }
 
   const handleSave = () => {
@@ -146,65 +300,143 @@ function ProviderModal({
               description="密钥仅存储在本地，不会上传服务器"
             />
             
+            {/* 测试和获取模型按钮 */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <Button 
+                size="sm" 
+                variant="flat" 
+                color="success" 
+                onPress={handleTestConnection}
+                isLoading={isTesting}
+              >
+                {isTesting ? '测试中...' : '测试连接'}
+              </Button>
+              <Button 
+                size="sm" 
+                variant="flat" 
+                color="primary" 
+                onPress={handleFetchModels}
+                isLoading={isFetching}
+              >
+                {isFetching ? '获取中...' : '获取模型列表'}
+              </Button>
+            </div>
+            
             <Divider />
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <p style={{ fontWeight: 600, fontSize: 14 }}>模型列表</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <p style={{ fontWeight: 600, fontSize: 14 }}>模型列表</p>
+                <Chip size="sm" variant="flat" color="success">{enabledCount} 启用</Chip>
+                {disabledCount > 0 && (
+                  <Chip size="sm" variant="flat" color="default">{disabledCount} 禁用</Chip>
+                )}
+              </div>
               <Button size="sm" variant="flat" color="primary" onPress={handleAddModel}>
                 + 添加模型
               </Button>
             </div>
             
+            {/* 搜索和批量操作 */}
+            {models.length > 0 && (
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <Input
+                  placeholder="搜索模型名称或 ID..."
+                  value={searchQuery}
+                  onValueChange={setSearchQuery}
+                  size="sm"
+                  variant="flat"
+                  startContent={<Icon icon="solar:magnifer-linear" width={16} style={{ color: 'var(--text-muted)' }} />}
+                  style={{ flex: 1 }}
+                  isClearable
+                />
+                <Button size="sm" variant="flat" color="success" onPress={handleEnableAll}>
+                  全部启用
+                </Button>
+                <Button size="sm" variant="flat" color="default" onPress={handleDisableAll}>
+                  全部禁用
+                </Button>
+              </div>
+            )}
+            
             {models.length === 0 ? (
               <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: '20px 0' }}>
                 暂无模型，点击上方按钮添加
               </p>
+            ) : filteredModels.length === 0 ? (
+              <p style={{ color: 'var(--text-muted)', fontSize: 13, textAlign: 'center', padding: '20px 0' }}>
+                未找到匹配的模型
+              </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                {models.map((model, index) => (
-                  <Card key={model.id} shadow="sm" style={{ background: 'var(--bg-tertiary)' }}>
-                    <CardBody style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                {filteredModels.map((model) => {
+                  const index = models.findIndex(m => m.id === model.id)
+                  const isEnabled = model.enabled !== false
+                  return (
+                    <Card 
+                      key={model.id} 
+                      shadow="sm" 
+                      style={{ 
+                        background: isEnabled ? 'var(--bg-tertiary)' : 'var(--bg-secondary)',
+                        opacity: isEnabled ? 1 : 0.6,
+                      }}
+                    >
+                      <CardBody style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Input
+                            placeholder="模型显示名称"
+                            value={model.name}
+                            onValueChange={v => handleUpdateModel(index, { name: v })}
+                            size="sm"
+                            variant="flat"
+                            style={{ flex: 1, marginRight: 8 }}
+                          />
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                            <Tooltip content={isEnabled ? '点击禁用' : '点击启用'}>
+                              <Button
+                                size="sm"
+                                variant="light"
+                                color={isEnabled ? 'success' : 'default'}
+                                isIconOnly
+                                onPress={() => handleToggleModel(index)}
+                              >
+                                <Icon icon={isEnabled ? 'solar:check-circle-bold' : 'solar:close-circle-bold'} width={18} />
+                              </Button>
+                            </Tooltip>
+                            <Button
+                              size="sm"
+                              variant="light"
+                              color="danger"
+                              isIconOnly
+                              onPress={() => handleRemoveModel(index)}
+                            >
+                              <Icon icon="solar:trash-bin-trash-bold" width={18} />
+                            </Button>
+                          </div>
+                        </div>
                         <Input
-                          placeholder="模型显示名称"
-                          value={model.name}
-                          onValueChange={v => handleUpdateModel(index, { name: v })}
+                          placeholder="模型标识符 (如 gpt-4o)"
+                          value={model.modelId}
+                          onValueChange={v => handleUpdateModel(index, { modelId: v })}
                           size="sm"
                           variant="flat"
-                          style={{ flex: 1, marginRight: 8 }}
+                          description="API 调用使用的模型 ID"
                         />
-                        <Button
+                        <Select
+                          label="模型类型"
+                          selectedKeys={[model.type]}
+                          onSelectionChange={keys => handleUpdateModel(index, { type: [...keys][0] as 'small' | 'large' | 'both' })}
                           size="sm"
-                          variant="light"
-                          color="danger"
-                          isIconOnly
-                          onPress={() => handleRemoveModel(index)}
+                          variant="flat"
                         >
-                          <Icon icon="solar:trash-bin-trash-bold" width={18} />
-                        </Button>
-                      </div>
-                      <Input
-                        placeholder="模型标识符 (如 gpt-4o)"
-                        value={model.modelId}
-                        onValueChange={v => handleUpdateModel(index, { modelId: v })}
-                        size="sm"
-                        variant="flat"
-                        description="API 调用使用的模型 ID"
-                      />
-                      <Select
-                        label="模型类型"
-                        selectedKeys={[model.type]}
-                        onSelectionChange={keys => handleUpdateModel(index, { type: [...keys][0] as 'small' | 'large' | 'both' })}
-                        size="sm"
-                        variant="flat"
-                      >
-                        <SelectItem key="small">小参数模型</SelectItem>
-                        <SelectItem key="large">大参数模型</SelectItem>
-                        <SelectItem key="both">通用模型</SelectItem>
-                      </Select>
-                    </CardBody>
-                  </Card>
-                ))}
+                          <SelectItem key="small">小参数模型</SelectItem>
+                          <SelectItem key="large">大参数模型</SelectItem>
+                          <SelectItem key="both">通用模型</SelectItem>
+                        </Select>
+                      </CardBody>
+                    </Card>
+                  )
+                })}
               </div>
             )}
           </div>
@@ -233,6 +465,13 @@ function ProviderCard({
   onDelete: () => void
 }) {
   const [expanded, setExpanded] = useState(false)
+  const [modelsExpanded, setModelsExpanded] = useState(false)
+  
+  // 过滤启用的模型
+  const enabledModels = provider.models.filter(m => m.enabled !== false)
+  // 最多显示 9 个（约 3 行）
+  const displayModels = modelsExpanded ? enabledModels : enabledModels.slice(0, 9)
+  const hasMoreModels = enabledModels.length > 9
   
   return (
     <Card shadow="sm">
@@ -247,7 +486,7 @@ function ProviderCard({
             <div>
               <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>{provider.name}</p>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '2px 0 0' }}>
-                {provider.models.length} 个模型
+                {enabledModels.length} 个模型
               </p>
             </div>
           </div>
@@ -271,15 +510,48 @@ function ProviderCard({
                 {provider.baseUrl}
               </code>
             </div>
-            {provider.models.length > 0 && (
+            {enabledModels.length > 0 && (
               <div style={{ marginTop: 8 }}>
                 <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 8 }}>可用模型：</p>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                  {provider.models.map(model => (
-                    <Chip key={model.id} size="sm" variant="flat">
+                  {displayModels.map(model => (
+                    <Chip 
+                      key={model.id} 
+                      size="sm" 
+                      variant="flat"
+                      color={model.enabled === false ? 'default' : 'primary'}
+                    >
                       {model.name}
                     </Chip>
                   ))}
+                  {hasMoreModels && !modelsExpanded && (
+                    <Chip
+                      size="sm"
+                      variant="flat"
+                      color="secondary"
+                      style={{ cursor: 'pointer' }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setModelsExpanded(true)
+                      }}
+                    >
+                      +{enabledModels.length - 9} 更多
+                    </Chip>
+                  )}
+                  {modelsExpanded && hasMoreModels && (
+                    <Chip
+                      size="sm"
+                      variant="flat"
+                      color="secondary"
+                      style={{ cursor: 'pointer' }}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setModelsExpanded(false)
+                      }}
+                    >
+                      收起
+                    </Chip>
+                  )}
                 </div>
               </div>
             )}
@@ -295,10 +567,61 @@ export function SettingsForm() {
   const [saved, setSaved] = useState(false)
   const [editingProvider, setEditingProvider] = useState<AIProvider | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
+  
+  // 测试嵌入模型连接状态
+  const [testingEmbedding, setTestingEmbedding] = useState(false)
 
   useEffect(() => {
     setSettings(getSettings())
   }, [])
+  
+  // 测试嵌入模型连接
+  const testEmbeddingConnection = async () => {
+    const embedding = settings.embeddingModel
+    if (!embedding?.apiKey) {
+      addToast({ title: '请先配置嵌入模型 API Key', color: 'warning' })
+      return
+    }
+    if (!embedding?.modelName) {
+      addToast({ title: '请先配置模型名称', color: 'warning' })
+      return
+    }
+    
+    setTestingEmbedding(true)
+    try {
+      const baseUrl = embedding.baseUrl.replace(/\/embeddings$/, '').replace(/\/$/, '')
+      const response = await fetch(`${baseUrl}/embeddings`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${embedding.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: embedding.modelName,
+          input: 'test',
+        }),
+      })
+      
+      if (response.ok) {
+        addToast({ title: '嵌入模型连接成功！', color: 'success' })
+      } else {
+        const error = await response.json().catch(() => ({}))
+        addToast({ 
+          title: '连接失败', 
+          description: error.error?.message || `HTTP ${response.status}`,
+          color: 'danger' 
+        })
+      }
+    } catch (error) {
+      addToast({ 
+        title: '连接失败', 
+        description: error instanceof Error ? error.message : '网络错误',
+        color: 'danger' 
+      })
+    } finally {
+      setTestingEmbedding(false)
+    }
+  }
 
   const handleSave = () => {
     saveSettings(settings)
@@ -654,6 +977,16 @@ export function SettingsForm() {
                   size="sm"
                   description="密钥仅存储在本地"
                 />
+                <Button 
+                  size="sm" 
+                  variant="flat" 
+                  color="success" 
+                  onPress={testEmbeddingConnection}
+                  isLoading={testingEmbedding}
+                  style={{ alignSelf: 'flex-start' }}
+                >
+                  {testingEmbedding ? '测试中...' : '测试连接'}
+                </Button>
               </div>
             </div>
 

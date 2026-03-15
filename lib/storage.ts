@@ -536,3 +536,119 @@ export function deleteAsset(id: string): void {
 export function getAssetsByType(typeId: string): AssetItem[] {
   return getAssets().filter(a => a.typeId === typeId)
 }
+
+// ============ 文档版本历史存储 ============
+
+const VERSIONS_KEY = 'paper_reader_document_versions'
+const MAX_VERSIONS_PER_DOC = 20 // 每个文档最多保存的版本数
+
+export function getDocumentVersions(documentId: string): import('./types').DocumentVersion[] {
+  if (!isBrowser()) return []
+  try {
+    const raw = localStorage.getItem(VERSIONS_KEY)
+    if (!raw) return []
+    const allVersions = JSON.parse(raw) as import('./types').DocumentVersion[]
+    return allVersions
+      .filter(v => v.documentId === documentId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+  } catch {
+    return []
+  }
+}
+
+export function getAllVersions(): import('./types').DocumentVersion[] {
+  if (!isBrowser()) return []
+  try {
+    const raw = localStorage.getItem(VERSIONS_KEY)
+    if (!raw) return []
+    return JSON.parse(raw) as import('./types').DocumentVersion[]
+  } catch {
+    return []
+  }
+}
+
+export function saveDocumentVersion(version: import('./types').DocumentVersion): void {
+  if (!isBrowser()) return
+  try {
+    const raw = localStorage.getItem(VERSIONS_KEY)
+    const allVersions: import('./types').DocumentVersion[] = raw ? JSON.parse(raw) : []
+    
+    // 添加新版本
+    allVersions.push(version)
+    
+    // 限制每个文档的版本数量
+    const docVersions = allVersions
+      .filter(v => v.documentId === version.documentId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    
+    if (docVersions.length > MAX_VERSIONS_PER_DOC) {
+      // 删除最旧的版本
+      const toRemove = docVersions.slice(MAX_VERSIONS_PER_DOC)
+      const toRemoveIds = new Set(toRemove.map(v => v.id))
+      const filtered = allVersions.filter(v => !toRemoveIds.has(v.id))
+      localStorage.setItem(VERSIONS_KEY, JSON.stringify(filtered))
+    } else {
+      localStorage.setItem(VERSIONS_KEY, JSON.stringify(allVersions))
+    }
+    
+    emitStorageEvent('document-versions-updated')
+  } catch (e) {
+    console.error('Failed to save document version:', e)
+  }
+}
+
+export function deleteDocumentVersion(versionId: string): void {
+  if (!isBrowser()) return
+  try {
+    const raw = localStorage.getItem(VERSIONS_KEY)
+    if (!raw) return
+    const allVersions = JSON.parse(raw) as import('./types').DocumentVersion[]
+    const filtered = allVersions.filter(v => v.id !== versionId)
+    localStorage.setItem(VERSIONS_KEY, JSON.stringify(filtered))
+    emitStorageEvent('document-versions-updated')
+  } catch (e) {
+    console.error('Failed to delete document version:', e)
+  }
+}
+
+export function deleteAllDocumentVersions(documentId: string): void {
+  if (!isBrowser()) return
+  try {
+    const raw = localStorage.getItem(VERSIONS_KEY)
+    if (!raw) return
+    const allVersions = JSON.parse(raw) as import('./types').DocumentVersion[]
+    const filtered = allVersions.filter(v => v.documentId !== documentId)
+    localStorage.setItem(VERSIONS_KEY, JSON.stringify(filtered))
+    emitStorageEvent('document-versions-updated')
+  } catch (e) {
+    console.error('Failed to delete all document versions:', e)
+  }
+}
+
+export function getDocumentVersion(versionId: string): import('./types').DocumentVersion | null {
+  if (!isBrowser()) return null
+  try {
+    const raw = localStorage.getItem(VERSIONS_KEY)
+    if (!raw) return null
+    const allVersions = JSON.parse(raw) as import('./types').DocumentVersion[]
+    return allVersions.find(v => v.id === versionId) ?? null
+  } catch {
+    return null
+  }
+}
+
+// 计算文档字数
+export function calculateWordCount(blocks: unknown[]): number {
+  let count = 0
+  for (const block of blocks) {
+    const b = block as { content?: { type: string; text: string }[] }
+    if (b.content && Array.isArray(b.content)) {
+      for (const inline of b.content) {
+        if (inline.type === 'text' && inline.text) {
+          count += inline.text.length
+        }
+      }
+    }
+  }
+  return count
+}

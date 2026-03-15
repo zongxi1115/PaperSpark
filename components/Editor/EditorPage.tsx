@@ -29,8 +29,9 @@ import { DefaultChatTransport } from 'ai'
 import { Button, Divider, Tooltip, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure } from '@heroui/react'
 import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
-import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems } from '@/lib/storage'
-import type { AppDocument, AppSettings, ArticleAuthor } from '@/lib/types'
+import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems, saveDocumentVersion, deleteAllDocumentVersions, calculateWordCount } from '@/lib/storage'
+import type { AppDocument, AppSettings, ArticleAuthor, DocumentVersion } from '@/lib/types'
+import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
 import { FormulaInputExtension } from '@/lib/formulaInputExtension'
@@ -524,6 +525,127 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     saveDocument(updated)
   }, [doc, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])
 
+  // 版本控制：保存版本快照
+  const handleSaveVersion = useCallback((title: string) => {
+    if (!doc) return
+    const currentBlocks = editor.document as Block[]
+    const version: DocumentVersion = {
+      id: `version-${Date.now()}`,
+      documentId: doc.id,
+      title,
+      content: currentBlocks,
+      articleTitle,
+      articleAuthors,
+      articleAbstract,
+      articleKeywords,
+      articleDate,
+      isAuto: false,
+      wordCount: calculateWordCount(currentBlocks),
+      createdAt: new Date().toISOString(),
+    }
+    saveDocumentVersion(version)
+    addToast({ title: '版本快照已保存', color: 'success' })
+  }, [doc, editor, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])
+
+  // 版本控制：恢复历史版本
+  const handleRestoreVersion = useCallback((version: DocumentVersion) => {
+    if (!doc) return
+    
+    // 先保存当前版本（自动）
+    const currentBlocks = editor.document as Block[]
+    const autoVersion: DocumentVersion = {
+      id: `version-${Date.now()}`,
+      documentId: doc.id,
+      title: `恢复前自动保存`,
+      content: currentBlocks,
+      articleTitle,
+      articleAuthors,
+      articleAbstract,
+      articleKeywords,
+      articleDate,
+      isAuto: true,
+      wordCount: calculateWordCount(currentBlocks),
+      createdAt: new Date().toISOString(),
+    }
+    saveDocumentVersion(autoVersion)
+    
+    // 恢复版本内容
+    editor.replaceBlocks(editor.document, version.content as Block[])
+    setBlocks(version.content as Block[])
+    
+    // 恢复文章元数据
+    if (version.articleTitle !== undefined) setArticleTitle(version.articleTitle)
+    if (version.articleAuthors !== undefined) setArticleAuthors(version.articleAuthors)
+    if (version.articleAbstract !== undefined) setArticleAbstract(version.articleAbstract)
+    if (version.articleKeywords !== undefined) setArticleKeywords(version.articleKeywords)
+    if (version.articleDate !== undefined) setArticleDate(version.articleDate)
+    
+    // 保存恢复后的文档
+    const updated: AppDocument = {
+      ...doc,
+      content: version.content,
+      articleTitle: version.articleTitle,
+      articleAuthors: version.articleAuthors,
+      articleAbstract: version.articleAbstract,
+      articleKeywords: version.articleKeywords,
+      articleDate: version.articleDate,
+      updatedAt: new Date().toISOString(),
+    }
+    setDoc(updated)
+    saveDocument(updated)
+  }, [doc, editor, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])
+
+  // 自动版本快照：每 5 分钟自动保存一次
+  const AUTO_VERSION_INTERVAL = 5 * 60 * 1000 // 5分钟
+  const lastAutoVersionRef = useRef<string>('') // 上次自动保存的内容 hash
+  
+  useEffect(() => {
+    if (!doc) return
+    
+    const autoSaveVersion = () => {
+      const currentBlocks = editor.document as Block[]
+      const contentStr = JSON.stringify(currentBlocks)
+      
+      // 计算简单的 hash 来判断内容是否有变化
+      let hash = 0
+      for (let i = 0; i < contentStr.length; i++) {
+        const char = contentStr.charCodeAt(i)
+        hash = ((hash << 5) - hash) + char
+        hash = hash & hash
+      }
+      const contentHash = hash.toString()
+      
+      // 如果内容没有变化，跳过
+      if (contentHash === lastAutoVersionRef.current) return
+      lastAutoVersionRef.current = contentHash
+      
+      // 如果内容为空或太少，跳过
+      const wordCount = calculateWordCount(currentBlocks)
+      if (wordCount < 50) return
+      
+      const now = new Date()
+      const version: DocumentVersion = {
+        id: `version-${Date.now()}`,
+        documentId: doc.id,
+        title: `自动保存 ${now.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })} ${now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`,
+        content: currentBlocks,
+        articleTitle,
+        articleAuthors,
+        articleAbstract,
+        articleKeywords,
+        articleDate,
+        isAuto: true,
+        wordCount,
+        createdAt: now.toISOString(),
+      }
+      saveDocumentVersion(version)
+    }
+    
+    const intervalId = setInterval(autoSaveVersion, AUTO_VERSION_INTERVAL)
+    
+    return () => clearInterval(intervalId)
+  }, [doc, editor, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])
+
   // 作者管理
   const handleAddAuthor = useCallback(() => {
     setEditingAuthor(null)
@@ -955,6 +1077,19 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               )}
             </>
           )}
+
+          <Divider orientation="vertical" style={{ height: 20 }} />
+          <VersionHistoryPanel
+            documentId={doc.id}
+            currentContent={blocks}
+            articleTitle={articleTitle}
+            articleAuthors={articleAuthors}
+            articleAbstract={articleAbstract}
+            articleKeywords={articleKeywords}
+            articleDate={articleDate}
+            onRestoreVersion={handleRestoreVersion}
+            onSaveVersion={handleSaveVersion}
+          />
 
           <div style={{ flex: 1 }} />
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>

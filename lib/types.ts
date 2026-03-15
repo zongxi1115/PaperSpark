@@ -20,6 +20,22 @@ export interface AppDocument {
   articleDate?: string // 文章日期
 }
 
+// 文档版本快照类型
+export interface DocumentVersion {
+  id: string
+  documentId: string
+  title: string // 版本名称（自动生成或用户自定义）
+  content: unknown[] // BlockNote 文档内容快照
+  articleTitle?: string
+  articleAuthors?: ArticleAuthor[]
+  articleAbstract?: string
+  articleKeywords?: string[]
+  articleDate?: string
+  isAuto?: boolean // 是否为自动保存的版本
+  wordCount?: number // 字数统计
+  createdAt: string
+}
+
 export interface ModelConfig {
   baseUrl: string
   apiKey: string

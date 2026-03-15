@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   ReactFlow,
@@ -13,6 +13,8 @@ import {
   useEdgesState,
   MarkerType,
   Position,
+  useReactFlow,
+  ReactFlowProvider,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { Button, Spinner, addToast } from '@heroui/react'
@@ -37,8 +39,124 @@ const nodeLabels: Record<KnowledgeNodeType, string> = {
   keyword: '关键词',
 }
 
-export default function KnowledgeGraphPage() {
+/**
+ * 智能布局算法：按节点类型分区排列
+ * - 论文：中心位置
+ * - 作者：右侧弧形区域
+ * - 方法：左侧弧形区域
+ * - 概念：上方弧形区域
+ * - 关键词/数据集：下方弧形区域
+ */
+function calculateNodePositions(nodes: KnowledgeGraphNode[]): Map<string, { x: number; y: number }> {
+  const positions = new Map<string, { x: number; y: number }>()
+  const centerX = 600
+  const centerY = 400
+
+  // 按类型分组
+  const nodesByType: Record<KnowledgeNodeType, KnowledgeGraphNode[]> = {
+    paper: [],
+    concept: [],
+    author: [],
+    method: [],
+    dataset: [],
+    keyword: [],
+  }
+
+  nodes.forEach(node => {
+    nodesByType[node.type].push(node)
+  })
+
+  // 论文节点：中心位置，多个论文时水平排列
+  const papers = nodesByType.paper
+  papers.forEach((node, index) => {
+    const offsetX = (index - (papers.length - 1) / 2) * 200
+    positions.set(node.id, {
+      x: centerX + offsetX,
+      y: centerY,
+    })
+  })
+
+  // 作者节点：右侧弧形分布 (角度范围: -60° 到 60°，即右侧扇形)
+  const authors = nodesByType.author
+  const authorRadius = 350
+  authors.forEach((node, index) => {
+    const angleRange = Math.PI / 3 // 60度范围
+    const startAngle = -angleRange / 2 - Math.PI / 2 // 从 -30° 开始
+    const angle = authors.length > 1
+      ? startAngle + (index / (authors.length - 1)) * angleRange
+      : -Math.PI / 2
+    positions.set(node.id, {
+      x: centerX + Math.cos(angle) * authorRadius,
+      y: centerY + Math.sin(angle) * authorRadius,
+    })
+  })
+
+  // 方法节点：左侧弧形分布
+  const methods = nodesByType.method
+  const methodRadius = 350
+  methods.forEach((node, index) => {
+    const angleRange = Math.PI / 3
+    const startAngle = Math.PI / 2 - angleRange / 2 // 从 60° 开始
+    const angle = methods.length > 1
+      ? startAngle + (index / (methods.length - 1)) * angleRange
+      : Math.PI / 2
+    positions.set(node.id, {
+      x: centerX + Math.cos(angle) * methodRadius,
+      y: centerY + Math.sin(angle) * methodRadius,
+    })
+  })
+
+  // 概念节点：上方弧形分布
+  const concepts = nodesByType.concept
+  const conceptRadius = 320
+  concepts.forEach((node, index) => {
+    const angleRange = Math.PI * 0.6 // 108度范围
+    const startAngle = -Math.PI - angleRange / 2 // 从左侧开始
+    const angle = concepts.length > 1
+      ? startAngle + (index / (concepts.length - 1)) * angleRange
+      : -Math.PI / 2 * 3 // 正上方
+    positions.set(node.id, {
+      x: centerX + Math.cos(angle) * conceptRadius,
+      y: centerY + Math.sin(angle) * conceptRadius,
+    })
+  })
+
+  // 关键词节点：下方弧形分布
+  const keywords = nodesByType.keyword
+  const keywordRadius = 380
+  keywords.forEach((node, index) => {
+    const angleRange = Math.PI * 0.5
+    const startAngle = -angleRange / 2
+    const angle = keywords.length > 1
+      ? startAngle + (index / (keywords.length - 1)) * angleRange
+      : Math.PI / 2 // 正下方
+    positions.set(node.id, {
+      x: centerX + Math.cos(angle) * keywordRadius,
+      y: centerY + Math.sin(angle) * keywordRadius,
+    })
+  })
+
+  // 数据集节点：右下角区域
+  const datasets = nodesByType.dataset
+  const datasetRadius = 300
+  datasets.forEach((node, index) => {
+    const angleRange = Math.PI / 4
+    const startAngle = Math.PI / 6
+    const angle = datasets.length > 1
+      ? startAngle + (index / (datasets.length - 1)) * angleRange
+      : Math.PI / 4
+    positions.set(node.id, {
+      x: centerX + Math.cos(angle) * datasetRadius,
+      y: centerY + Math.sin(angle) * datasetRadius,
+    })
+  })
+
+  return positions
+}
+
+function KnowledgeGraphContent() {
   const router = useRouter()
+  const { fitView } = useReactFlow()
   const [nodes, setNodes, onNodesChange] = useNodesState([])
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [loading, setLoading] = useState(true)
@@ -59,64 +177,112 @@ export default function KnowledgeGraphPage() {
     return
       }
 
+      // 使用智能布局算法计算节点位置
+      const nodePositions = calculateNodePositions(graph.nodes)
+
       // 转换节点为 ReactFlow 格式
-      const flowNodes: Node[] = graph.nodes.map((node: KnowledgeGraphNode, index: number) => {
-        const angle = (index / graph.nodes.length) * 2 * Math.PI
-        const radius = 300 + node.weight * 200
+      const flowNodes: Node[] = graph.nodes.map((node: KnowledgeGraphNode) => {
+        const calculatedPosition = nodePositions.get(node.id) || { x: 600, y: 400 }
+        
+        // 根据节点类型设置不同的尺寸
+        const nodeSizes: Record<KnowledgeNodeType, { width: number; height: number }> = {
+          paper: { width: 180, height: 70 },
+          author: { width: 120, height: 50 },
+          concept: { width: 130, height: 55 },
+          method: { width: 130, height: 55 },
+          dataset: { width: 120, height: 50 },
+          keyword: { width: 100, height: 45 },
+        }
+        const size = nodeSizes[node.type]
 
         return {
           id: node.id,
           type: 'default',
-          position: node.position || {
-          x: 400 + Math.cos(angle) * radius,
-            y: 300 + Math.sin(angle) * radius,
-          },
+          position: node.position || calculatedPosition,
           data: {
             label: (
-              <div style={{ textAlign: 'center' }}>
-           <div style={{ fontSize: 11, fontWeight: 600 }}>{node.label}</div>
-       <div style={{ fontSize: 9, color: '#666', marginTop: 2 }}>
+              <div style={{ textAlign: 'center', padding: '4px 0' }}>
+                <div style={{ 
+                  fontSize: node.type === 'paper' ? 12 : 11, 
+                  fontWeight: 600,
+                  maxWidth: size.width - 20,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {node.label}
+                </div>
+                <div style={{ 
+                  fontSize: 9, 
+                  color: 'rgba(255,255,255,0.8)', 
+                  marginTop: 2 
+                }}>
                   {nodeLabels[node.type]}
                 </div>
-          </div>
+              </div>
             ),
           },
-        style: {
+          style: {
             background: nodeColors[node.type],
-          color: 'white',
-            border: '2px solid white',
-            borderRadius: 8,
+            color: 'white',
+            border: `2px solid ${nodeColors[node.type]}`,
+            boxShadow: `0 4px 12px ${nodeColors[node.type]}40`,
+            borderRadius: node.type === 'paper' ? 12 : 8,
             padding: 10,
             fontSize: 12,
-            width: 120 + node.weight * 80,
-            height: 60 + node.weight * 40,
+            width: size.width,
+            height: size.height,
           },
-       sourcePosition: Position.Right,
-        targetPosition: Position.Left,
+          sourcePosition: Position.Right,
+          targetPosition: Position.Left,
         }
       })
 
+      // 关系类型对应的颜色
+      const edgeColors: Record<string, string> = {
+        authored_by: '#f59e0b',       // 作者关系 - 橙色
+        contains_concept: '#10b981',  // 概念关系 - 绿色
+        applies_method: '#8b5cf6',    // 方法关系 - 紫色
+        uses_dataset: '#ec4899',      // 数据集关系 - 粉色
+        cites: '#3b82f6',             // 引用关系 - 蓝色
+        related_to: '#6b7280',        // 相关关系 - 灰色
+      }
+
       // 转换边为 ReactFlow 格式
-      const flowEdges: Edge[] = graph.edges.map((edge: KnowledgeGraphEdge) => ({
-        id: edge.id,
-      source: edge.sourceId,
-        target: edge.targetId,
-        label: edge.label,
-        type: 'smoothstep',
-        animated: edge.strength > 0.7,
-        style: {
-          stroke: '#94a3b8',
-          strokeWidth: 1 + edge.strength * 2,
-        },
-        labelStyle: {
-        fontSize: 10,
-          fill: '#64748b',
-        },
-        markerEnd: {
-          type: MarkerType.ArrowClosed,
-          color: '#94a3b8',
-        },
-      }))
+      const flowEdges: Edge[] = graph.edges.map((edge: KnowledgeGraphEdge) => {
+        const edgeColor = edgeColors[edge.type] || '#94a3b8'
+        
+        return {
+          id: edge.id,
+          source: edge.sourceId,
+          target: edge.targetId,
+          label: edge.label,
+          type: 'bezier',
+          animated: edge.strength > 0.7,
+          style: {
+            stroke: edgeColor,
+            strokeWidth: 1.5 + edge.strength * 1.5,
+            opacity: 0.8,
+          },
+          labelStyle: {
+            fontSize: 10,
+            fill: edgeColor,
+            fontWeight: 500,
+          },
+          labelBgStyle: {
+            fill: 'var(--bg-primary)',
+            fillOpacity: 0.9,
+          },
+          labelBgPadding: [4, 6] as [number, number],
+          labelBgBorderRadius: 4,
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            color: edgeColor,
+            width: 15,
+            height: 15,
+          },
+        }
+      })
 
       setNodes(flowNodes)
       setEdges(flowEdges)
@@ -139,6 +305,31 @@ export default function KnowledgeGraphPage() {
       router.push(`/immersive/${graphNode.knowledgeItemId}`)
     }
   }, [router])
+
+  // 重新布局：清除节点位置缓存，重新计算布局
+  const handleRelayout = useCallback(() => {
+    const graph = getKnowledgeGraph()
+    if (!graph || graph.nodes.length === 0) return
+
+    // 清除所有节点的 position 属性
+    graph.nodes.forEach(node => {
+      delete node.position
+    })
+
+    // 重新计算位置
+    const nodePositions = calculateNodePositions(graph.nodes)
+
+    // 更新节点位置
+    setNodes(nodes => nodes.map(node => {
+      const newPosition = nodePositions.get(node.id)
+      return newPosition ? { ...node, position: newPosition } : node
+    }))
+
+    // 延迟调用 fitView 确保节点位置已更新
+    setTimeout(() => {
+      fitView({ padding: 0.2, duration: 300 })
+    }, 50)
+  }, [setNodes, fitView])
 
   if (loading) {
     return (
@@ -188,6 +379,9 @@ export default function KnowledgeGraphPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
+          <Button size="sm" variant="flat" onPress={handleRelayout}>
+            重新布局
+          </Button>
           <Button size="sm" variant="flat" onPress={loadGraph}>
             刷新
           </Button>
@@ -232,20 +426,37 @@ export default function KnowledgeGraphPage() {
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
         fitView
+        fitViewOptions={{ padding: 0.2, duration: 200 }}
         attributionPosition="bottom-right"
+        minZoom={0.2}
+        maxZoom={2}
+        defaultEdgeOptions={{
+          type: 'smoothstep',
+        }}
       >
-        <Background />
-      <Controls />
+        <Background gap={16} size={1} />
+        <Controls showInteractive={false} />
         <MiniMap
           nodeColor={(node) => {
-         const graphNode = getKnowledgeGraph()?.nodes.find(n => n.id === node.id)
+            const graphNode = getKnowledgeGraph()?.nodes.find(n => n.id === node.id)
             return graphNode ? nodeColors[graphNode.type] : '#94a3b8'
           }}
           style={{
-         background: 'var(--bg-secondary)',
+            background: 'var(--bg-secondary)',
           }}
+          pannable
+          zoomable
         />
       </ReactFlow>
     </div>
+  )
+}
+
+// 包装 ReactFlowProvider 以支持 useReactFlow hook
+export default function KnowledgeGraphPage() {
+  return (
+    <ReactFlowProvider>
+      <KnowledgeGraphContent />
+    </ReactFlowProvider>
   )
 }

@@ -95,8 +95,15 @@ function extractHeadings(blocks: Block[]): { id: string; level: number; text: st
     .filter(h => h.text.trim())
 }
 
-// 将 blocks 转换为纯文本（按段落）
-function blocksToLines(blocks: Block[]): string[] {
+// Block 结构
+interface BlockData {
+  type: string
+  level?: number
+  text: string
+}
+
+// 将 blocks 转换为结构化数据
+function blocksToData(blocks: Block[]): BlockData[] {
   return blocks.map(b => {
     const block = b as { type: string; props?: { level?: number }; content?: { type: string; text: string }[] }
     const text = block.content
@@ -104,27 +111,56 @@ function blocksToLines(blocks: Block[]): string[] {
       .map(c => c.text)
       .join('') ?? ''
     
-    if (block.type === 'heading') {
-      const level = block.props?.level ?? 1
-      return `${'#'.repeat(level)} ${text}`
+    return {
+      type: block.type,
+      level: block.props?.level,
+      text,
     }
-    return text
-  }).filter(t => t.trim())
+  }).filter(b => b.text.trim())
 }
 
-// LCS diff 算法
-function diffLines(oldLines: string[], newLines: string[]): { type: 'same' | 'added' | 'removed'; text: string }[] {
-  if (oldLines.length === 0 && newLines.length === 0) return []
-  if (oldLines.length === 0) return newLines.map(text => ({ type: 'added' as const, text }))
-  if (newLines.length === 0) return oldLines.map(text => ({ type: 'removed' as const, text }))
+// 字符级 LCS diff
+function diffChars(oldStr: string, newStr: string): { type: 'same' | 'added' | 'removed'; text: string }[] {
+  if (!oldStr && !newStr) return []
+  if (!oldStr) return [{ type: 'added', text: newStr }]
+  if (!newStr) return [{ type: 'removed', text: oldStr }]
   
-  const m = oldLines.length
-  const n = newLines.length
+  const oldChars = [...oldStr]
+  const newChars = [...newStr]
+  
+  const m = oldChars.length
+  const n = newChars.length
+  
+  // 优化：如果字符串太长，限制 diff 范围
+  if (m > 5000 || n > 5000) {
+    if (oldStr === newStr) return [{ type: 'same', text: oldStr }]
+    // 对于长字符串，简单的开头/结尾匹配
+    const commonPrefix = commonPrefixLength(oldStr, newStr)
+    const commonSuffix = commonSuffixLength(oldStr.slice(commonPrefix), newStr.slice(commonPrefix))
+    
+    const result: { type: 'same' | 'added' | 'removed'; text: string }[] = []
+    if (commonPrefix > 0) {
+      result.push({ type: 'same', text: oldStr.slice(0, commonPrefix) })
+    }
+    
+    const oldMiddle = oldStr.slice(commonPrefix, oldStr.length - commonSuffix)
+    const newMiddle = newStr.slice(commonPrefix, newStr.length - commonSuffix)
+    
+    if (oldMiddle) result.push({ type: 'removed', text: oldMiddle })
+    if (newMiddle) result.push({ type: 'added', text: newMiddle })
+    
+    if (commonSuffix > 0) {
+      result.push({ type: 'same', text: oldStr.slice(oldStr.length - commonSuffix) })
+    }
+    
+    return result
+  }
+  
   const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0))
   
   for (let i = 1; i <= m; i++) {
     for (let j = 1; j <= n; j++) {
-      if (oldLines[i - 1] === newLines[j - 1]) {
+      if (oldChars[i - 1] === newChars[j - 1]) {
         dp[i][j] = dp[i - 1][j - 1] + 1
       } else {
         dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
@@ -136,16 +172,118 @@ function diffLines(oldLines: string[], newLines: string[]): { type: 'same' | 'ad
   let i = m, j = n
   
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      result.unshift({ type: 'same', text: oldLines[i - 1] })
+    if (i > 0 && j > 0 && oldChars[i - 1] === newChars[j - 1]) {
+      result.unshift({ type: 'same', text: oldChars[i - 1] })
       i--
       j--
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      result.unshift({ type: 'added', text: newLines[j - 1] })
+      result.unshift({ type: 'added', text: newChars[j - 1] })
       j--
     } else if (i > 0) {
-      result.unshift({ type: 'removed', text: oldLines[i - 1] })
+      result.unshift({ type: 'removed', text: oldChars[i - 1] })
       i--
+    }
+  }
+  
+  // 合并相邻的同类型片段
+  return mergeDiffResult(result)
+}
+
+function commonPrefixLength(a: string, b: string): number {
+  let i = 0
+  while (i < a.length && i < b.length && a[i] === b[i]) i++
+  return i
+}
+
+function commonSuffixLength(a: string, b: string): number {
+  let i = 0
+  while (i < a.length && i < b.length && a[a.length - 1 - i] === b[b.length - 1 - i]) i++
+  return i
+}
+
+function mergeDiffResult(diff: { type: 'same' | 'added' | 'removed'; text: string }[]): { type: 'same' | 'added' | 'removed'; text: string }[] {
+  if (diff.length === 0) return []
+  
+  const result: { type: 'same' | 'added' | 'removed'; text: string }[] = [diff[0]]
+  
+  for (let i = 1; i < diff.length; i++) {
+    const last = result[result.length - 1]
+    if (last.type === diff[i].type) {
+      last.text += diff[i].text
+    } else {
+      result.push(diff[i])
+    }
+  }
+  
+  return result
+}
+
+// 行级 LCS diff
+function diffLines(oldLines: BlockData[], newLines: BlockData[]): { 
+  type: 'same' | 'added' | 'removed'
+  oldLine?: BlockData
+  newLine?: BlockData
+  charDiff?: { type: 'same' | 'added' | 'removed'; text: string }[]
+}[] {
+  if (oldLines.length === 0 && newLines.length === 0) return []
+  if (oldLines.length === 0) return newLines.map(line => ({ type: 'added' as const, newLine: line }))
+  if (newLines.length === 0) return oldLines.map(line => ({ type: 'removed' as const, oldLine: line }))
+  
+  const m = oldLines.length
+  const n = newLines.length
+  const dp: number[][] = Array(m + 1).fill(null).map(() => Array(n + 1).fill(0))
+  
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      if (oldLines[i - 1].text === newLines[j - 1].text && oldLines[i - 1].type === newLines[j - 1].type) {
+        dp[i][j] = dp[i - 1][j - 1] + 1
+      } else {
+        dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1])
+      }
+    }
+  }
+  
+  const result: { 
+    type: 'same' | 'added' | 'removed'
+    oldLine?: BlockData
+    newLine?: BlockData
+    charDiff?: { type: 'same' | 'added' | 'removed'; text: string }[]
+  }[] = []
+  let i = m, j = n
+  
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && oldLines[i - 1].text === newLines[j - 1].text && oldLines[i - 1].type === newLines[j - 1].type) {
+      result.unshift({ type: 'same', oldLine: oldLines[i - 1], newLine: newLines[j - 1] })
+      i--
+      j--
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      result.unshift({ type: 'added', newLine: newLines[j - 1] })
+      j--
+    } else if (i > 0) {
+      result.unshift({ type: 'removed', oldLine: oldLines[i - 1] })
+      i--
+    }
+  }
+  
+  // 对修改的行进行字符级 diff
+  // 找到相邻的 added/removed，可能是修改
+  for (let k = 0; k < result.length - 1; k++) {
+    if (result[k].type === 'removed' && result[k + 1].type === 'added') {
+      const oldLine = result[k].oldLine!
+      const newLine = result[k + 1].newLine!
+      
+      // 如果类型相同，可能是修改
+      if (oldLine.type === newLine.type) {
+        const charDiff = diffChars(oldLine.text, newLine.text)
+        // 如果有一定相似度，标记为修改
+        const sameChars = charDiff.filter(d => d.type === 'same').reduce((sum, d) => sum + d.text.length, 0)
+        const totalChars = Math.max(oldLine.text.length, newLine.text.length)
+        
+        if (totalChars > 0 && sameChars / totalChars > 0.3) {
+          result[k] = { type: 'removed', oldLine, newLine, charDiff }
+          result[k + 1] = { type: 'added', oldLine, newLine, charDiff }
+        }
+      }
     }
   }
   
@@ -170,7 +308,6 @@ export function VersionHistoryPanel({
   const loadVersions = useCallback(() => {
     const loaded = getDocumentVersions(documentId)
     setVersions(loaded)
-    // 默认选中第一个
     if (loaded.length > 0 && !selectedVersion) {
       setSelectedVersion(loaded[0])
     }
@@ -220,9 +357,9 @@ export function VersionHistoryPanel({
   // 计算正文 diff
   const contentDiff = useMemo(() => {
     if (!selectedVersion) return []
-    const versionLines = blocksToLines(selectedVersion.content as Block[])
-    const currentLines = blocksToLines(currentContent)
-    return diffLines(versionLines, currentLines)
+    const versionData = blocksToData(selectedVersion.content as Block[])
+    const currentData = blocksToData(currentContent)
+    return diffLines(versionData, currentData)
   }, [selectedVersion, currentContent])
 
   // 计算大纲 diff
@@ -231,21 +368,92 @@ export function VersionHistoryPanel({
     const versionHeadings = extractHeadings(selectedVersion.content as Block[])
     const currentHeadings = extractHeadings(currentContent)
     return diffLines(
-      versionHeadings.map(h => `${'#'.repeat(h.level)} ${h.text}`),
-      currentHeadings.map(h => `${'#'.repeat(h.level)} ${h.text}`)
+      versionHeadings.map(h => ({ type: 'heading', level: h.level, text: h.text })),
+      currentHeadings.map(h => ({ type: 'heading', level: h.level, text: h.text }))
     )
   }, [selectedVersion, currentContent])
 
   // 统计 diff 变化
   const diffStats = useMemo(() => {
     const diff = diffMode === 'content' ? contentDiff : outlineDiff
-    let added = 0, removed = 0
+    let added = 0, removed = 0, charsAdded = 0, charsRemoved = 0
     diff.forEach(d => {
-      if (d.type === 'added') added++
-      if (d.type === 'removed') removed++
+      if (d.type === 'added') {
+        added++
+        charsAdded += d.newLine?.text.length || 0
+      }
+      if (d.type === 'removed') {
+        removed++
+        charsRemoved += d.oldLine?.text.length || 0
+      }
     })
-    return { added, removed }
+    return { added, removed, charsAdded, charsRemoved }
   }, [contentDiff, outlineDiff, diffMode])
+
+  // 渲染单个 block 的 Markdown 样式
+  const renderBlockStyle = (block: BlockData, diffType?: 'added' | 'removed' | 'same') => {
+    const isHeading = block.type === 'heading'
+    const level = block.level || 1
+    
+    const baseStyle: React.CSSProperties = {
+      lineHeight: 1.8,
+      marginBottom: isHeading ? 8 : 4,
+      color: 'var(--text-primary)',
+    }
+    
+    if (isHeading) {
+      return {
+        ...baseStyle,
+        fontSize: level === 1 ? 24 : level === 2 ? 20 : 16,
+        fontWeight: 600,
+        marginTop: level === 1 ? 20 : 16,
+        paddingBottom: 4,
+        borderBottom: level === 1 || level === 2 ? '1px solid var(--border-color)' : 'none',
+      }
+    }
+    
+    return {
+      ...baseStyle,
+      fontSize: 15,
+      fontWeight: 400,
+    }
+  }
+
+  // 渲染字符级 diff
+  const renderCharDiff = (charDiff: { type: 'same' | 'added' | 'removed'; text: string }[]) => {
+    return charDiff.map((d, idx) => {
+      if (d.type === 'same') {
+        return <span key={idx}>{d.text}</span>
+      } else if (d.type === 'added') {
+        return (
+          <span 
+            key={idx} 
+            style={{ 
+              background: 'rgba(34, 197, 94, 0.3)', 
+              color: '#166534',
+              borderRadius: 2,
+            }}
+          >
+            {d.text}
+          </span>
+        )
+      } else {
+        return (
+          <span 
+            key={idx} 
+            style={{ 
+              background: 'rgba(239, 68, 68, 0.3)', 
+              color: '#991b1b',
+              textDecoration: 'line-through',
+              borderRadius: 2,
+            }}
+          >
+            {d.text}
+          </span>
+        )
+      }
+    })
+  }
 
   // 渲染 diff
   const renderDiff = () => {
@@ -255,65 +463,60 @@ export function VersionHistoryPanel({
       return <div style={{ color: 'var(--text-muted)', textAlign: 'center', padding: 40 }}>无差异</div>
     }
     
-    return diff.map((d, index) => {
-      const isHeading = d.text.startsWith('#')
-      
-      if (d.type === 'same') {
-        return (
-          <div 
-            key={index}
-            style={{ 
-              padding: '3px 16px',
-              color: 'var(--text-secondary)',
-              fontWeight: isHeading ? 500 : 400,
-              lineHeight: 1.6,
-              fontSize: 13,
-              fontFamily: 'Consolas, Monaco, monospace',
-            }}
-          >
-            <span style={{ color: 'var(--text-muted)', marginRight: 12, userSelect: 'none' }}> </span>
-            {d.text}
-          </div>
-        )
-      } else if (d.type === 'added') {
-        return (
-          <div 
-            key={index}
-            style={{ 
-              padding: '3px 16px',
-              background: 'rgba(34, 197, 94, 0.12)',
-              borderLeft: '3px solid #22c55e',
-              color: 'var(--text-primary)',
-              lineHeight: 1.6,
-              fontSize: 13,
-              fontFamily: 'Consolas, Monaco, monospace',
-            }}
-          >
-            <span style={{ color: '#22c55e', marginRight: 8, fontWeight: 600 }}>+</span>
-            {d.text}
-          </div>
-        )
-      } else {
-        return (
-          <div 
-            key={index}
-            style={{ 
-              padding: '3px 16px',
-              background: 'rgba(239, 68, 68, 0.12)',
-              borderLeft: '3px solid #ef4444',
-              color: 'var(--text-muted)',
-              textDecoration: 'line-through',
-              lineHeight: 1.6,
-              fontSize: 13,
-              fontFamily: 'Consolas, Monaco, monospace',
-            }}
-          >
-            <span style={{ color: '#ef4444', marginRight: 8, fontWeight: 600, textDecoration: 'none' }}>−</span>
-            {d.text}
-          </div>
-        )
-      }
-    })
+    return (
+      <div style={{ padding: '20px 32px', maxWidth: 800, margin: '0 auto' }}>
+        {diff.map((d, index) => {
+          if (d.type === 'same') {
+            const block = d.newLine!
+            return (
+              <div key={index} style={renderBlockStyle(block, 'same')}>
+                {block.text}
+              </div>
+            )
+          } else if (d.type === 'added') {
+            const block = d.newLine!
+            const hasCharDiff = d.charDiff && d.oldLine
+            
+            return (
+              <div 
+                key={index} 
+                style={{ 
+                  ...renderBlockStyle(block, 'added'),
+                  background: 'rgba(34, 197, 94, 0.08)',
+                  borderLeft: '3px solid #22c55e',
+                  marginLeft: -16,
+                  paddingLeft: 13,
+                  borderRadius: '0 4px 4px 0',
+                }}
+              >
+                {hasCharDiff ? renderCharDiff(d.charDiff!) : block.text}
+              </div>
+            )
+          } else {
+            const block = d.oldLine!
+            
+            return (
+              <div 
+                key={index} 
+                style={{ 
+                  ...renderBlockStyle(block, 'removed'),
+                  background: 'rgba(239, 68, 68, 0.08)',
+                  borderLeft: '3px solid #ef4444',
+                  marginLeft: -16,
+                  paddingLeft: 13,
+                  borderRadius: '0 4px 4px 0',
+                  opacity: 0.7,
+                }}
+              >
+                <span style={{ textDecoration: 'line-through', color: 'var(--text-muted)' }}>
+                  {block.text}
+                </span>
+              </div>
+            )
+          }
+        })}
+      </div>
+    )
   }
 
   return (
@@ -441,16 +644,13 @@ export function VersionHistoryPanel({
                           }}>
                             {version.title}
                           </div>
-                          <div style={{ display: 'flex', gap: 2, marginLeft: 8 }}>
+                          <div style={{ display: 'flex', gap: 2, marginLeft: 8 }} onClick={(e) => e.stopPropagation()}>
                             <Button
                               size="sm"
                               variant="light"
                               color="danger"
                               isIconOnly
-                              onPress={(e) => {
-                                e.stopPropagation()
-                                handleDeleteVersion(version.id)
-                              }}
+                              onPress={() => handleDeleteVersion(version.id)}
                               style={{ minWidth: 24, height: 24 }}
                             >
                               <TrashIcon />
@@ -520,12 +720,12 @@ export function VersionHistoryPanel({
                     </div>
 
                     {/* 变化统计 */}
-                    <div style={{ display: 'flex', gap: 8, fontSize: 12, marginRight: 12 }}>
+                    <div style={{ display: 'flex', gap: 12, fontSize: 12, marginRight: 12 }}>
                       {diffStats.added > 0 && (
-                        <span style={{ color: '#22c55e' }}>+{diffStats.added}</span>
+                        <span style={{ color: '#22c55e' }}>+{diffStats.added} 行 ({diffStats.charsAdded} 字)</span>
                       )}
                       {diffStats.removed > 0 && (
-                        <span style={{ color: '#ef4444' }}>−{diffStats.removed}</span>
+                        <span style={{ color: '#ef4444' }}>−{diffStats.removed} 行 ({diffStats.charsRemoved} 字)</span>
                       )}
                       {diffStats.added === 0 && diffStats.removed === 0 && (
                         <span style={{ color: 'var(--text-muted)' }}>无变化</span>
@@ -573,7 +773,7 @@ export function VersionHistoryPanel({
                         marginRight: 4,
                         verticalAlign: 'middle',
                       }}></span>
-                      新增行
+                      新增
                     </span>
                     <span>
                       <span style={{ 
@@ -586,7 +786,32 @@ export function VersionHistoryPanel({
                         marginRight: 4,
                         verticalAlign: 'middle',
                       }}></span>
-                      删除行
+                      删除
+                    </span>
+                    <span>
+                      <span style={{ 
+                        display: 'inline-block',
+                        width: 14,
+                        height: 14,
+                        background: 'rgba(34, 197, 94, 0.3)',
+                        borderRadius: 2,
+                        marginRight: 4,
+                        verticalAlign: 'middle',
+                      }}></span>
+                      字符级新增
+                    </span>
+                    <span>
+                      <span style={{ 
+                        display: 'inline-block',
+                        width: 14,
+                        height: 14,
+                        background: 'rgba(239, 68, 68, 0.3)',
+                        textDecoration: 'line-through',
+                        borderRadius: 2,
+                        marginRight: 4,
+                        verticalAlign: 'middle',
+                      }}></span>
+                      字符级删除
                     </span>
                     <span style={{ color: 'var(--text-secondary)' }}>
                       对比：历史版本 → 当前版本

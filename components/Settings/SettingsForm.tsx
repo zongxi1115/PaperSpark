@@ -693,7 +693,6 @@ export function SettingsForm() {
   const featureSelectItems: FeatureSelectItem[] = [
     { label: '自动纠错', description: '停止输入 2.5 秒后，使用小参数模型自动检测并修复当前段落的错别字', settingKey: 'autoCorrect' },
     { label: '自动补全小片段', description: '输入时自动补全当前段落的小片段内容，提升输入效率', settingKey: 'autoComplete' },
-    { label: '三线表', description: '用于创建符合学术规范的三线表', settingKey: 'threeLineTable' },
   ]
 
   return (
@@ -873,6 +872,103 @@ export function SettingsForm() {
                 )
               })}
             </div>
+          </CardBody>
+        </Card>
+
+        {/* 标题字体大小 */}
+        <Card shadow="sm">
+          <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+            <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>标题字体大小</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              自定义编辑器中各级标题的字体大小
+            </p>
+          </CardHeader>
+          <Divider />
+          <CardBody style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 80, fontSize: 14, fontWeight: 500 }}>
+                <span style={{ fontSize: (settings.headingFontSizes?.h1 ?? 28), fontWeight: 600 }}>H1</span>
+              </div>
+              <Input
+                type="number"
+                min={18}
+                max={48}
+                value={String(settings.headingFontSizes?.h1 ?? 28)}
+                onValueChange={v => {
+                  const num = parseInt(v, 10)
+                  if (!isNaN(num) && num >= 18 && num <= 48) {
+                    setSettings(s => ({
+                      ...s,
+                      headingFontSizes: { ...s.headingFontSizes, h1: num, h2: s.headingFontSizes?.h2 ?? 22, h3: s.headingFontSizes?.h3 ?? 18 },
+                    }))
+                  }
+                }}
+                variant="bordered"
+                size="sm"
+                style={{ width: 100 }}
+                endContent={<span style={{ fontSize: 12, color: 'var(--text-muted)' }}>px</span>}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 80, fontSize: 14, fontWeight: 500 }}>
+                <span style={{ fontSize: (settings.headingFontSizes?.h2 ?? 22), fontWeight: 600 }}>H2</span>
+              </div>
+              <Input
+                type="number"
+                min={14}
+                max={36}
+                value={String(settings.headingFontSizes?.h2 ?? 22)}
+                onValueChange={v => {
+                  const num = parseInt(v, 10)
+                  if (!isNaN(num) && num >= 14 && num <= 36) {
+                    setSettings(s => ({
+                      ...s,
+                      headingFontSizes: { ...s.headingFontSizes, h1: s.headingFontSizes?.h1 ?? 28, h2: num, h3: s.headingFontSizes?.h3 ?? 18 },
+                    }))
+                  }
+                }}
+                variant="bordered"
+                size="sm"
+                style={{ width: 100 }}
+                endContent={<span style={{ fontSize: 12, color: 'var(--text-muted)' }}>px</span>}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <div style={{ width: 80, fontSize: 14, fontWeight: 500 }}>
+                <span style={{ fontSize: (settings.headingFontSizes?.h3 ?? 18), fontWeight: 600 }}>H3</span>
+              </div>
+              <Input
+                type="number"
+                min={12}
+                max={28}
+                value={String(settings.headingFontSizes?.h3 ?? 18)}
+                onValueChange={v => {
+                  const num = parseInt(v, 10)
+                  if (!isNaN(num) && num >= 12 && num <= 28) {
+                    setSettings(s => ({
+                      ...s,
+                      headingFontSizes: { ...s.headingFontSizes, h1: s.headingFontSizes?.h1 ?? 28, h2: s.headingFontSizes?.h2 ?? 22, h3: num },
+                    }))
+                  }
+                }}
+                variant="bordered"
+                size="sm"
+                style={{ width: 100 }}
+                endContent={<span style={{ fontSize: 12, color: 'var(--text-muted)' }}>px</span>}
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="flat"
+              color="default"
+              onPress={() => setSettings(s => ({
+                ...s,
+                headingFontSizes: { h1: 28, h2: 22, h3: 18 },
+              }))}
+              style={{ alignSelf: 'flex-start' }}
+            >
+              恢复默认
+            </Button>
           </CardBody>
         </Card>
 

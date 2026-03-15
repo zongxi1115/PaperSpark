@@ -53,7 +53,7 @@ export interface AIModel {
  * autoComplete: 自动补全小片段，输入时自动补全当前段落的小片段内容，提升输入效率
  * threeLineTable: 三线表，用于创建符合学术规范的三线表
  */
-export const selectFeatures = ['autoCorrect', 'autoComplete', 'threeLineTable'] as const
+export const selectFeatures = ['autoCorrect', 'autoComplete'] as const
 export type FeatureSelectItem = {
   label: string
   description: string
@@ -87,6 +87,12 @@ export type AppSettings = {
   citationStyle?: string
   // 编辑器主题
   editorThemeId?: string
+  // 标题字体大小设置
+  headingFontSizes?: {
+    h1?: number // 1级标题字号
+    h2?: number // 2级标题字号
+    h3?: number // 3级标题字号
+  }
   // 嵌入模型配置（RAG 用）
   embeddingModel?: EmbeddingModelConfig
   // 重排序模型配置（RAG 用）
@@ -156,6 +162,12 @@ function getDefaultSettings(): AppSettings {
     },
     // 重排序模型默认配置（可选）
     rerankModel: undefined,
+    // 标题字体大小默认设置
+    headingFontSizes: {
+      h1: 28,
+      h2: 22,
+      h3: 18,
+    },
     ...selectFeatures.reduce((acc, key) => ({ ...acc, [key]: false }), {} as Record<typeof selectFeatures[number], boolean>),
   }
 }

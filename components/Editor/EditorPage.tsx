@@ -461,6 +461,36 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     }
   }, [activeThemeConfig.googleFontUrl])
 
+  // 动态注入标题字体大小样式
+  useEffect(() => {
+    const headingFontSizes = settings.headingFontSizes
+    if (!headingFontSizes) return
+
+    const styleId = 'heading-font-sizes-override'
+    let styleEl = document.getElementById(styleId) as HTMLStyleElement
+    if (!styleEl) {
+      styleEl = document.createElement('style')
+      styleEl.id = styleId
+      document.head.appendChild(styleEl)
+    }
+
+    styleEl.textContent = `
+      .bn-block-content[data-content-type="heading"][data-level="1"] {
+        font-size: ${headingFontSizes.h1}px !important;
+      }
+      .bn-block-content[data-content-type="heading"][data-level="2"] {
+        font-size: ${headingFontSizes.h2}px !important;
+      }
+      .bn-block-content[data-content-type="heading"][data-level="3"] {
+        font-size: ${headingFontSizes.h3}px !important;
+      }
+    `
+
+    return () => {
+      styleEl.remove()
+    }
+  }, [settings.headingFontSizes])
+
   useEffect(() => {
     const handleFocus = () => syncSettingsFromStorage()
     const handleVisibilityChange = () => {

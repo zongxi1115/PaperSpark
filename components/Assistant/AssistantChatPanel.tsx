@@ -650,13 +650,18 @@ export function AssistantChatPanel() {
       // 确保图片是服务器 URL
       const imageUrl = await uploadImageToServer(imageSource)
       
-      // 使用 BlockNote API 插入图片块
+      // 使用 BlockNote API 插入图片块（正确的 ImageBlock 结构）
       editor.insertBlocks([
         {
           type: 'image',
           props: {
-            src: imageUrl,
-            alt: 'AI 生成的图片',
+            backgroundColor: 'default',
+            textAlignment: 'center',
+            name: 'ai-generated-image.png',
+            url: imageUrl,
+            caption: 'AI 生成的图片',
+            showPreview: true,
+            previewWidth: undefined,
           },
         }
       ], editor.getTextCursorPosition().block, 'after')
@@ -685,15 +690,15 @@ export function AssistantChatPanel() {
         typeId: preferredTypeId,
         summary: '由 Python 代码生成的图片',
         content: [{
-          type: 'paragraph',
-          content: [
-            { type: 'text', text: '', styles: {} },
-          ],
-        }, {
           type: 'image',
           props: {
-            src: imageUrl,
-            alt: 'Python 生成的图片',
+            backgroundColor: 'default',
+            textAlignment: 'center',
+            name: 'ai-generated-image.png',
+            url: imageUrl,
+            caption: 'Python 生成的图片',
+            showPreview: true,
+            previewWidth: undefined,
           },
         }],
         tags: ['python', 'generated', 'image'],

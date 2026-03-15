@@ -92,6 +92,9 @@ export function AssistantChatPanel() {
   
   // Python 代码块运行状态: key = `${msgId}:${blockIdx}`
   const [codeBlockStates, setCodeBlockStates] = useState<Record<string, CodeBlockState>>({})
+  
+  // 图片预览状态
+  const [previewImage, setPreviewImage] = useState<string | null>(null)
 
   const { isOpen: isNoteModalOpen, onOpen: onNoteModalOpen, onClose: onNoteModalClose } = useDisclosure()
   
@@ -1543,13 +1546,31 @@ export function AssistantChatPanel() {
               >
                 {/* 角色标签 */}
                 <div style={{
-                  fontSize: 10,
-                  color: message.role === 'user' ? 'var(--accent-color)' : 'var(--text-muted)',
-                  fontWeight: 500,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
                 }}>
-                  {message.role === 'user' ? '你' : '助手'}
+                  <div style={{
+                    fontSize: 10,
+                    color: message.role === 'user' ? 'var(--accent-color)' : 'var(--text-muted)',
+                    fontWeight: 500,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.5px',
+                  }}>
+                    {message.role === 'user' ? '你' : '助手'}
+                  </div>
+                  {/* 助手加载动画 - 圆形旋转边框 */}
+                  {message.role === 'assistant' && idx === messages.length - 1 && isLoading && (
+                    <div style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: '50%',
+                      border: '2px solid transparent',
+                      borderTopColor: '#3b82f6',
+                      borderRightColor: '#3b82f6',
+                      animation: 'spin 0.8s linear infinite',
+                    }} />
+                  )}
                 </div>
                 
                 {/* 内容 */}
@@ -1822,17 +1843,28 @@ export function AssistantChatPanel() {
                                         background: 'var(--bg-primary)',
                                       }}>
                                         <div style={{ fontSize: 10, color: 'var(--text-muted)', marginBottom: 8 }}>
-                                          生成图片 ({blockState.result.images.length})
+                                          生成图片 ({blockState.result.images.length}) - 点击可放大预览
                                         </div>
                                         {blockState.result.images.map((img, imgIdx) => (
                                           <div key={imgIdx} style={{ marginBottom: 12 }}>
                                             <img 
                                               src={img} 
                                               alt={`输出图片 ${imgIdx + 1}`}
+                                              onClick={() => setPreviewImage(img)}
                                               style={{
                                                 maxWidth: '100%',
                                                 borderRadius: 4,
                                                 border: '1px solid var(--border-color)',
+                                                cursor: 'pointer',
+                                                transition: 'transform 0.2s, box-shadow 0.2s',
+                                              }}
+                                              onMouseEnter={(e) => {
+                                                e.currentTarget.style.transform = 'scale(1.02)'
+                                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 0, 0, 0.15)'
+                                              }}
+                                              onMouseLeave={(e) => {
+                                                e.currentTarget.style.transform = 'scale(1)'
+                                                e.currentTarget.style.boxShadow = 'none'
                                               }}
                                             />
                                             <div style={{ 
@@ -2464,25 +2496,76 @@ export function AssistantChatPanel() {
               gap: 4,
             }}>
               {isLoading ? (
-                <Button
-                  size="sm"
-                  color="danger"
-                  variant="flat"
-                  onPress={handleStop}
-                  style={{ minWidth: 'auto' }}
+                // 停止按钮 - 圆形带蓝色旋转边框
+                <button
+                  onClick={handleStop}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: 'var(--bg-secondary)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    position: 'relative',
+                    outline: '2px solid transparent',
+                    outlineOffset: '2px',
+                    animation: 'spin-border 1s linear infinite',
+                  }}
+                  title="停止生成"
                 >
-                  停止
-                </Button>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#ef4444' }}>
+                    <rect x="6" y="6" width="12" height="12" rx="2" />
+                  </svg>
+                  {/* 旋转边框层 */}
+                  <div style={{
+                    position: 'absolute',
+                    inset: -2,
+                    borderRadius: '50%',
+                    border: '2px solid transparent',
+                    borderTopColor: '#3b82f6',
+                    borderRightColor: '#3b82f6',
+                    pointerEvents: 'none',
+                    animation: 'spin 0.8s linear infinite',
+                  }} />
+                </button>
               ) : (
-                <Button
-                  size="sm"
-                  color="primary"
-                  onPress={handleSend}
-                  isDisabled={!inputValue.trim()}
-                  style={{ minWidth: 'auto' }}
+                // 发送按钮 - 圆形纸飞机图标
+                <button
+                  onClick={handleSend}
+                  disabled={!inputValue.trim()}
+                  style={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: '50%',
+                    border: 'none',
+                    background: inputValue.trim() ? 'var(--accent-color)' : 'var(--bg-secondary)',
+                    cursor: inputValue.trim() ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    transition: 'all 0.2s ease',
+                    opacity: inputValue.trim() ? 1 : 0.5,
+                  }}
+                  title="发送消息"
+                  onMouseEnter={(e) => {
+                    if (inputValue.trim()) {
+                      e.currentTarget.style.transform = 'scale(1.05)'
+                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 153, 255, 0.3)'
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.transform = 'scale(1)'
+                    e.currentTarget.style.boxShadow = 'none'
+                  }}
                 >
-                  发送
-                </Button>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={inputValue.trim() ? 'white' : 'var(--text-muted)'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" fill={inputValue.trim() ? 'white' : 'none'} stroke={inputValue.trim() ? 'white' : 'var(--text-muted)'} />
+                  </svg>
+                </button>
               )}
             </div>
           </div>
@@ -2627,6 +2710,10 @@ export function AssistantChatPanel() {
             from { opacity: 0; transform: scale(0.9); }
             to { opacity: 1; transform: scale(1); }
           }
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
           .markdown-content h1, .markdown-content h2, .markdown-content h3, 
           .markdown-content h4, .markdown-content h5, .markdown-content h6 {
             margin: 12px 0 8px 0;
@@ -2713,6 +2800,66 @@ export function AssistantChatPanel() {
           </ModalFooter>
         </ModalContent>
       </Modal>
+
+      {/* 图片预览模态框 */}
+      {previewImage && (
+        <div
+          onClick={() => setPreviewImage(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.85)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            cursor: 'zoom-out',
+            animation: 'fadeIn 0.2s ease',
+          }}
+        >
+          <img
+            src={previewImage}
+            alt="预览图片"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              maxWidth: '90vw',
+              maxHeight: '90vh',
+              borderRadius: 8,
+              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.5)',
+              cursor: 'default',
+            }}
+          />
+          {/* 关闭按钮 */}
+          <button
+            onClick={() => setPreviewImage(null)}
+            style={{
+              position: 'absolute',
+              top: 20,
+              right: 20,
+              width: 40,
+              height: 40,
+              borderRadius: '50%',
+              border: 'none',
+              background: 'rgba(255, 255, 255, 0.1)',
+              color: 'white',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: 20,
+              transition: 'background 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'
+            }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
     </div>
   )
 }

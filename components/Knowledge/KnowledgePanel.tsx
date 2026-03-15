@@ -1,4 +1,5 @@
 'use client'
+// TODO: fetch下来的文件需要保存到本地，后续沉浸式阅读直接从本地读取，避免重复下载和分析
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import {
@@ -67,6 +68,63 @@ export function KnowledgePanel() {
   const { isOpen: isDeleteConfirmOpen, onOpen: onDeleteConfirmOpen, onClose: onDeleteConfirmClose } = useDisclosure()
   const [deleting, setDeleting] = useState(false)
   const [itemToDelete, setItemToDelete] = useState<KnowledgeItem | null>(null)
+
+  const getProxiedPdfUrl = useCallback((item: KnowledgeItem, options?: { download?: boolean }) => {
+    const remoteUrl = item.attachmentUrl || (item.sourceType === 'url' ? item.url : undefined)
+    if (!remoteUrl) return null
+
+    const rawFileName = item.attachmentFileName || item.fileName || item.title || 'document'
+    const normalized = rawFileName.trim() || 'document'
+    const fileName = normalized.toLowerCase().endsWith('.pdf') ? normalized : `${normalized}.pdf`
+
+    const params = new URLSearchParams({
+      url: remoteUrl,
+      filename: fileName,
+    })
+    if (options?.download) params.set('download', '1')
+    return `/api/pdf/proxy?${params.toString()}`
+  }, [])
+
+  const handleDownloadPdf = useCallback(async (item: KnowledgeItem) => {
+    try {
+      if (item.sourceType === 'upload' && item.sourceId) {
+        const { getStoredFile } = await import('@/lib/localFiles')
+        const record = await getStoredFile(item.sourceId)
+        if (!record?.blob) {
+          addToast({ title: '未找到本地 PDF 文件', color: 'warning' })
+          return
+        }
+
+        const url = URL.createObjectURL(record.blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = record.name || item.fileName || 'document.pdf'
+        a.rel = 'noopener noreferrer'
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+        setTimeout(() => URL.revokeObjectURL(url), 1000)
+        return
+      }
+
+      const proxyUrl = getProxiedPdfUrl(item, { download: true })
+      if (!proxyUrl) {
+        addToast({ title: '该条目没有可下载的 PDF', color: 'warning' })
+        return
+      }
+
+      const a = document.createElement('a')
+      a.href = proxyUrl
+      a.target = '_blank'
+      a.rel = 'noopener noreferrer'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+    } catch (error) {
+      console.error('Download PDF error:', error)
+      addToast({ title: '下载失败', color: 'danger' })
+    }
+  }, [getProxiedPdfUrl])
 
   // 加载知识库数据
   useEffect(() => {
@@ -314,7 +372,7 @@ export function KnowledgePanel() {
 
     setLoading(true)
     try {
-      let data: { content: string; fileName: string; fileType: string; fileSize?: number; url?: string }
+      let data: { fileName: string; fileType: NonNullable<KnowledgeItem['fileType']>; fileSize?: number; url?: string }
       let localFileId: string | undefined
 
       if (importTab === 'upload' && pendingFile) {
@@ -349,6 +407,9 @@ export function KnowledgePanel() {
         fileType: data.fileType,
         fileSize: data.fileSize,
         url: importTab === 'url' ? importUrl : undefined,
+        hasAttachment: importTab === 'url',
+        attachmentUrl: importTab === 'url' ? importUrl : undefined,
+        attachmentFileName: importTab === 'url' ? data.fileName : undefined,
         createdAt: now,
         updatedAt: now,
       }
@@ -557,13 +618,12 @@ export function KnowledgePanel() {
                 </DropdownTrigger>
                 <DropdownMenu aria-label="PDF操作">
                   {/* 有 PDF 附件时显示下载和精读 */}
-                  {(item.hasAttachment || item.sourceType === 'upload') && (
+                  {(item.sourceType === 'upload' || item.hasAttachment || Boolean(item.attachmentUrl) || (item.sourceType === 'url' && Boolean(item.url))) && (
                     <>
                       <DropdownItem
                         key="download"
                         startContent={<DownloadIcon />}
-                        href={item.attachmentUrl || '#'}
-                        target="_blank"
+                        onPress={() => handleDownloadPdf(item)}
                       >
                         下载 PDF
                       </DropdownItem>
@@ -679,12 +739,37 @@ export function KnowledgePanel() {
                 )}
 
                 {/* PDF 附件 */}
-                {selectedItem.hasAttachment && selectedItem.attachmentUrl && (
+                {(selectedItem.sourceType === 'upload' || Boolean(selectedItem.attachmentUrl) || (selectedItem.sourceType === 'url' && Boolean(selectedItem.url))) && (
                   <div>
                     <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 4 }}>PDF 附件</p>
-                    <a href={selectedItem.attachmentUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: 'var(--accent-color)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <PdfIcon /> {selectedItem.attachmentFileName || '查看 PDF'}
-                    </a>
+                    {selectedItem.sourceType === 'upload' ? (
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadPdf(selectedItem)}
+                        style={{
+                          fontSize: 13,
+                          color: 'var(--accent-color)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          background: 'transparent',
+                          border: 'none',
+                          padding: 0,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <PdfIcon /> {selectedItem.fileName || '下载 PDF'}
+                      </button>
+                    ) : (
+                      <a
+                        href={getProxiedPdfUrl(selectedItem) || '#'}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{ fontSize: 13, color: 'var(--accent-color)', display: 'flex', alignItems: 'center', gap: 4 }}
+                      >
+                        <PdfIcon /> {selectedItem.attachmentFileName || selectedItem.fileName || '查看 PDF'}
+                      </a>
+                    )}
                   </div>
                 )}
 

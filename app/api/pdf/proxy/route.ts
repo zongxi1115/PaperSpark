@@ -1,41 +1,77 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// 代理获取远程 PDF 文件，绕过 CORS 限制
+// 代理获取远程 PDF 文件，绕过 CORS 限制（不落盘、不做 base64）
 export async function GET(req: NextRequest) {
   const url = req.nextUrl.searchParams.get('url')
+  const download = req.nextUrl.searchParams.get('download') === '1'
+  const requestedFilename = req.nextUrl.searchParams.get('filename')
   
   if (!url) {
     return NextResponse.json({ error: '缺少 url 参数' }, { status: 400 })
   }
 
   try {
-    const response = await fetch(url, {
+    const target = new URL(url)
+    if (target.protocol !== 'http:' && target.protocol !== 'https:') {
+      return NextResponse.json({ error: '仅支持 http/https URL' }, { status: 400 })
+    }
+
+    // 基础 SSRF 防护：禁止显式本地地址（域名解析到内网的情况无法在此处可靠判断）
+    const hostname = target.hostname.toLowerCase()
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1') {
+      return NextResponse.json({ error: '不允许代理本地地址' }, { status: 400 })
+    }
+
+    const range = req.headers.get('range')
+
+    const response = await fetch(target.toString(), {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        Accept: 'application/pdf,application/octet-stream;q=0.9,*/*;q=0.8',
+        ...(range ? { Range: range } : {}),
       },
+      redirect: 'follow',
     })
 
-    if (!response.ok) {
+    if (!response.ok && response.status !== 206) {
       return NextResponse.json(
         { error: `获取 PDF 失败: ${response.statusText}` },
         { status: response.status }
       )
     }
 
-    const arrayBuffer = await response.arrayBuffer()
-    
-    // 转换为 base64
-    const uint8Array = new Uint8Array(arrayBuffer)
-    let binary = ''
-    for (let i = 0; i < uint8Array.length; i++) {
-      binary += String.fromCharCode(uint8Array[i])
-    }
-    const base64 = btoa(binary)
+    const headers = new Headers()
+    headers.set('Content-Type', response.headers.get('content-type') || 'application/pdf')
+    headers.set('Cache-Control', 'private, no-store')
 
-    return NextResponse.json({
-      base64,
-      contentType: response.headers.get('content-type') || 'application/pdf',
-      size: arrayBuffer.byteLength,
+    const passthroughHeaders = [
+      'content-length',
+      'content-range',
+      'accept-ranges',
+      'etag',
+      'last-modified',
+    ]
+
+    passthroughHeaders.forEach(key => {
+      const value = response.headers.get(key)
+      if (value) headers.set(key, value)
+    })
+
+    const safeFilename = (value: string) =>
+      value
+        .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120) || 'document.pdf'
+
+    if (requestedFilename) {
+      const disposition = download ? 'attachment' : 'inline'
+      headers.set('Content-Disposition', `${disposition}; filename="${safeFilename(requestedFilename)}"`)
+    }
+
+    return new NextResponse(response.body, {
+      status: response.status,
+      headers,
     })
   } catch (error) {
     console.error('PDF proxy error:', error)

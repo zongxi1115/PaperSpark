@@ -17,8 +17,8 @@ import {
   ReactFlowProvider,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { Button, Spinner, addToast } from '@heroui/react'
-import { getKnowledgeGraph, getGraphStats } from '@/lib/knowledgeGraph'
+import { Button, Spinner, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure } from '@heroui/react'
+import { getKnowledgeGraph, getGraphStats, saveKnowledgeGraph } from '@/lib/knowledgeGraph'
 import type { KnowledgeGraphNode, KnowledgeGraphEdge, KnowledgeNodeType } from '@/lib/types'
 
 const nodeColors: Record<KnowledgeNodeType, string> = {
@@ -161,6 +161,41 @@ function KnowledgeGraphContent() {
   const [edges, setEdges, onEdgesChange] = useEdgesState([])
   const [loading, setLoading] = useState(true)
   const [stats, setStats] = useState({ nodeCount: 0, edgeCount: 0, nodeTypes: {} as Record<string, number> })
+  const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
+  const [deleteTarget, setDeleteTarget] = useState<{ nodeId: string; title: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const requestDeletePaperNode = useCallback((nodeId: string, title: string) => {
+    setDeleteTarget({ nodeId, title })
+    onDeleteOpen()
+  }, [onDeleteOpen])
+
+  const deletePaperSubgraph = useCallback((paperNodeId: string) => {
+    const graph = getKnowledgeGraph()
+    if (!graph) return { removedNodes: 0, removedEdges: 0 }
+
+    const beforeNodeCount = graph.nodes.length
+    const beforeEdgeCount = graph.edges.length
+
+    graph.nodes = graph.nodes.filter(node => node.id !== paperNodeId)
+    graph.edges = graph.edges.filter(edge => edge.sourceId !== paperNodeId && edge.targetId !== paperNodeId)
+
+    // 删除因本次删除导致的孤立非论文节点（概念/方法/作者等）
+    const connectedNodeIds = new Set<string>()
+    graph.edges.forEach(edge => {
+      connectedNodeIds.add(edge.sourceId)
+      connectedNodeIds.add(edge.targetId)
+    })
+    graph.nodes = graph.nodes.filter(node => node.type === 'paper' || connectedNodeIds.has(node.id))
+
+    graph.updatedAt = new Date().toISOString()
+    saveKnowledgeGraph(graph)
+
+    return {
+      removedNodes: beforeNodeCount - graph.nodes.length,
+      removedEdges: beforeEdgeCount - graph.edges.length,
+    }
+  }, [])
 
   // 加载图谱数据
   const loadGraph = useCallback(() => {
@@ -194,6 +229,7 @@ function KnowledgeGraphContent() {
           keyword: { width: 100, height: 45 },
         }
         const size = nodeSizes[node.type]
+        const canDelete = node.type === 'paper'
 
         return {
           id: node.id,
@@ -201,7 +237,25 @@ function KnowledgeGraphContent() {
           position: node.position || calculatedPosition,
           data: {
             label: (
-              <div style={{ textAlign: 'center', padding: '4px 0' }}>
+              <div
+                className={canDelete ? 'paper-node-label' : undefined}
+                style={{ textAlign: 'center', padding: '4px 0', position: 'relative' }}
+              >
+                {canDelete && (
+                  <button
+                    type="button"
+                    className="paper-node-close"
+                    aria-label="删除该文档节点"
+                    title="删除"
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      requestDeletePaperNode(node.id, node.label)
+                    }}
+                  >
+                    ×
+                  </button>
+                )}
                 <div style={{ 
                   fontSize: node.type === 'paper' ? 12 : 11, 
                   fontWeight: 600,
@@ -292,7 +346,7 @@ function KnowledgeGraphContent() {
     } finally {
       setLoading(false)
     }
-  }, [setNodes, setEdges])
+  }, [setNodes, setEdges, requestDeletePaperNode])
 
   useEffect(() => {
     loadGraph()
@@ -357,6 +411,76 @@ function KnowledgeGraphContent() {
 
   return (
     <div style={{ width: '100vw', height: '100vh', position: 'relative' }}>
+      <style>{`
+        .paper-node-close {
+          position: absolute;
+          right: 6px;
+          top: 6px;
+          width: 18px;
+          height: 18px;
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.55);
+          background: rgba(0, 0, 0, 0.25);
+          color: rgba(255, 255, 255, 0.9);
+          font-size: 14px;
+          line-height: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
+        }
+        .paper-node-label:hover .paper-node-close {
+          opacity: 1;
+          pointer-events: auto;
+        }
+        .paper-node-close:hover {
+          background: rgba(0, 0, 0, 0.35);
+          transform: scale(1.04);
+        }
+      `}</style>
+
+      <Modal isOpen={isDeleteOpen} onClose={onDeleteClose} size="md">
+        <ModalContent>
+          <ModalHeader>确认删除</ModalHeader>
+          <ModalBody>
+            <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+              将删除文档节点 <span style={{ fontWeight: 600 }}>{deleteTarget?.title || ''}</span>，并移除与其相连的关系；同时会清理因此产生的孤立节点。
+              <div style={{ marginTop: 8, color: 'var(--text-muted)' }}>该操作不可撤销。</div>
+            </div>
+          </ModalBody>
+          <ModalFooter>
+            <Button variant="flat" onPress={onDeleteClose} isDisabled={deleting}>
+              取消
+            </Button>
+            <Button
+              color="danger"
+              onPress={async () => {
+                if (!deleteTarget) return
+                setDeleting(true)
+                try {
+                  const result = deletePaperSubgraph(deleteTarget.nodeId)
+                  addToast({ title: `已删除：${result.removedNodes} 节点 · ${result.removedEdges} 关系`, color: 'success' })
+                  onDeleteClose()
+                  setDeleteTarget(null)
+                  loadGraph()
+                } catch (error) {
+                  console.error('Delete paper node error:', error)
+                  addToast({ title: '删除失败', color: 'danger' })
+                } finally {
+                  setDeleting(false)
+                }
+              }}
+              isLoading={deleting}
+            >
+              删除
+            </Button>
+          </ModalFooter>
+        </ModalContent>
+      </Modal>
+
       {/* 头部工具栏 */}
     <div style={{
         position: 'absolute',

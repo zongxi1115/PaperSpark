@@ -3,6 +3,7 @@ import { getSettings, getSelectedSmallModel, updateKnowledgeItem } from './stora
 import { buildKnowledgeGraphFromAnalysis } from './knowledgeGraph'
 
 const AUTO_GRAPH_FINGERPRINT_KEY = 'paper_reader_graph_build_fingerprints'
+const AUTO_GRAPH_ANALYZED_ONCE_KEY = 'paper_reader_graph_analyzed_once'
 
 function getBuildFingerprints(): Record<string, string> {
   if (typeof window === 'undefined') return {}
@@ -18,6 +19,22 @@ function getBuildFingerprints(): Record<string, string> {
 function saveBuildFingerprints(fingerprints: Record<string, string>): void {
   if (typeof window === 'undefined') return
   localStorage.setItem(AUTO_GRAPH_FINGERPRINT_KEY, JSON.stringify(fingerprints))
+}
+
+function getAnalyzedOnceMap(): Record<string, string> {
+  if (typeof window === 'undefined') return {}
+  try {
+    const raw = localStorage.getItem(AUTO_GRAPH_ANALYZED_ONCE_KEY)
+    if (!raw) return {}
+    return JSON.parse(raw) as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+
+function saveAnalyzedOnceMap(map: Record<string, string>): void {
+  if (typeof window === 'undefined') return
+  localStorage.setItem(AUTO_GRAPH_ANALYZED_ONCE_KEY, JSON.stringify(map))
 }
 
 function buildContentFingerprint(knowledgeItem: KnowledgeItem, fullText?: string): string {
@@ -53,9 +70,16 @@ export async function autoGraphBuild(
       return { success: false, error: 'No model configured' }
     }
 
+    // 用户期望：每篇文档只分析/构建一次（避免重复消耗）。
+    const analyzedOnce = getAnalyzedOnceMap()
+    if (analyzedOnce[knowledgeItem.id]) {
+      return { success: true, skipped: true }
+    }
+
     const fingerprint = buildContentFingerprint(knowledgeItem, fullText)
     const fingerprints = getBuildFingerprints()
-    if (fingerprints[knowledgeItem.id] === fingerprint) {
+    // 兼容旧逻辑：历史上如果写过 fingerprint，就视为已完成一次构建，后续不再重复 analyze。
+    if (fingerprints[knowledgeItem.id]) {
       return { success: true, skipped: true }
     }
 
@@ -97,8 +121,11 @@ export async function autoGraphBuild(
       `[AutoGraph] Built graph for "${knowledgeItem.title}": ${buildResult.nodesCreated} nodes, ${buildResult.edgesCreated} edges`
     )
 
+    // 标记“已完成一次分析/构建”（无论是否降级），确保后续不会重复调用 /analyze。
     fingerprints[knowledgeItem.id] = fingerprint
     saveBuildFingerprints(fingerprints)
+    analyzedOnce[knowledgeItem.id] = new Date().toISOString()
+    saveAnalyzedOnceMap(analyzedOnce)
 
     // 3. 标记知识库条目已构建图谱
     updateKnowledgeItem(knowledgeItem.id, {

@@ -6,13 +6,12 @@ import { Button, Tooltip, Skeleton, Progress, Modal, ModalContent, ModalHeader, 
 import { Icon } from '@iconify/react'
 import { getKnowledgeItem, getSettings, getSelectedSmallModel, updateKnowledgeItem, deleteKnowledgeItem, getEmbeddingModelConfig } from '@/lib/storage'
 import {
-  getPDFFile,
-  savePDFFile,
   getPDFDocumentByKnowledgeId,
   savePDFDocument,
   updatePDFDocument,
   getPDFPagesByDocumentId,
   savePDFPages,
+  deletePDFFile,
   getTranslation,
   deleteTranslation,
   getAnnotationsByDocumentId,
@@ -24,7 +23,7 @@ import {
 import PDFViewer from '@/components/PDF/PDFViewer'
 import AIGuidePanel from '@/components/Guide/AIGuidePanel'
 import ImmersiveChatPanel from '@/components/Assistant/ImmersiveChatPanel'
-import type { TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload, GuideFocusTarget } from '@/lib/types'
+import type { KnowledgeItem, TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload, GuideFocusTarget } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
 import { parsePDFWithSurya } from '@/lib/suryaParser'
 import { indexKnowledgeForRAG, deleteKnowledgeVectors } from '@/lib/rag'
@@ -142,7 +141,7 @@ export default function ImmersiveReaderPage() {
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null)
+  const [pdfBlob, setPdfBlob] = useState<Blob | null>(null)
   const [documentTitle, setDocumentTitle] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
@@ -194,6 +193,8 @@ export default function ImmersiveReaderPage() {
   const [abstractExpanded, setAbstractExpanded] = useState(false)
 
   const processedRef = useRef(false)
+  const pdfBlobRef = useRef<Blob | null>(null)
+  const pdfFileNameRef = useRef<string>('document.pdf')
 
   // 删除确认弹窗
   const { isOpen: isDeleteOpen, onOpen: onDeleteOpen, onClose: onDeleteClose } = useDisclosure()
@@ -254,8 +255,43 @@ export default function ImmersiveReaderPage() {
     })
   }, [knowledgeId])
 
+  const resolvePdfSource = useCallback(async (item: KnowledgeItem) => {
+    const guessFileName = () => {
+      const raw = item.attachmentFileName || item.fileName || item.title || 'document'
+      const normalized = raw.trim() || 'document'
+      return normalized.toLowerCase().endsWith('.pdf') ? normalized : `${normalized}.pdf`
+    }
+
+    if (item.sourceType === 'upload' && item.sourceId) {
+      const { getStoredFile } = await import('@/lib/localFiles')
+      const fileRecord = await getStoredFile(item.sourceId)
+      if (!fileRecord?.blob) return null
+      return { blob: fileRecord.blob, fileName: fileRecord.name || guessFileName() }
+    }
+
+    const remoteUrl = item.attachmentUrl || (item.sourceType === 'url' ? item.url : undefined)
+    if (!remoteUrl) return null
+
+    const fileName = guessFileName()
+    const res = await fetch(
+      `/api/pdf/proxy?url=${encodeURIComponent(remoteUrl)}&filename=${encodeURIComponent(fileName)}`,
+      { cache: 'no-store' },
+    )
+
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null)
+      throw new Error(payload?.error || '获取 PDF 失败')
+    }
+
+    return { blob: await res.blob(), fileName }
+  }, [])
+
   // 加载 PDF 文件
   const loadPDF = useCallback(async () => {
+    processedRef.current = false
+    pdfBlobRef.current = null
+    pdfFileNameRef.current = 'document.pdf'
+
     setLoading(true)
     setError(null)
 
@@ -268,47 +304,20 @@ export default function ImmersiveReaderPage() {
       }
       setDocumentTitle(item.title)
 
-      // 检查是否有缓存的 PDF 文件
-      const cachedFile = await getPDFFile(knowledgeId)
-      if (cachedFile) {
-        const arrayBuffer = await cachedFile.blob.arrayBuffer()
-        setPdfData(arrayBuffer)
-        setLoading(false)
-        return
-      }
-
-      // 获取 PDF
-      let blob: Blob | null = null
-
-      if (item.sourceType === 'upload' && item.sourceId) {
-        const { getStoredFile } = await import('@/lib/localFiles')
-        const fileRecord = await getStoredFile(item.sourceId)
-        if (fileRecord?.blob) {
-          blob = fileRecord.blob
-        }
-      } else if (item.attachmentUrl) {
-        const res = await fetch(`/api/pdf/proxy?url=${encodeURIComponent(item.attachmentUrl)}`)
-        if (!res.ok) {
-          throw new Error('获取 PDF 失败')
-        }
-        const data = await res.json()
-        const binaryString = atob(data.base64)
-        const bytes = new Uint8Array(binaryString.length)
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i)
-        }
-        blob = new Blob([bytes], { type: 'application/pdf' })
-      }
-
-      if (!blob) {
+      const resolved = await resolvePdfSource(item)
+      if (!resolved?.blob) {
         setError('无法获取 PDF 文件')
         setLoading(false)
         return
       }
 
-      await savePDFFile(knowledgeId, blob, item.fileName || 'document.pdf')
-      const arrayBuffer = await blob.arrayBuffer()
-      setPdfData(arrayBuffer)
+      pdfBlobRef.current = resolved.blob
+      pdfFileNameRef.current = resolved.fileName
+
+      // 存储 Blob 而不是 ArrayBuffer，避免 ArrayBuffer 被 PDF.js Worker detach 后无法重用
+      setPdfBlob(resolved.blob)
+      // 不再缓存原始 PDF blob（历史版本可能写入过，顺手清理）
+      void deletePDFFile(knowledgeId)
       setLoading(false)
 
     } catch (err) {
@@ -316,7 +325,7 @@ export default function ImmersiveReaderPage() {
       setError(err instanceof Error ? err.message : '加载失败')
       setLoading(false)
     }
-  }, [knowledgeId])
+  }, [knowledgeId, resolvePdfSource])
 
   // 后台处理 - 解析 PDF
   const processPDF = useCallback(async () => {
@@ -441,11 +450,32 @@ export default function ImmersiveReaderPage() {
     setStructureParsing(true)
     setMetadataLoading(!existingDoc)
     try {
-      const cachedFile = await getPDFFile(knowledgeId)
-      if (!cachedFile) {
+      const fallbackFileName = (() => {
+        const raw = item.attachmentFileName || item.fileName || item.title || 'document'
+        const normalized = raw.trim() || 'document'
+        return normalized.toLowerCase().endsWith('.pdf') ? normalized : `${normalized}.pdf`
+      })()
+
+      let fileName = pdfFileNameRef.current || fallbackFileName
+      let fileBlob: Blob | null =
+        pdfBlobRef.current ||
+        pdfBlob
+
+      if (!fileBlob) {
+        const resolved = await resolvePdfSource(item)
+        if (resolved?.blob) {
+          fileBlob = resolved.blob
+          fileName = resolved.fileName || fileName
+        }
+      }
+
+      if (!fileBlob) {
         setMetadataLoading(false)
         return
       }
+
+      pdfBlobRef.current = fileBlob
+      pdfFileNameRef.current = fileName
 
       const fallbackMetadata = {
         title: existingDoc?.metadata.title || item.title,
@@ -468,7 +498,7 @@ export default function ImmersiveReaderPage() {
         await savePDFDocument({
           id: knowledgeId,
           knowledgeItemId: knowledgeId,
-          fileName: cachedFile.fileName,
+          fileName,
           pageCount: existingPages.length,
           metadata: fallbackMetadata,
           parser: 'surya',
@@ -481,8 +511,8 @@ export default function ImmersiveReaderPage() {
       const metadataModelConfig = getSelectedSmallModel(getSettings())
       const result = await parsePDFWithSurya({
         documentId: knowledgeId,
-        fileBlob: cachedFile.blob,
-        fileName: cachedFile.fileName,
+        fileBlob,
+        fileName,
         keepOutputs: false,
         includeMetadata: Boolean(metadataModelConfig?.apiKey && metadataModelConfig?.modelName),
         modelConfig: metadataModelConfig || undefined,
@@ -515,7 +545,7 @@ export default function ImmersiveReaderPage() {
       await savePDFDocument({
         id: knowledgeId,
         knowledgeItemId: knowledgeId,
-        fileName: cachedFile.fileName,
+        fileName,
         pageCount: result.pages.length,
         metadata: mergedMetadata,
         parser: 'surya',
@@ -577,7 +607,7 @@ export default function ImmersiveReaderPage() {
     } finally {
       setStructureParsing(false)
     }
-  }, [buildRAGIndex, knowledgeId])
+  }, [buildRAGIndex, knowledgeId, pdfBlob, resolvePdfSource])
 
   // 流式翻译
   const startStreamingTranslation = useCallback(async () => {
@@ -739,11 +769,11 @@ export default function ImmersiveReaderPage() {
   }, [loadPDF])
 
   useEffect(() => {
-    if (pdfData && !loading) {
+    if (pdfBlob && !loading) {
       const timer = setTimeout(() => processPDF(), 500)
       return () => clearTimeout(timer)
     }
-  }, [pdfData, loading, processPDF])
+  }, [pdfBlob, loading, processPDF])
 
   // 加载状态
   if (loading) {
@@ -1435,9 +1465,9 @@ export default function ImmersiveReaderPage() {
 
         {/* PDF 查看器 */}
         <div className="flex-1 overflow-hidden">
-          {pdfData ? (
+          {pdfBlob ? (
             <PDFViewer
-              pdfData={pdfData}
+              pdfBlob={pdfBlob}
               currentPage={currentPage}
               scale={scale}
               documentId={knowledgeId}

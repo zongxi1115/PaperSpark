@@ -120,7 +120,7 @@ function convertToFlowElements(nodes: MindMapNode[]): { nodes: Node<MindMapFlowD
         id: `${parentId}-${nodeId}`,
         source: parentId,
         target: nodeId,
-        type: 'smoothstep',
+        type: 'bezier',
         animated: false,
         style: { stroke: 'rgba(255,255,255,0.25)', strokeWidth: 1.5 },
         markerEnd: { type: MarkerType.ArrowClosed, color: 'rgba(255,255,255,0.25)' },

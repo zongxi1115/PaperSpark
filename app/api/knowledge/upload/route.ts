@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-// 文件上传处理 - 将文件存储到临时位置并返回元数据
+// 文件上传/URL 导入：仅做校验并返回元数据（不下载、不存储文件内容）
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData()
@@ -14,8 +14,24 @@ export async function POST(request: NextRequest) {
     // 处理 URL 导入
     if (url && !file) {
       try {
-        const response = await fetch(url)
+        const requestOnce = async (init: RequestInit) => {
+          return await fetch(url, {
+            redirect: 'follow',
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              ...(init.headers || {}),
+            },
+            ...init,
+          })
+        }
+
+        // 优先 HEAD，失败则用 Range GET 探测
+        let response = await requestOnce({ method: 'HEAD' })
         if (!response.ok) {
+          response = await requestOnce({ method: 'GET', headers: { Range: 'bytes=0-0' } })
+        }
+
+        if (!response.ok && response.status !== 206) {
           return NextResponse.json({ error: 'Failed to fetch URL' }, { status: 400 })
         }
 
@@ -42,16 +58,28 @@ export async function POST(request: NextRequest) {
           return NextResponse.json({ error: 'URL must point to a PDF file' }, { status: 400 })
         }
 
-        const arrayBuffer = await response.arrayBuffer()
-        const base64 = Buffer.from(arrayBuffer).toString('base64')
+        let fileSize: number | undefined
+        const contentLength = response.headers.get('content-length')
+        if (contentLength) {
+          const parsed = Number.parseInt(contentLength, 10)
+          if (Number.isFinite(parsed) && parsed > 0) fileSize = parsed
+        }
+
+        const contentRange = response.headers.get('content-range')
+        if (!fileSize && contentRange) {
+          const match = contentRange.match(/\/(\d+)\s*$/)
+          if (match?.[1]) {
+            const parsed = Number.parseInt(match[1], 10)
+            if (Number.isFinite(parsed) && parsed > 0) fileSize = parsed
+          }
+        }
 
         return NextResponse.json({
           success: true,
           fileName: filename,
           fileType: 'pdf',
-          fileSize: arrayBuffer.byteLength,
+          fileSize,
           url,
-          content: base64, // 返回 base64 编码的文件内容
         })
       } catch (error) {
         console.error('URL fetch error:', error)
@@ -63,21 +91,19 @@ export async function POST(request: NextRequest) {
     if (file) {
       const fileName = file.name.toLowerCase()
       const isPdf = fileName.endsWith('.pdf')
-      const isWord = fileName.endsWith('.docx') || fileName.endsWith('.doc')
+      const isDocx = fileName.endsWith('.docx')
+      const isDoc = fileName.endsWith('.doc')
+      const isWord = isDocx || isDoc
 
       if (!isPdf && !isWord) {
         return NextResponse.json({ error: 'Only PDF and Word files are supported' }, { status: 400 })
       }
 
-      const arrayBuffer = await file.arrayBuffer()
-      const base64 = Buffer.from(arrayBuffer).toString('base64')
-
       return NextResponse.json({
         success: true,
         fileName: file.name,
-        fileType: isPdf ? 'pdf' : 'docx',
+        fileType: isPdf ? 'pdf' : isDoc ? 'doc' : 'docx',
         fileSize: file.size,
-        content: base64,
       })
     }
 

@@ -102,7 +102,7 @@ async function getPdfjs(): Promise<PDFJSLib> {
 }
 
 interface PDFViewerProps {
-  pdfData: ArrayBuffer
+  pdfBlob: Blob
   scale: number
   documentId?: string
   currentPage?: number
@@ -1298,7 +1298,7 @@ function PDFPage({
 }
 
 export default function PDFViewer({
-  pdfData,
+  pdfBlob,
   scale,
   documentId,
   currentPage = 1,
@@ -1355,8 +1355,10 @@ export default function PDFViewer({
     let mounted = true
     async function loadPDF() {
       try {
+        // 每次从 Blob 获取新的 ArrayBuffer，避免 ArrayBuffer 被 Worker detach 后无法重用
+        const arrayBuffer = await pdfBlob.arrayBuffer()
         const pdfjs = await getPdfjs()
-        const doc = await pdfjs.getDocument({ data: pdfData }).promise
+        const doc = await pdfjs.getDocument({ data: arrayBuffer }).promise
         if (mounted) {
           setPdfDoc(doc)
           onTotalPagesChange?.(doc.numPages)
@@ -1377,7 +1379,7 @@ export default function PDFViewer({
     }
     loadPDF()
     return () => { mounted = false }
-  }, [pdfData, onTotalPagesChange])
+  }, [pdfBlob, onTotalPagesChange])
 
   // 监听滚动更新当前页码
   useEffect(() => {

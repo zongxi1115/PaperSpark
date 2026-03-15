@@ -1,6 +1,6 @@
 'use client'
 
-import type { ModelConfig, TextBlock } from './types'
+import type { ModelConfig, TextBlock, EmbeddingModelConfig } from './types'
 import { deleteVectorDocumentsByDocumentId, saveVectorDocuments } from './pdfCache'
 
 const SURYA_SERVICE_URL = process.env.NEXT_PUBLIC_SURYA_SERVICE_URL || 'http://127.0.0.1:8765'
@@ -43,9 +43,10 @@ export async function indexKnowledgeForRAG(params: {
   documentId: string
   blocks: TextBlock[]
   modelConfig?: ModelConfig | null
+  embeddingConfig?: EmbeddingModelConfig | null
   forceLocal?: boolean
 }): Promise<RAGIndexResult> {
-  const { documentId, blocks, modelConfig, forceLocal } = params
+  const { documentId, blocks, modelConfig, embeddingConfig, forceLocal } = params
 
   if (!documentId || blocks.length === 0) {
     return {
@@ -59,7 +60,7 @@ export async function indexKnowledgeForRAG(params: {
   const response = await fetch('/api/rag/embed', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ documentId, blocks, modelConfig, forceLocal }),
+    body: JSON.stringify({ documentId, blocks, modelConfig, embeddingConfig, forceLocal }),
   })
 
   const payload = await response.json()

@@ -112,6 +112,22 @@ export function getSelectedLargeModel(settings: AppSettings): import('./types').
   return settings.largeModel || defaultSettings.largeModel!
 }
 
+// 获取嵌入模型配置
+export function getEmbeddingModelConfig(settings: AppSettings): import('./types').EmbeddingModelConfig | null {
+  if (settings.embeddingModel?.apiKey && settings.embeddingModel?.modelName && settings.embeddingModel?.baseUrl) {
+    return settings.embeddingModel
+  }
+  return defaultSettings.embeddingModel || null
+}
+
+// 获取重排序模型配置
+export function getRerankModelConfig(settings: AppSettings): import('./types').RerankModelConfig | null {
+  if (settings.rerankModel?.apiKey && settings.rerankModel?.modelName && settings.rerankModel?.baseUrl) {
+    return settings.rerankModel
+  }
+  return null
+}
+
 export function getLastDocId(): string | null {
   if (!isBrowser()) return null
   return localStorage.getItem(LAST_DOC_KEY)

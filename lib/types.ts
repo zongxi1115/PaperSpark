@@ -60,6 +60,20 @@ export type FeatureSelectItem = {
 }
 
 
+// 嵌入模型配置
+export interface EmbeddingModelConfig {
+  baseUrl: string
+  apiKey: string
+  modelName: string
+}
+
+// 重排序模型配置
+export interface RerankModelConfig {
+  baseUrl: string
+  apiKey: string
+  modelName: string
+}
+
 export type AppSettings = {
   // 新的多接口配置
   providers: AIProvider[]
@@ -72,6 +86,10 @@ export type AppSettings = {
   citationStyle?: string
   // 编辑器主题
   editorThemeId?: string
+  // 嵌入模型配置（RAG 用）
+  embeddingModel?: EmbeddingModelConfig
+  // 重排序模型配置（RAG 用）
+  rerankModel?: RerankModelConfig
 } & { [key in typeof selectFeatures[number]]: boolean
 }
 
@@ -129,6 +147,14 @@ function getDefaultSettings(): AppSettings {
       apiKey: process.env.NEXT_PUBLIC_LARGE_MODEL_API_KEY || '',
       modelName: process.env.NEXT_PUBLIC_LARGE_MODEL_NAME || 'gpt-4o',
     },
+    // 嵌入模型默认配置
+    embeddingModel: {
+      baseUrl: process.env.NEXT_PUBLIC_EMBEDDING_BASE_URL || 'https://api.openai.com/v1/embeddings',
+      apiKey: process.env.NEXT_PUBLIC_EMBEDDING_API_KEY || '',
+      modelName: process.env.NEXT_PUBLIC_EMBEDDING_NAME || 'text-embedding-3-small',
+    },
+    // 重排序模型默认配置（可选）
+    rerankModel: undefined,
     ...selectFeatures.reduce((acc, key) => ({ ...acc, [key]: false }), {} as Record<typeof selectFeatures[number], boolean>),
   }
 }

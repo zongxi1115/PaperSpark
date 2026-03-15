@@ -55,7 +55,12 @@ interface EditorPageProps {
 const CONTEXT_WINDOW = 1500 // 上下文窗口大小
 const AUTO_COMPLETE_DELAY = 5000 // 5秒无输入后触发补全
 
-function extractTitle(content: Block[]): string {
+function extractTitle(content: Block[], articleTitle?: string): string {
+  // 优先使用文章标题
+  if (articleTitle?.trim()) {
+    return articleTitle.trim()
+  }
+  // 回退：从正文第一个块提取
   if (content.length > 0) {
     const first = content[0] as { type: string; content?: { type: string; text: string }[] }
     if (first.type === 'heading' || first.type === 'paragraph') {
@@ -653,7 +658,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     setBlocks(current)
 
     if (!doc) return
-    const title = extractTitle(current)
+    const title = extractTitle(current, articleTitle)
     const updated: AppDocument = {
       ...doc,
       title,

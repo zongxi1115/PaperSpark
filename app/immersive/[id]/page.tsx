@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Button, Tooltip, Skeleton, Progress, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, addToast } from '@heroui/react'
 import { Icon } from '@iconify/react'
-import { getKnowledgeItem, getSettings, getSelectedSmallModel, updateKnowledgeItem, deleteKnowledgeItem } from '@/lib/storage'
+import { getKnowledgeItem, getSettings, getSelectedSmallModel, updateKnowledgeItem, deleteKnowledgeItem, getEmbeddingModelConfig } from '@/lib/storage'
 import {
   getPDFFile,
   savePDFFile,
@@ -227,9 +227,13 @@ export default function ImmersiveReaderPage() {
       ragError: '',
     })
 
+    const settings = getSettings()
+    const embeddingConfig = getEmbeddingModelConfig(settings)
+
     const result = await indexKnowledgeForRAG({
       documentId: knowledgeId,
       blocks: sourceBlocks,
+      embeddingConfig,
     })
 
     if (result.success) {

@@ -580,6 +580,171 @@ export function SettingsForm() {
           </CardBody>
         </Card>
 
+        {/* RAG 模型配置 */}
+        <Card shadow="sm">
+          <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+              <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>RAG 模型配置</p>
+              <Button
+                size="sm"
+                variant="flat"
+                color="primary"
+                onPress={() => setSettings(s => ({
+                  ...s,
+                  embeddingModel: {
+                    baseUrl: 'https://api.openai.com/v1/embeddings',
+                    apiKey: '',
+                    modelName: 'text-embedding-3-small',
+                  },
+                }))}
+              >
+                + 配置嵌入模型
+              </Button>
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              配置知识库检索用的嵌入模型和重排序模型
+            </p>
+          </CardHeader>
+          <Divider />
+          <CardBody style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 20 }}>
+            {/* 嵌入模型配置 */}
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                <Icon icon="solar:database-bold" width={18} style={{ color: 'var(--text-muted)' }} />
+                <p style={{ fontWeight: 500, fontSize: 14, margin: 0 }}>嵌入模型</p>
+                {settings.embeddingModel?.apiKey && (
+                  <Chip size="sm" color="success" variant="flat">已配置</Chip>
+                )}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <Input
+                  label="Base URL"
+                  placeholder="https://api.openai.com/v1/embeddings"
+                  value={settings.embeddingModel?.baseUrl || ''}
+                  onValueChange={v => setSettings(s => ({
+                    ...s,
+                    embeddingModel: { ...s.embeddingModel, baseUrl: v, apiKey: s.embeddingModel?.apiKey || '', modelName: s.embeddingModel?.modelName || '' },
+                  }))}
+                  variant="bordered"
+                  size="sm"
+                  description="嵌入 API 端点地址"
+                />
+                <Input
+                  label="模型名称"
+                  placeholder="text-embedding-3-small"
+                  value={settings.embeddingModel?.modelName || ''}
+                  onValueChange={v => setSettings(s => ({
+                    ...s,
+                    embeddingModel: { ...s.embeddingModel, modelName: v, baseUrl: s.embeddingModel?.baseUrl || '', apiKey: s.embeddingModel?.apiKey || '' },
+                  }))}
+                  variant="bordered"
+                  size="sm"
+                  description="如 text-embedding-3-small、text-embedding-ada-002"
+                />
+                <Input
+                  label="API Key"
+                  placeholder="sk-..."
+                  type="password"
+                  value={settings.embeddingModel?.apiKey || ''}
+                  onValueChange={v => setSettings(s => ({
+                    ...s,
+                    embeddingModel: { ...s.embeddingModel, apiKey: v, baseUrl: s.embeddingModel?.baseUrl || '', modelName: s.embeddingModel?.modelName || '' },
+                  }))}
+                  variant="bordered"
+                  size="sm"
+                  description="密钥仅存储在本地"
+                />
+              </div>
+            </div>
+
+            <Divider />
+
+            {/* 重排序模型配置 */}
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Icon icon="solar:sort-vertical-bold" width={18} style={{ color: 'var(--text-muted)' }} />
+                  <p style={{ fontWeight: 500, fontSize: 14, margin: 0 }}>重排序模型</p>
+                  {settings.rerankModel?.apiKey && (
+                    <Chip size="sm" color="success" variant="flat">已配置</Chip>
+                  )}
+                </div>
+                {!settings.rerankModel && (
+                  <Button
+                    size="sm"
+                    variant="flat"
+                    color="default"
+                    onPress={() => setSettings(s => ({
+                      ...s,
+                      rerankModel: {
+                        baseUrl: '',
+                        apiKey: '',
+                        modelName: '',
+                      },
+                    }))}
+                  >
+                    + 配置
+                  </Button>
+                )}
+              </div>
+              {settings.rerankModel ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <Input
+                    label="Base URL"
+                    placeholder="https://api.cohere.ai/v1/rerank"
+                    value={settings.rerankModel.baseUrl || ''}
+                    onValueChange={v => setSettings(s => ({
+                      ...s,
+                      rerankModel: { ...s.rerankModel!, baseUrl: v },
+                    }))}
+                    variant="bordered"
+                    size="sm"
+                    description="重排序 API 端点地址"
+                  />
+                  <Input
+                    label="模型名称"
+                    placeholder="rerank-v3.5"
+                    value={settings.rerankModel.modelName || ''}
+                    onValueChange={v => setSettings(s => ({
+                      ...s,
+                      rerankModel: { ...s.rerankModel!, modelName: v },
+                    }))}
+                    variant="bordered"
+                    size="sm"
+                    description="如 rerank-v3.5、BAAI/bge-reranker-v2-m3"
+                  />
+                  <Input
+                    label="API Key"
+                    placeholder="API Key"
+                    type="password"
+                    value={settings.rerankModel.apiKey || ''}
+                    onValueChange={v => setSettings(s => ({
+                      ...s,
+                      rerankModel: { ...s.rerankModel!, apiKey: v },
+                    }))}
+                    variant="bordered"
+                    size="sm"
+                    description="密钥仅存储在本地"
+                  />
+                  <Button
+                    size="sm"
+                    variant="light"
+                    color="danger"
+                    onPress={() => setSettings(s => ({ ...s, rerankModel: undefined }))}
+                    style={{ alignSelf: 'flex-start' }}
+                  >
+                    移除重排序配置
+                  </Button>
+                </div>
+              ) : (
+                <p style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+                  重排序模型可选，配置后可提升检索结果的相关性排序
+                </p>
+              )}
+            </div>
+          </CardBody>
+        </Card>
+
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 12, paddingTop: 4 }}>
           <Button color="primary" onPress={handleSave} isDisabled={saved}>

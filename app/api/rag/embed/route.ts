@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import type { TextBlock, ModelConfig, VectorDocument } from '@/lib/types'
+import type { TextBlock, ModelConfig, VectorDocument, EmbeddingModelConfig } from '@/lib/types'
 import { resolveEmbeddingProvider } from '@/lib/ragServerConfig'
 
 export const maxDuration = 120
@@ -54,14 +54,15 @@ async function generateEmbeddings(
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { documentId, blocks, modelConfig, forceLocal } = body as {
+    const { documentId, blocks, modelConfig, embeddingConfig, forceLocal } = body as {
       documentId: string
       blocks: TextBlock[]
       modelConfig?: ModelConfig | null
+      embeddingConfig?: EmbeddingModelConfig | null
       forceLocal?: boolean
     }
 
-    const provider = resolveEmbeddingProvider(modelConfig)
+    const provider = resolveEmbeddingProvider(modelConfig, embeddingConfig)
 
     if (!provider.apiKey || !provider.baseUrl || !provider.modelName) {
       return NextResponse.json({

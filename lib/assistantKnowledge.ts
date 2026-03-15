@@ -3,7 +3,7 @@
 import { getKnowledgeItems } from '@/lib/storage'
 import { getVectorDocumentsByDocumentId } from '@/lib/pdfCache'
 import { indexKnowledgeForRAG } from '@/lib/rag'
-import type { AssistantCitation, KnowledgeItem, RAGSearchResult, TextBlock, VectorDocument } from '@/lib/types'
+import type { AssistantCitation, KnowledgeItem, RAGSearchResult, TextBlock, VectorDocument, EmbeddingModelConfig, RerankModelConfig } from '@/lib/types'
 
 type CandidateHit = AssistantCitation
 
@@ -63,7 +63,7 @@ function getKeywordScore(query: string, item: KnowledgeItem) {
   return score / tokens.length
 }
 
-async function ensureOverviewVectors(item: KnowledgeItem) {
+async function ensureOverviewVectors(item: KnowledgeItem, embeddingConfig?: EmbeddingModelConfig | null) {
   const documentId = `knowledge-overview:${item.id}`
   const existingVectors = await getVectorDocumentsByDocumentId(documentId)
   if (existingVectors.length > 0) {
@@ -73,6 +73,7 @@ async function ensureOverviewVectors(item: KnowledgeItem) {
   const indexResult = await indexKnowledgeForRAG({
     documentId,
     blocks: buildOverviewBlocks(item),
+    embeddingConfig,
     forceLocal: true,
   })
 
@@ -83,8 +84,12 @@ async function ensureOverviewVectors(item: KnowledgeItem) {
   return await getVectorDocumentsByDocumentId(documentId)
 }
 
-async function searchOverview(item: KnowledgeItem, query: string): Promise<CandidateHit | null> {
-  const localVectors = await ensureOverviewVectors(item)
+async function searchOverview(
+  item: KnowledgeItem,
+  query: string,
+  embeddingConfig?: EmbeddingModelConfig | null
+): Promise<CandidateHit | null> {
+  const localVectors = await ensureOverviewVectors(item, embeddingConfig)
   const keywordScore = getKeywordScore(query, item)
   if (localVectors.length === 0 && keywordScore <= 0) {
     return null
@@ -100,6 +105,7 @@ async function searchOverview(item: KnowledgeItem, query: string): Promise<Candi
           query,
           topK: 1,
           localVectors,
+          embeddingConfig,
         }),
       })
 
@@ -131,7 +137,12 @@ async function searchOverview(item: KnowledgeItem, query: string): Promise<Candi
   }
 }
 
-async function searchFullText(item: KnowledgeItem, query: string): Promise<CandidateHit[]> {
+async function searchFullText(
+  item: KnowledgeItem,
+  query: string,
+  embeddingConfig?: EmbeddingModelConfig | null,
+  rerankConfig?: RerankModelConfig | null
+): Promise<CandidateHit[]> {
   if (!item.hasImmersiveCache || item.ragStatus !== 'indexed') {
     return []
   }
@@ -149,6 +160,8 @@ async function searchFullText(item: KnowledgeItem, query: string): Promise<Candi
         query,
         topK: 2,
         localVectors,
+        embeddingConfig,
+        rerankConfig,
       }),
     })
 
@@ -177,7 +190,11 @@ async function searchFullText(item: KnowledgeItem, query: string): Promise<Candi
   }
 }
 
-export async function searchMyKnowledgeBase(query: string): Promise<AssistantCitation[]> {
+export async function searchMyKnowledgeBase(
+  query: string,
+  embeddingConfig?: EmbeddingModelConfig | null,
+  rerankConfig?: RerankModelConfig | null
+): Promise<AssistantCitation[]> {
   const knowledgeItems = getKnowledgeItems()
   if (knowledgeItems.length === 0) {
     return []
@@ -190,10 +207,10 @@ export async function searchMyKnowledgeBase(query: string): Promise<AssistantCit
     .slice(0, 6)
     .map(entry => entry.item)
 
-  const overviewHits = (await Promise.all(topKeywordItems.map(item => searchOverview(item, query))))
+  const overviewHits = (await Promise.all(topKeywordItems.map(item => searchOverview(item, query, embeddingConfig))))
     .filter((item): item is CandidateHit => Boolean(item))
 
-  const fulltextHits = (await Promise.all(topKeywordItems.map(item => searchFullText(item, query))))
+  const fulltextHits = (await Promise.all(topKeywordItems.map(item => searchFullText(item, query, embeddingConfig, rerankConfig))))
     .flat()
 
   const merged = [...overviewHits, ...fulltextHits]

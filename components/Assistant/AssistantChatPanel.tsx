@@ -51,6 +51,8 @@ import {
   getAssistantNotes,
   addAssistantNote,
   deleteAssistantNote,
+  getEmbeddingModelConfig,
+  getRerankModelConfig,
 } from '@/lib/storage'
 import { getVectorDocumentsByDocumentId } from '@/lib/pdfCache'
 import { getFullTextByKnowledgeId } from '@/lib/pdfCache'
@@ -907,7 +909,11 @@ export function AssistantChatPanel() {
           }
         })
 
-        knowledgeCandidates = await runKnowledgeSearch(content)
+        knowledgeCandidates = await runKnowledgeSearch(
+          content,
+          settings ? getEmbeddingModelConfig(settings) : null,
+          settings ? getRerankModelConfig(settings) : null
+        )
         knowledgeCandidates = [...mentionCandidates, ...knowledgeCandidates]
           .sort((left, right) => right.score - left.score)
           .filter((candidate, index, array) => array.findIndex(item => item.knowledgeItemId === candidate.knowledgeItemId && item.excerpt === candidate.excerpt && item.sourceKind === candidate.sourceKind) === index)

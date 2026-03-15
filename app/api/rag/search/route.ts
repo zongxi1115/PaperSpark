@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import type { ModelConfig, RAGSearchResult, VectorDocument } from '@/lib/types'
+import type { ModelConfig, RAGSearchResult, VectorDocument, EmbeddingModelConfig, RerankModelConfig } from '@/lib/types'
 import { cosineSimilarity } from '@/lib/ragUtils'
 import { resolveEmbeddingProvider, resolveRerankProvider } from '@/lib/ragServerConfig'
 
@@ -24,9 +24,10 @@ async function checkSuryaService(): Promise<boolean> {
 // 生成查询嵌入
 async function generateQueryEmbedding(
   query: string,
-  modelConfig?: ModelConfig | null
+  modelConfig?: ModelConfig | null,
+  embeddingConfig?: EmbeddingModelConfig | null
 ): Promise<number[]> {
-  const provider = resolveEmbeddingProvider(modelConfig)
+  const provider = resolveEmbeddingProvider(modelConfig, embeddingConfig)
 
   if (!provider.apiKey || !provider.baseUrl || !provider.modelName) {
     throw new Error('Missing embedding provider configuration')
@@ -52,8 +53,8 @@ async function generateQueryEmbedding(
   return data.data[0].embedding
 }
 
-async function rerankResults(query: string, results: RAGSearchResult[]): Promise<RAGSearchResult[]> {
-  const provider = resolveRerankProvider()
+async function rerankResults(query: string, results: RAGSearchResult[], rerankConfig?: RerankModelConfig | null): Promise<RAGSearchResult[]> {
+  const provider = resolveRerankProvider(rerankConfig)
 
   if (!provider || results.length === 0) {
     return results
@@ -112,15 +113,17 @@ async function rerankResults(query: string, results: RAGSearchResult[]): Promise
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
-    const { documentId, query, topK = 5, modelConfig, localVectors } = body as {
+    const { documentId, query, topK = 5, modelConfig, embeddingConfig, rerankConfig, localVectors } = body as {
       documentId?: string
       query: string
       topK?: number
       modelConfig?: ModelConfig | null
+      embeddingConfig?: EmbeddingModelConfig | null
+      rerankConfig?: RerankModelConfig | null
       localVectors?: VectorDocument[] // 本地存储的向量数据
     }
 
-    const provider = resolveEmbeddingProvider(modelConfig)
+    const provider = resolveEmbeddingProvider(modelConfig, embeddingConfig)
 
     if (!query) {
       return NextResponse.json({ success: false, error: '参数不完整' }, { status: 400 })
@@ -156,7 +159,7 @@ export async function POST(req: NextRequest) {
 
           if (response.ok) {
             const result = await response.json()
-            const rerankedResults = await rerankResults(query, Array.isArray(result.results) ? result.results : [])
+            const rerankedResults = await rerankResults(query, Array.isArray(result.results) ? result.results : [], rerankConfig)
             return NextResponse.json({
               success: true,
               results: rerankedResults.slice(0, topK),
@@ -185,7 +188,7 @@ export async function POST(req: NextRequest) {
     // 生成查询嵌入
     let queryEmbedding: number[]
     try {
-      queryEmbedding = await generateQueryEmbedding(query, modelConfig)
+      queryEmbedding = await generateQueryEmbedding(query, modelConfig, embeddingConfig)
     } catch (error) {
       console.error('Query embedding failed:', error)
       return NextResponse.json({
@@ -212,7 +215,7 @@ export async function POST(req: NextRequest) {
         type: vector.metadata.type,
       }))
 
-    const rerankedResults = await rerankResults(query, results)
+    const rerankedResults = await rerankResults(query, results, rerankConfig)
 
     return NextResponse.json({
       success: true,

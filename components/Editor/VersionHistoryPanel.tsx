@@ -95,28 +95,148 @@ function extractHeadings(blocks: Block[]): { id: string; level: number; text: st
     .filter(h => h.text.trim())
 }
 
+// 行内内容类型（公式、引用等）
+interface InlineContentData {
+  type: 'text' | 'formula' | 'citation' | string
+  text?: string
+  latex?: string
+  citationIndex?: number
+  citationTitle?: string
+}
+
+// 表格单元格
+interface TableCell {
+  content: InlineContentData[]
+}
+
+// 表格行
+interface TableRow {
+  cells: TableCell[]
+}
+
 // Block 结构
 interface BlockData {
   type: string
   level?: number
   text: string
+  // 表格数据
+  table?: {
+    rows: TableRow[]
+    columnWidths?: number[]
+  }
+  // 行内内容（用于渲染公式等）
+  inlineContent?: InlineContentData[]
+}
+
+// 提取行内内容（包括公式）
+function extractInlineContent(content: unknown): InlineContentData[] {
+  if (!Array.isArray(content)) return []
+  
+  return content.map(c => {
+    const item = c as { type: string; text?: string; props?: { latex?: string; citationIndex?: number; citationTitle?: string } }
+    if (item.type === 'formula') {
+      return {
+        type: 'formula',
+        latex: item.props?.latex || '',
+      }
+    } else if (item.type === 'citation') {
+      return {
+        type: 'citation',
+        citationIndex: item.props?.citationIndex,
+        citationTitle: item.props?.citationTitle,
+      }
+    } else {
+      return {
+        type: 'text',
+        text: item.text || '',
+      }
+    }
+  })
+}
+
+// 从行内内容提取纯文本（包含公式标记）
+function extractTextFromInlineContent(inlineContent: InlineContentData[]): string {
+  return inlineContent
+    .map(c => {
+      if (c.type === 'formula') {
+        return `$${c.latex || ''}$` // 用 $ 包裹公式标识
+      } else if (c.type === 'citation') {
+        return `[${c.citationIndex || '?'}]`
+      }
+      return c.text || ''
+    })
+    .join('')
+}
+
+// 提取表格数据
+function extractTableData(block: unknown): BlockData['table'] {
+  const b = block as {
+    type: string
+    content?: unknown
+    props?: {
+      columnWidths?: number[]
+    }
+  }
+  
+  // 表格块的 content 可能是 { type: 'tableContent', rows: [...] }
+  const content = b.content as { type?: string; rows?: unknown[] } | undefined
+  
+  if (!content || content.type !== 'tableContent' || !Array.isArray(content.rows)) {
+    return undefined
+  }
+  
+  const rows: TableRow[] = content.rows.map((row: unknown) => {
+    const r = row as { cells?: unknown[] }
+    const cells: TableCell[] = (r.cells || []).map((cell: unknown) => {
+      const c = cell as { content?: unknown }
+      return {
+        content: extractInlineContent(c.content),
+      }
+    })
+    return { cells }
+  })
+  
+  return {
+    rows,
+    columnWidths: b.props?.columnWidths,
+  }
 }
 
 // 将 blocks 转换为结构化数据
 function blocksToData(blocks: Block[]): BlockData[] {
   return blocks.map(b => {
-    const block = b as { type: string; props?: { level?: number }; content?: { type: string; text: string }[] }
-    const text = block.content
-      ?.filter(c => c.type === 'text')
-      .map(c => c.text)
-      .join('') ?? ''
+    const block = b as { type: string; props?: { level?: number }; content?: unknown }
+    
+    // 处理表格块
+    if (block.type === 'table') {
+      const tableData = extractTableData(block)
+      // 提取表格文本用于 diff
+      let text = '[表格]'
+      if (tableData?.rows) {
+        const cellTexts = tableData.rows.flatMap(row => 
+          row.cells.map(cell => extractTextFromInlineContent(cell.content))
+        )
+        text = cellTexts.filter(t => t.trim()).join(' | ') || '[表格]'
+      }
+      
+      return {
+        type: block.type,
+        text,
+        table: tableData,
+      }
+    }
+    
+    // 处理普通块（段落、标题等）
+    const inlineContent = extractInlineContent(block.content)
+    const text = extractTextFromInlineContent(inlineContent)
     
     return {
       type: block.type,
       level: block.props?.level,
       text,
+      inlineContent: inlineContent.length > 0 ? inlineContent : undefined,
     }
-  }).filter(b => b.text.trim())
+  }).filter(b => b.text.trim() || b.table || (b.inlineContent && b.inlineContent.length > 0))
 }
 
 // 字符级 LCS diff
@@ -390,6 +510,108 @@ export function VersionHistoryPanel({
     return { added, removed, charsAdded, charsRemoved }
   }, [contentDiff, outlineDiff, diffMode])
 
+  // 渲染行内内容（包括公式）
+  const renderInlineContent = (inlineContent: InlineContentData[], diffType?: 'added' | 'removed' | 'same') => {
+    return inlineContent.map((item, idx) => {
+      if (item.type === 'formula') {
+        // 渲染公式
+        return (
+          <span
+            key={idx}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '1px 6px',
+              margin: '0 2px',
+              borderRadius: '3px',
+              backgroundColor: 'rgba(139, 92, 246, 0.1)',
+              border: '1px solid rgba(139, 92, 246, 0.3)',
+              fontFamily: 'monospace',
+              fontSize: '0.9em',
+            }}
+            title={item.latex}
+          >
+            {item.latex || '∅'}
+          </span>
+        )
+      } else if (item.type === 'citation') {
+        // 渲染引用
+        return (
+          <span
+            key={idx}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              padding: '1px 6px',
+              margin: '0 2px',
+              borderRadius: '3px',
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              border: '1px solid rgba(59, 130, 246, 0.3)',
+              fontSize: '0.85em',
+            }}
+            title={item.citationTitle}
+          >
+            [{item.citationIndex || '?'}]
+          </span>
+        )
+      } else {
+        // 普通文本
+        return <span key={idx}>{item.text}</span>
+      }
+    })
+  }
+
+  // 渲染表格
+  const renderTable = (table: NonNullable<BlockData['table']>, diffType?: 'added' | 'removed' | 'same') => {
+    if (!table.rows || table.rows.length === 0) return null
+    
+    const diffBg = diffType === 'added' 
+      ? 'rgba(34, 197, 94, 0.08)' 
+      : diffType === 'removed' 
+        ? 'rgba(239, 68, 68, 0.08)' 
+        : 'transparent'
+    
+    return (
+      <div style={{
+        overflowX: 'auto',
+        margin: '8px 0',
+        borderRadius: 6,
+        border: '1px solid var(--border-color)',
+        background: diffBg,
+      }}>
+        <table style={{
+          width: '100%',
+          borderCollapse: 'collapse',
+          fontSize: 14,
+        }}>
+          <tbody>
+            {table.rows.map((row, rowIdx) => (
+              <tr key={rowIdx}>
+                {row.cells.map((cell, cellIdx) => (
+                  <td
+                    key={cellIdx}
+                    style={{
+                      padding: '8px 12px',
+                      border: '1px solid var(--border-color)',
+                      verticalAlign: 'top',
+                      minWidth: 60,
+                      backgroundColor: rowIdx === 0 ? 'var(--bg-secondary)' : undefined,
+                      fontWeight: rowIdx === 0 ? 500 : 400,
+                    }}
+                  >
+                    {cell.content.length > 0 
+                      ? renderInlineContent(cell.content, diffType) 
+                      : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
   // 渲染单个 block 的 Markdown 样式
   const renderBlockStyle = (block: BlockData, diffType?: 'added' | 'removed' | 'same') => {
     const isHeading = block.type === 'heading'
@@ -455,6 +677,22 @@ export function VersionHistoryPanel({
     })
   }
 
+  // 渲染单个块的内容（包含公式等）
+  const renderBlockContent = (block: BlockData, diffType?: 'added' | 'removed' | 'same') => {
+    // 如果是表格，渲染表格
+    if (block.type === 'table' && block.table) {
+      return renderTable(block.table, diffType)
+    }
+    
+    // 如果有行内内容（包含公式），使用行内渲染
+    if (block.inlineContent && block.inlineContent.length > 0) {
+      return renderInlineContent(block.inlineContent, diffType)
+    }
+    
+    // 否则返回纯文本
+    return block.text
+  }
+
   // 渲染 diff
   const renderDiff = () => {
     const diff = diffMode === 'content' ? contentDiff : outlineDiff
@@ -470,12 +708,14 @@ export function VersionHistoryPanel({
             const block = d.newLine!
             return (
               <div key={index} style={renderBlockStyle(block, 'same')}>
-                {block.text}
+                {renderBlockContent(block, 'same')}
               </div>
             )
           } else if (d.type === 'added') {
             const block = d.newLine!
-            const hasCharDiff = d.charDiff && d.oldLine
+            // 如果有行内内容（公式），不使用 charDiff，保持公式渲染
+            const hasInlineContent = block.inlineContent && block.inlineContent.length > 0
+            const hasCharDiff = d.charDiff && d.oldLine && !block.table && !hasInlineContent
             
             return (
               <div 
@@ -489,11 +729,27 @@ export function VersionHistoryPanel({
                   borderRadius: '0 4px 4px 0',
                 }}
               >
-                {hasCharDiff ? renderCharDiff(d.charDiff!) : block.text}
+                {hasCharDiff ? renderCharDiff(d.charDiff!) : renderBlockContent(block, 'added')}
               </div>
             )
           } else {
             const block = d.oldLine!
+            
+            // 表格删除时直接渲染表格
+            if (block.type === 'table' && block.table) {
+              return (
+                <div 
+                  key={index}
+                  style={{ 
+                    opacity: 0.6,
+                    marginLeft: -16,
+                    paddingLeft: 13,
+                  }}
+                >
+                  {renderTable(block.table, 'removed')}
+                </div>
+              )
+            }
             
             return (
               <div 

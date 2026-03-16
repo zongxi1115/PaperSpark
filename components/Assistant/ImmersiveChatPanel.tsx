@@ -523,22 +523,30 @@ ${selectionText}${quoteText}${contextText}
                   }`}
                 >
                   {message.role === 'assistant' ? (
-                    <div className="prose prose-invert prose-sm max-w-none">
+                    <div className="prose prose-invert prose-sm max-w-none [&_sup]:inline [&_sup]:align-baseline">
                       <ReactMarkdown
                         remarkPlugins={[remarkGfm]}
                         components={{
-                          a: ({ href, children }) => {
+                          a: ({ node, href, children, ...props }) => {
                             if (href?.startsWith('cite:')) {
                               const index = Number(href.slice('cite:'.length))
+                              const citation = message.citations?.[index - 1]
+                              if (!citation) {
+                                console.warn('Citation not found:', index, 'in', message.citations)
+                                return <span className="text-red-400">[{children}]</span>
+                              }
                               return (
                                 <button
                                   type="button"
-                                  className="inline-flex items-center justify-center min-w-[1.2em] h-[1.2em] text-[9px] font-semibold text-blue-400 bg-blue-500/15 rounded px-0.5 mx-[1px] hover:bg-blue-500/30 hover:text-blue-300 transition-colors cursor-pointer align-super leading-none"
-                                  onClick={() => {
-                                    const citation = message.citations?.[index - 1]
-                                    if (!citation) return
+                                  className="not-prose inline-flex items-center justify-center min-w-[1.5em] min-h-[1.5em] text-[10px] font-bold text-white bg-blue-500 rounded px-1 mx-0.5 hover:bg-blue-600 active:bg-blue-700 transition-colors cursor-pointer relative -top-[0.2em] leading-none shadow-sm"
+                                  style={{ zIndex: 10 }}
+                                  onClick={(e) => {
+                                    e.preventDefault()
+                                    e.stopPropagation()
+                                    console.log('Citation clicked:', index, citation)
                                     onCitationClick(buildCitationTarget(citation, blockById.current))
                                   }}
+                                  title={`点击查看引用 [${index}]`}
                                 >
                                   {children}
                                 </button>

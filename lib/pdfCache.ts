@@ -178,18 +178,15 @@ export async function deleteTranslation(documentId: string): Promise<void> {
 
 /**
  * 检查是否有完整的沉浸式阅读缓存
+ * 只检查文档缓存和页面缓存，不要求翻译缓存（用户可能只解析了 PDF 没翻译）
  */
 export async function hasImmersiveCache(knowledgeItemId: string): Promise<boolean> {
   const doc = await getPDFDocumentByKnowledgeId(knowledgeItemId)
   if (!doc) return false
+  if (doc.parser !== 'surya' || doc.parseStatus !== 'completed') return false
   
   const pages = await getPDFPagesByDocumentId(doc.id)
-  if (pages.length === 0) return false
-  
-  const translation = await getTranslation(doc.id)
-  if (!translation) return false
-  
-  return true
+  return pages.length > 0
 }
 
 /**

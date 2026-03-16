@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getEditor } from '@/lib/editorContext'
-import { AIExtension } from '@blocknote/xl-ai'
 import type { PartialBlock, Block } from '@blocknote/core'
 import { insertBlocks } from '@blocknote/core'
 
@@ -22,6 +21,7 @@ export interface EditDocumentRequest {
 }
 
 export type EditStatus = 'idle' | 'running' | 'reviewing' | 'accepted' | 'rejected' | 'error'
+type SuggestionId = string | number
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 文档结构信息
@@ -42,13 +42,13 @@ export function getDocumentStructure(): DocumentBlockInfo[] | null {
   if (!editor) return null
 
   const blocks = editor.document as Block<any, any, any>[]
-  
+
   return blocks.map(block => {
     const b = block as Record<string, unknown>
     const type = (b.type as string) || 'paragraph'
     const props = (b.props as Record<string, unknown>) || {}
     const content = b.content
-    
+
     // 提取文本内容
     const extractText = (c: unknown): string => {
       if (!c) return ''
@@ -59,15 +59,15 @@ export function getDocumentStructure(): DocumentBlockInfo[] | null {
       if (r.type === 'text') return typeof r.text === 'string' ? r.text : ''
       if (r.type === 'link') return extractText(r.content)
       if (r.type === 'tableContent' && Array.isArray(r.rows)) {
-        return r.rows.map((row: any) => 
+        return r.rows.map((row: any) =>
           (row.cells || []).map((cell: any) => extractText(cell)).join(' | ')
         ).join(' / ')
       }
       return extractText(r.content) || extractText(r.text)
     }
-    
+
     const text = extractText(content).slice(0, 100)
-    
+
     return {
       id: block.id,
       type,
@@ -155,7 +155,7 @@ export class StreamingToolDetector {
         deleteBlockIds.push(blockId)
       }
     }
-    
+
     // 如果有删除操作，创建一个批量删除的检测项
     if (deleteBlockIds.length > 0) {
       const idx = detected.length
@@ -236,7 +236,7 @@ export function parseSimpleToolCalls(text: string): ParsedToolCall[] {
       content,
     })
   }
-  
+
   // 匹配所有 ::delete blockId，合并为批量删除
   const deleteBlockIds: string[] = []
   const deleteRegex = /::delete\s+(\S+)/g
@@ -254,7 +254,7 @@ export function parseSimpleToolCalls(text: string): ParsedToolCall[] {
       content: '',
     })
   }
-  
+
   // 匹配 ::update blockId
   const updateRegex = /::update\s+(\S+)\n([\s\S]*?)::/g
   while ((match = updateRegex.exec(text)) !== null) {
@@ -266,7 +266,7 @@ export function parseSimpleToolCalls(text: string): ParsedToolCall[] {
       content,
     })
   }
-  
+
   return results
 }
 
@@ -275,7 +275,7 @@ export function parseSimpleToolCalls(text: string): ParsedToolCall[] {
  */
 export function convertToolCallsToRequest(toolCalls: ParsedToolCall[]): EditDocumentRequest {
   const operations: EditOperation[] = []
-  
+
   for (const call of toolCalls) {
     if (call.type === 'insert') {
       // 将文本内容转换为块
@@ -322,7 +322,7 @@ export function convertToolCallsToRequest(toolCalls: ParsedToolCall[]): EditDocu
       }
     }
   }
-  
+
   return { operations }
 }
 
@@ -352,7 +352,7 @@ function simpleTextToBlocks(text: string): PartialBlock<any, any, any>[] {
   const lines = text.split('\n')
   const blocks: PartialBlock<any, any, any>[] = []
   let currentParagraph: string[] = []
-  
+
   const flushParagraph = () => {
     const content = currentParagraph.join('\n').trim()
     if (content) {
@@ -363,17 +363,17 @@ function simpleTextToBlocks(text: string): PartialBlock<any, any, any>[] {
     }
     currentParagraph = []
   }
-  
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     const trimmedLine = line.trim()
-    
+
     // 空行：结束当前段落
     if (!trimmedLine) {
       flushParagraph()
       continue
     }
-    
+
     // 标题：# ## ### 等
     const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/)
     if (headingMatch) {
@@ -387,7 +387,7 @@ function simpleTextToBlocks(text: string): PartialBlock<any, any, any>[] {
       })
       continue
     }
-    
+
     // 无序列表：- * +
     const bulletMatch = trimmedLine.match(/^[-*+]\s+(.+)$/)
     if (bulletMatch) {
@@ -398,7 +398,7 @@ function simpleTextToBlocks(text: string): PartialBlock<any, any, any>[] {
       })
       continue
     }
-    
+
     // 有序列表：1. 2. 等
     const numberedMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/)
     if (numberedMatch) {
@@ -409,14 +409,14 @@ function simpleTextToBlocks(text: string): PartialBlock<any, any, any>[] {
       })
       continue
     }
-    
+
     // 普通文本：累积到当前段落
     currentParagraph.push(trimmedLine)
   }
-  
+
   // 处理剩余内容
   flushParagraph()
-  
+
   // 如果没有任何块，创建一个空段落
   if (blocks.length === 0) {
     return [{
@@ -424,7 +424,7 @@ function simpleTextToBlocks(text: string): PartialBlock<any, any, any>[] {
       content: [{ type: 'text', text: text.trim(), styles: {} }],
     }]
   }
-  
+
   return blocks
 }
 
@@ -482,13 +482,33 @@ function buildPartialContent(block: PartialBlock<any, any, any>, text: string): 
   })
 }
 
+function generateNextSuggestionId(editor: NonNullable<ReturnType<typeof getEditor>>): SuggestionId {
+  let maxSuggestionId = 0
+
+  editor.prosemirrorState.doc.descendants((node) => {
+    for (const mark of node.marks || []) {
+      const markId = mark.attrs?.id
+      if (typeof markId === 'number' && Number.isFinite(markId)) {
+        maxSuggestionId = Math.max(maxSuggestionId, markId)
+      }
+    }
+    return true
+  })
+
+  return maxSuggestionId + 1
+}
+
 function markBlockAsInsertion(
   editor: NonNullable<ReturnType<typeof getEditor>>,
   blockId: string,
+  suggestionId?: SuggestionId,
 ) {
   const schema = editor.prosemirrorState.schema
   const insertionMark = schema.marks['insertion']
   if (!insertionMark) return
+  const insertion = insertionMark.create(
+    suggestionId === undefined ? undefined : { id: suggestionId },
+  )
 
   const doc = editor.prosemirrorState.doc
   let blockFrom = -1
@@ -520,11 +540,11 @@ function markBlockAsInsertion(
 
   editor.transact((tr) => {
     tr.setMeta('addToHistory', false)
-    tr.addNodeMark(blockFrom, insertionMark.create())
+    tr.addNodeMark(blockFrom, insertion)
     if (innerFrom < innerTo) {
-      tr.addMark(innerFrom, innerTo, insertionMark.create())
+      tr.addMark(innerFrom, innerTo, insertion)
       for (const pos of innerBlockPositions) {
-        tr.addNodeMark(pos, insertionMark.create())
+        tr.addNodeMark(pos, insertion)
       }
     }
   })
@@ -536,6 +556,7 @@ async function animateInsertWithMark(
   referenceId: string,
   position: 'before' | 'after',
   signal: AbortSignal,
+  suggestionId?: SuggestionId,
   opKey?: string,
 ): Promise<string | null> {
   const emptyBlock: PartialBlock<any, any, any> = { type: block.type || 'paragraph', content: [] }
@@ -552,7 +573,7 @@ async function animateInsertWithMark(
   const fullText = getBlockText(block)
 
   if (!fullText) {
-    markBlockAsInsertion(editor, insertedId)
+    markBlockAsInsertion(editor, insertedId, suggestionId)
     if (opKey) registerOperationBlockId(opKey, insertedId)
     return insertedId
   }
@@ -562,18 +583,20 @@ async function animateInsertWithMark(
     if (signal.aborted) return insertedId
     const partial = fullText.slice(0, i)
     editor.updateBlock(insertedId!, { ...block, content: buildPartialContent(block, partial) } as any)
-    markBlockAsInsertion(editor, insertedId!)
+    markBlockAsInsertion(editor, insertedId!, suggestionId)
     await delay(12 * jitter())
   }
 
   editor.updateBlock(insertedId, block as any)
-  markBlockAsInsertion(editor, insertedId)
+  markBlockAsInsertion(editor, insertedId, suggestionId)
   if (opKey) registerOperationBlockId(opKey, insertedId)
   return insertedId
 }
 
 // 按操作 key 存储插入的块ID，用于后续按操作接受/撤销
 const operationBlockIds = new Map<string, Set<string>>()
+// 按操作 key 存储 suggestion id，用于精确接受/撤销标记
+const operationSuggestionIds = new Map<string, Set<SuggestionId>>()
 // 按操作 key 存储更新操作的旧块内容，用于撤销恢复
 const operationOldBlocks = new Map<string, Array<{ blockId: string; oldBlock: any }>>()
 
@@ -582,6 +605,65 @@ function registerOperationBlockId(opKey: string, blockId: string) {
     operationBlockIds.set(opKey, new Set())
   }
   operationBlockIds.get(opKey)!.add(blockId)
+}
+
+function registerOperationSuggestionId(opKey: string, suggestionId: SuggestionId) {
+  if (!operationSuggestionIds.has(opKey)) {
+    operationSuggestionIds.set(opKey, new Set())
+  }
+  operationSuggestionIds.get(opKey)!.add(suggestionId)
+}
+
+function collectInsertionMarkTargets(
+  editor: NonNullable<ReturnType<typeof getEditor>>,
+  suggestionIds?: Set<SuggestionId>,
+) {
+  const insertionMark = editor.prosemirrorState.schema.marks['insertion']
+  const inlineRanges: Array<{ from: number; to: number }> = []
+  const blockPositions: number[] = []
+
+  if (!insertionMark) {
+    return { insertionMark: null, inlineRanges, blockPositions }
+  }
+
+  editor.prosemirrorState.doc.descendants((node, pos) => {
+    const mark = insertionMark.isInSet(node.marks || [])
+    if (!mark) return true
+    if (suggestionIds && !suggestionIds.has(mark.attrs?.id)) return true
+
+    if (node.isInline) {
+      inlineRanges.push({ from: pos, to: pos + node.nodeSize })
+    }
+
+    if (node.isBlock) {
+      blockPositions.push(pos)
+    }
+
+    return true
+  })
+
+  return { insertionMark, inlineRanges, blockPositions }
+}
+
+function removeInsertionMarksForOperation(
+  editor: NonNullable<ReturnType<typeof getEditor>>,
+  suggestionIds?: Set<SuggestionId>,
+) {
+  const { insertionMark, inlineRanges, blockPositions } = collectInsertionMarkTargets(editor, suggestionIds)
+  if (!insertionMark) return
+
+  editor.transact((tr) => {
+    tr.setMeta('addToHistory', false)
+
+    for (const range of inlineRanges) {
+      tr.removeMark(range.from, range.to, insertionMark)
+    }
+
+    const uniqueBlockPositions = [...new Set(blockPositions)].sort((a, b) => b - a)
+    for (const pos of uniqueBlockPositions) {
+      tr.removeNodeMark(pos, insertionMark)
+    }
+  })
 }
 
 // 移除 insertionMark 标记（接受更改时调用）
@@ -594,44 +676,9 @@ export function acceptInsertionChanges(opKey?: string): void {
   const insertionMark = schema.marks['insertion']
   if (!insertionMark) return
 
-  if (opKey && operationBlockIds.has(opKey)) {
-    // 按操作作用域移除标记
-    const blockIds = operationBlockIds.get(opKey)!
-
-    // 收集需要处理的块位置信息
-    const blockInfos: Array<{ pos: number; node: any; innerFrom: number; innerTo: number }> = []
-
-    editor.prosemirrorState.doc.descendants((node, pos) => {
-      if (node.isBlock && node.attrs?.id && blockIds.has(node.attrs.id)) {
-        const innerFrom = pos + 1
-        const innerTo = pos + node.nodeSize - 1
-        blockInfos.push({ pos, node, innerFrom, innerTo })
-      }
-      return true
-    })
-
-    // 使用单个事务处理所有标记移除
-    editor.transact((tr) => {
-      tr.setMeta('addToHistory', false)
-      
-      // 先移除所有内联标记
-      for (const info of blockInfos) {
-        if (info.innerFrom < info.innerTo) {
-          tr.removeMark(info.innerFrom, info.innerTo, insertionMark)
-        }
-      }
-      
-      // 然后移除节点标记（逆序处理避免位置偏移）
-      for (let i = blockInfos.length - 1; i >= 0; i--) {
-        const info = blockInfos[i]
-        const hasMark = (info.node.marks || []).some((m: any) => m.type === insertionMark)
-        if (hasMark) {
-          const filteredMarks = (info.node.marks || []).filter((m: any) => m.type !== insertionMark)
-          tr.setNodeMarkup(info.pos, undefined, undefined, filteredMarks)
-        }
-      }
-    })
-    
+  if (opKey && operationSuggestionIds.has(opKey)) {
+    removeInsertionMarksForOperation(editor, operationSuggestionIds.get(opKey))
+    operationSuggestionIds.delete(opKey)
     operationBlockIds.delete(opKey)
     operationOldBlocks.delete(opKey)
   } else {
@@ -659,8 +706,9 @@ export function acceptInsertionChanges(opKey?: string): void {
         tr.setNodeMarkup(info.pos, undefined, undefined, filteredMarks)
       }
     })
-    
+
     operationBlockIds.clear()
+    operationSuggestionIds.clear()
     operationOldBlocks.clear()
   }
 }
@@ -684,20 +732,17 @@ export function rejectInsertionChanges(opKey?: string): void {
       operationOldBlocks.delete(opKey)
     }
 
-    // 删除插入的块
+    if (operationSuggestionIds.has(opKey)) {
+      removeInsertionMarksForOperation(editor, operationSuggestionIds.get(opKey))
+      operationSuggestionIds.delete(opKey)
+    }
+
+    // 删除本次操作新插入的块
     if (operationBlockIds.has(opKey)) {
-      const blockIds = operationBlockIds.get(opKey)!
-      // 先移除标记再删除
-      const schema = editor.prosemirrorState.schema
-      const insertionMark = schema.marks['insertion']
-      if (insertionMark) {
-        editor.transact((tr) => {
-          tr.setMeta('addToHistory', false)
-          tr.removeMark(0, tr.doc.content.size, insertionMark)
-        })
+      const blockIds = [...operationBlockIds.get(opKey)!].filter(blockId => blockExists(editor, blockId))
+      if (blockIds.length > 0) {
+        editor.removeBlocks(blockIds)
       }
-      // 删除块
-      editor.removeBlocks([...blockIds])
       operationBlockIds.delete(opKey)
     }
   } else {
@@ -737,6 +782,7 @@ export function rejectInsertionChanges(opKey?: string): void {
       editor.removeBlocks(blocksToRemove)
     }
     operationBlockIds.clear()
+    operationSuggestionIds.clear()
   }
 }
 
@@ -850,6 +896,11 @@ export async function applyEditOperations(
 
   const blocks = editor.document
   const lastBlockId = blocks[blocks.length - 1]?.id
+  const suggestionId = generateNextSuggestionId(editor)
+
+  if (opKey) {
+    registerOperationSuggestionId(opKey, suggestionId)
+  }
 
   for (const op of request.operations) {
     if (signal.aborted) break
@@ -866,7 +917,7 @@ export async function applyEditOperations(
       for (const block of op.blocks) {
         if (signal.aborted) break
         onProgress('正在写入…')
-        const newId = await animateInsertWithMark(editor, block, prevId, op.position, signal, opKey)
+        const newId = await animateInsertWithMark(editor, block, prevId, op.position, signal, suggestionId, opKey)
         if (newId) prevId = newId
         await delay(60 * jitter())
       }
@@ -885,10 +936,9 @@ export async function applyEditOperations(
           operationOldBlocks.get(opKey)!.push({ blockId: op.blockId, oldBlock: JSON.parse(JSON.stringify(oldBlock)) })
         }
       }
-    onProgress('更新中…')
+      onProgress('更新中…')
       editor.updateBlock(op.blockId, op.block as any)
-      markBlockAsInsertion(editor, op.blockId)
-      if (opKey) registerOperationBlockId(opKey, op.blockId)
+      markBlockAsInsertion(editor, op.blockId, suggestionId)
       await delay(120 * jitter())
     } else if (op.type === 'delete') {
       if (!blockExists(editor, op.blockId)) {
@@ -902,9 +952,9 @@ export async function applyEditOperations(
       } catch (error) {
         // 如果直接删除失败，尝试获取块并删除
         const block = editor.getBlock(op.blockId)
-      if (block) {
+        if (block) {
           editor.removeBlocks([op.blockId])
-     }
+        }
       }
       await delay(80 * jitter())
     }
@@ -1030,8 +1080,8 @@ function TypingDots() {
 function EditIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: '#f59e0b', flexShrink: 0 }}>
-      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
     </svg>
   )
 }
@@ -1054,10 +1104,10 @@ interface SimpleToolProps {
 
 export function SimpleTool({ type, params, content, status, progress, error, onAccept, onReject, opKey }: SimpleToolProps) {
   // 检查是否为批量删除
-  const deleteBlockIds = type === 'delete' && params.blockIds 
-    ? params.blockIds.split(',').filter(Boolean) 
-    : type === 'delete' && params.blockId 
-      ? [params.blockId] 
+  const deleteBlockIds = type === 'delete' && params.blockIds
+    ? params.blockIds.split(',').filter(Boolean)
+    : type === 'delete' && params.blockId
+      ? [params.blockId]
       : []
   const isBatchDelete = type === 'delete' && deleteBlockIds.length > 1
 
@@ -1074,7 +1124,7 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
   }[type]
 
   const isSettled = status === 'accepted' || status === 'rejected'
-  
+
   return (
     <div style={{
       border: '1px solid var(--border-color)',
@@ -1119,7 +1169,7 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
         {status === 'error' && <span style={{ color: '#ef4444', fontSize: 11 }}>✗ 失败</span>}
         {status === 'idle' && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>等待中…</span>}
       </div>
-      
+
       {/* 批量删除预览 */}
       {type === 'delete' && isBatchDelete && (
         <div style={{
@@ -1134,9 +1184,9 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
             将删除以下 {deleteBlockIds.length} 个块：
           </div>
           {deleteBlockIds.slice(0, 5).map((id, i) => (
-            <div key={i} style={{ 
-              fontFamily: 'monospace', 
-              fontSize: 10, 
+            <div key={i} style={{
+              fontFamily: 'monospace',
+              fontSize: 10,
               color: '#ef4444',
               marginBottom: 2,
             }}>
@@ -1150,7 +1200,7 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
           )}
         </div>
       )}
-      
+
       {/* 内容预览 */}
       {type === 'insert' && content && (
         <div style={{
@@ -1315,4 +1365,3 @@ function UpdateIcon() {
     </svg>
   )
 }
-

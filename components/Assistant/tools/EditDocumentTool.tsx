@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getEditor } from '@/lib/editorContext'
+import { convertMarkdownToBlocks } from '@/lib/blocknoteMarkdown'
 import type { PartialBlock, Block } from '@blocknote/core'
 import { insertBlocks } from '@blocknote/core'
 
@@ -57,6 +58,12 @@ export function getDocumentStructure(): DocumentBlockInfo[] | null {
       if (typeof c !== 'object') return ''
       const r = c as Record<string, unknown>
       if (r.type === 'text') return typeof r.text === 'string' ? r.text : ''
+      if (r.type === 'formula') {
+        const props = typeof r.props === 'object' && r.props !== null
+          ? r.props as Record<string, unknown>
+          : null
+        return typeof props?.latex === 'string' ? `$${props.latex}$` : ''
+      }
       if (r.type === 'link') return extractText(r.content)
       if (r.type === 'tableContent' && Array.isArray(r.rows)) {
         return r.rows.map((row: any) =>
@@ -368,99 +375,7 @@ export function convertToolCallsToRequest(toolCalls: ParsedToolCall[]): EditDocu
  */
 export function textToBlocks(text: string): PartialBlock<any, any, any>[] {
   const editor = getEditor()
-  if (editor) {
-    try {
-      const blocks = editor.tryParseMarkdownToBlocks(text)
-      if (blocks && blocks.length > 0) return blocks
-    } catch {
-      // Fallback to simple parser
-    }
-  }
-  return simpleTextToBlocks(text)
-}
-
-/**
- * 简易 Markdown 解析器（fallback）
- * 支持基础语法：标题 (#)、无序列表 (-)、有序列表 (1.)、代码块
- */
-function simpleTextToBlocks(text: string): PartialBlock<any, any, any>[] {
-  const lines = text.split('\n')
-  const blocks: PartialBlock<any, any, any>[] = []
-  let currentParagraph: string[] = []
-
-  const flushParagraph = () => {
-    const content = currentParagraph.join('\n').trim()
-    if (content) {
-      blocks.push({
-        type: 'paragraph',
-        content: [{ type: 'text', text: content, styles: {} }],
-      })
-    }
-    currentParagraph = []
-  }
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    const trimmedLine = line.trim()
-
-    // 空行：结束当前段落
-    if (!trimmedLine) {
-      flushParagraph()
-      continue
-    }
-
-    // 标题：# ## ### 等
-    const headingMatch = trimmedLine.match(/^(#{1,6})\s+(.+)$/)
-    if (headingMatch) {
-      flushParagraph()
-      const level = headingMatch[1].length
-      const text = headingMatch[2]
-      blocks.push({
-        type: 'heading',
-        props: { level },
-        content: [{ type: 'text', text, styles: {} }],
-      })
-      continue
-    }
-
-    // 无序列表：- * +
-    const bulletMatch = trimmedLine.match(/^[-*+]\s+(.+)$/)
-    if (bulletMatch) {
-      flushParagraph()
-      blocks.push({
-        type: 'bulletListItem',
-        content: [{ type: 'text', text: bulletMatch[1], styles: {} }],
-      })
-      continue
-    }
-
-    // 有序列表：1. 2. 等
-    const numberedMatch = trimmedLine.match(/^(\d+)\.\s+(.+)$/)
-    if (numberedMatch) {
-      flushParagraph()
-      blocks.push({
-        type: 'numberedListItem',
-        content: [{ type: 'text', text: numberedMatch[2], styles: {} }],
-      })
-      continue
-    }
-
-    // 普通文本：累积到当前段落
-    currentParagraph.push(trimmedLine)
-  }
-
-  // 处理剩余内容
-  flushParagraph()
-
-  // 如果没有任何块，创建一个空段落
-  if (blocks.length === 0) {
-    return [{
-      type: 'paragraph',
-      content: [{ type: 'text', text: text.trim(), styles: {} }],
-    }]
-  }
-
-  return blocks
+  return convertMarkdownToBlocks(editor, text)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -480,9 +395,15 @@ function extractBlockPreviewText(block: any): string {
   const content = block.content
   if (!content) return ''
   if (typeof content === 'string') return content
+  if (content?.type === 'tableContent' && Array.isArray(content.rows)) {
+    return content.rows
+      .map((row: any) => (row.cells || []).map((cell: any) => extractBlockPreviewText(cell)).join(' | '))
+      .join('\n')
+  }
   if (Array.isArray(content)) {
     return content.map((c: any) => {
       if (typeof c === 'string') return c
+      if (c?.type === 'formula') return c?.props?.latex ? `$${c.props.latex}$` : ''
       if (c?.text) return c.text
       if (c?.content) return extractBlockPreviewText(c)
       return ''

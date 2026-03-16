@@ -191,8 +191,11 @@ ${blockList}
 支持完整 Markdown 语法：
 - # 标题 → heading（支持 # 到 ######）
 - **粗体**、*斜体*、\`行内代码\` → 富文本样式
+- $a+b$ → 行内公式
+- 独占一段的 $$a+b$$ → 居中的公式段落
 - - 列表项 → bulletListItem
 - 1. 编号 → numberedListItem
+- GFM 表格 → table
 - \`\`\`语言 代码 \`\`\` → codeBlock
 - [链接](url) → 链接
 - > 引用 → 引用块

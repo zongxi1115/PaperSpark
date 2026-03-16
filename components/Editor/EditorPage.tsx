@@ -34,11 +34,12 @@ import type { AppDocument, AppSettings, ArticleAuthor, DocumentVersion } from '@
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
-import { FormulaInputExtension, parseMarkdownWithFormulas, convertToInlineContent } from '@/lib/formulaInputExtension'
+import { FormulaInputExtension } from '@/lib/formulaInputExtension'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
 import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
 import { registerEditor, unregisterEditor } from '@/lib/editorContext'
 import { exportToLatex, type LatexExportLanguage } from '@/lib/latexExporter'
+import { insertMarkdownBlocksAtCursor, looksLikeMarkdownContent } from '@/lib/blocknoteMarkdown'
 import { useThemeContext } from '@/components/Providers'
 
 // 自定义 Schema：包含行内公式和引用
@@ -222,35 +223,22 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       }),
       FormulaInputExtension(),
     ],
-    // 粘贴处理器：解析 markdown 中的公式
+    // 粘贴处理器：统一走 Markdown -> BlockNote 转换，支持公式、表格等复杂结构
     pasteHandler: ({ event, editor, defaultPasteHandler }) => {
       const clipboardData = event.clipboardData
       if (!clipboardData) {
         return defaultPasteHandler()
       }
 
-      // 获取纯文本内容
-      const plainText = clipboardData.getData('text/plain')
-      
-      // 检查是否包含公式标记
-      if (plainText && (plainText.includes('$') || plainText.includes('$$'))) {
-        // 解析公式
-        const parsed = parseMarkdownWithFormulas(plainText)
-        
-        // 如果有公式被解析出来
-        const hasFormulas = parsed.some(p => p.type === 'formula')
-        
-        if (hasFormulas) {
-          // 处理包含公式的粘贴
-          // 对于块级公式，需要创建新块
-          // 对于行内公式，转换为行内内容
-          
-          // 将解析结果转换为 BlockNote 可用的格式
-          const inlineContent = convertToInlineContent(parsed)
-          
-          // 插入内容
-          editor.insertInlineContent(inlineContent)
-          return true
+      const markdownText = clipboardData.getData('text/markdown')
+      const plainText = markdownText || clipboardData.getData('text/plain')
+      const hasMarkdownMime = Array.from(clipboardData.types || []).includes('text/markdown')
+
+      if (plainText && (hasMarkdownMime || looksLikeMarkdownContent(plainText))) {
+        try {
+          return insertMarkdownBlocksAtCursor(editor as any, plainText)
+        } catch (error) {
+          console.warn('Custom markdown paste failed, falling back to default handler.', error)
         }
       }
       

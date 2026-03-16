@@ -49,19 +49,25 @@ interface ImmersiveChatPanelProps {
 function splitIntoSentences(text: string) {
   const normalized = (text || '').replace(/\s+/g, ' ').trim()
   if (!normalized) return []
-  // Rough sentence split for zh/en mixed content (avoid regex lookbehind for compatibility).
   const sentences: string[] = []
   let buffer = ''
-  for (const ch of Array.from(normalized)) {
-    buffer += ch
-    if (/[。！？!?]/.test(ch)) {
+  const chars = Array.from(normalized)
+  for (let i = 0; i < chars.length; i++) {
+    buffer += chars[i]
+    const isCnEnd = /[。！？]/.test(chars[i])
+    const isEnEnd = /[.!?]/.test(chars[i]) && (
+      i === chars.length - 1 || /\s/.test(chars[i + 1] || '')
+    )
+    if (isCnEnd || isEnEnd) {
       const trimmed = buffer.trim()
-      if (trimmed) sentences.push(trimmed)
-      buffer = ''
+      if (trimmed.length > 3) {
+        sentences.push(trimmed)
+        buffer = ''
+      }
     }
   }
   const rest = buffer.trim()
-  if (rest) sentences.push(rest)
+  if (rest.length > 0) sentences.push(rest)
   return sentences.length ? sentences : [normalized]
 }
 
@@ -72,11 +78,31 @@ function pickBestSentence(blockText: string, preferredText?: string) {
   const preferred = (preferredText || '').replace(/\s+/g, ' ').trim()
   if (!preferred) return { sentence: sentences[0], sentenceIndex: 0 }
 
-  // Prefer a sentence that contains an excerpt from preferred text.
-  const probe = preferred.slice(0, 64)
-  const idx = sentences.findIndex(s => s.includes(probe) || probe.includes(s.slice(0, 32)))
-  if (idx >= 0) return { sentence: sentences[idx], sentenceIndex: idx }
-  return { sentence: sentences[0], sentenceIndex: 0 }
+  let bestIdx = 0
+  let bestScore = -1
+
+  for (let i = 0; i < sentences.length; i++) {
+    const s = sentences[i]
+    // Direct containment
+    if (s === preferred || preferred.includes(s) || s.includes(preferred)) {
+      return { sentence: s, sentenceIndex: i }
+    }
+    // 4-gram overlap scoring
+    const n = 4
+    const sGrams = new Set<string>()
+    for (let j = 0; j <= s.length - n; j++) sGrams.add(s.slice(j, j + n))
+    let overlap = 0
+    for (let j = 0; j <= preferred.length - n; j++) {
+      if (sGrams.has(preferred.slice(j, j + n))) overlap++
+    }
+    const score = overlap / Math.max(1, preferred.length - n + 1)
+    if (score > bestScore) {
+      bestScore = score
+      bestIdx = i
+    }
+  }
+
+  return { sentence: sentences[bestIdx], sentenceIndex: bestIdx }
 }
 
 function injectCitationLinks(markdown: string, maxIndex: number) {
@@ -88,6 +114,27 @@ function injectCitationLinks(markdown: string, maxIndex: number) {
     if (full[offset + match.length] === '(') return match
     return `[${num}](cite:${num})`
   })
+}
+
+function buildCitationTarget(
+  citation: ChatCitation,
+  blockMap: Map<string, TextBlock>,
+): GuideFocusTarget {
+  const block = blockMap.get(citation.blockId)
+  const pageNum = citation.pageNum || block?.pageNum || 0
+  const { sentence, sentenceIndex } = pickBestSentence(
+    block?.text || citation.text,
+    citation.text,
+  )
+  const sentenceNo = Math.max(sentenceIndex + 1, 1)
+  return {
+    blockId: citation.blockId,
+    pageNum: pageNum || 1,
+    title: pageNum
+      ? `第${pageNum}页 · 第${sentenceNo}句`
+      : `第${sentenceNo}句`,
+    note: (sentence || citation.text).slice(0, 140),
+  }
 }
 
 export default function ImmersiveChatPanel({
@@ -324,7 +371,7 @@ ${selectionText}${quoteText}${contextText}
 
 用户问题：${content}
 
-请用中文回答，简洁明了。如果引用了文档内容，请在句末标注引用编号如[1]。`,
+请用中文回答，简洁明了。回答中引用文档内容时，请在相关句末用方括号标注对应段落编号（如[1]、[2]），编号必须与上文参考段落编号一致。`,
             },
           ],
           modelConfig: largeModelConfig,
@@ -439,13 +486,15 @@ ${selectionText}${quoteText}${contextText}
       >
         {messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
-            <Icon icon="mdi:chat-question-outline" className="text-4xl mb-3 text-gray-600" />
-            <p className="text-sm text-center mb-4">选择文本提问，或直接输入问题</p>
+            <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-500/10 to-purple-500/10 flex items-center justify-center mb-3">
+              <Icon icon="mdi:chat-question-outline" className="text-xl text-blue-400/60" />
+            </div>
+            <p className="text-sm text-center mb-4 text-gray-400">选择文本提问，或直接输入问题</p>
             <div className="space-y-2 w-full max-w-xs">
               {quickQuestions.map((q, i) => (
                 <button
                   key={i}
-                  className="w-full text-left px-3 py-2 text-xs text-gray-400 bg-[#1a1a1a] rounded-lg hover:bg-[#252525] hover:text-gray-300 transition-colors"
+                  className="w-full text-left px-3 py-2.5 text-xs text-gray-400 bg-[#1a1a1a] rounded-xl border border-white/[0.04] hover:bg-[#222] hover:text-gray-300 hover:border-white/[0.08] transition-all"
                   onClick={() => setInputValue(q)}
                 >
                   {q}
@@ -458,14 +507,19 @@ ${selectionText}${quoteText}${contextText}
             {messages.map((message) => (
               <div
                 key={message.id}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`flex ${message.role === 'user' ? 'justify-end pl-10' : 'gap-2.5 pr-6'}`}
               >
+                {message.role === 'assistant' && (
+                  <div className="shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center mt-1">
+                    <Icon icon="mdi:robot-outline" className="text-[11px] text-blue-400" />
+                  </div>
+                )}
                 <div
                   data-chat-message-id={message.id}
-                  className={`max-w-[90%] rounded-xl px-3 py-2 ${
+                  className={`rounded-2xl px-3.5 py-2.5 ${
                     message.role === 'user'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-[#252525] text-gray-200'
+                      ? 'bg-blue-600/90 text-white max-w-[85%] rounded-tr-sm'
+                      : 'flex-1 min-w-0 bg-[#1e1e1e] border border-white/[0.04] text-gray-200 rounded-tl-sm'
                   }`}
                 >
                   {message.role === 'assistant' ? (
@@ -479,23 +533,14 @@ ${selectionText}${quoteText}${contextText}
                               return (
                                 <button
                                   type="button"
-                                  className="text-sky-300 hover:text-sky-200 hover:underline"
+                                  className="inline-flex items-center justify-center min-w-[1.2em] h-[1.2em] text-[9px] font-semibold text-blue-400 bg-blue-500/15 rounded px-0.5 mx-[1px] hover:bg-blue-500/30 hover:text-blue-300 transition-colors cursor-pointer align-super leading-none"
                                   onClick={() => {
                                     const citation = message.citations?.[index - 1]
                                     if (!citation) return
-
-                                    const block = blockById.current.get(citation.blockId)
-                                    const pageNum = citation.pageNum || block?.pageNum || 0
-                                    const { sentence, sentenceIndex } = pickBestSentence(block?.text || citation.text, citation.text)
-                                    onCitationClick({
-                                      blockId: citation.blockId,
-                                      pageNum: pageNum || 1,
-                                      title: pageNum ? `第${pageNum}页 · 第${Math.max(sentenceIndex + 1, 1)}句` : `第${Math.max(sentenceIndex + 1, 1)}句`,
-                                      note: sentence || citation.text.slice(0, 120),
-                                    })
+                                    onCitationClick(buildCitationTarget(citation, blockById.current))
                                   }}
                                 >
-                                  [{children}]
+                                  {children}
                                 </button>
                               )
                             }
@@ -514,59 +559,39 @@ ${selectionText}${quoteText}${contextText}
                     <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                   )}
 
-                  {/* 引用来源（精简显示） */}
+                  {/* Citation sources */}
                   {message.citations && message.citations.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-[#333]">
-                      <p className="text-[10px] text-gray-500 mb-1">引用来源：</p>
+                    <div className="mt-2.5 pt-2 border-t border-white/[0.06]">
                       <div className="flex flex-wrap gap-1">
-                        {message.citations.slice(0, 3).map((citation) => (
-                          <button
-                            key={citation.id}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] bg-[#1a1a1a] text-blue-400 rounded hover:bg-blue-500/10 transition-colors"
-                            onClick={() => onCitationClick({
-                              blockId: citation.blockId,
-                              pageNum: (citation.pageNum || blockById.current.get(citation.blockId)?.pageNum || 0) || 1,
-                              title: (() => {
-                                const pageNum = citation.pageNum || blockById.current.get(citation.blockId)?.pageNum || 0
-                                const { sentenceIndex } = pickBestSentence(blockById.current.get(citation.blockId)?.text || citation.text, citation.text)
-                                const sentenceNo = Math.max(sentenceIndex + 1, 1)
-                                return pageNum ? `第${pageNum}页 · 第${sentenceNo}句` : `第${sentenceNo}句`
-                              })(),
-                              note: (() => {
-                                const block = blockById.current.get(citation.blockId)
-                                const { sentence } = pickBestSentence(block?.text || citation.text, citation.text)
-                                return (sentence || citation.text).slice(0, 140)
-                              })(),
-                            })}
-                          >
-                            <Icon icon="mdi:file-document-outline" className="text-[10px]" />
-                            <span>
-                              {(() => {
-                                const pageNum = citation.pageNum || blockById.current.get(citation.blockId)?.pageNum || 0
-                                const { sentenceIndex } = pickBestSentence(blockById.current.get(citation.blockId)?.text || citation.text, citation.text)
-                                const sentenceNo = Math.max(sentenceIndex + 1, 1)
-                                return pageNum ? `第${pageNum}页·第${sentenceNo}句` : `第${sentenceNo}句`
-                              })()}
-                            </span>
-                          </button>
-                        ))}
+                        {message.citations.map((citation, i) => {
+                          const target = buildCitationTarget(citation, blockById.current)
+                          return (
+                            <button
+                              key={citation.id}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[10px] text-gray-400 bg-white/[0.04] rounded-lg hover:bg-white/[0.08] hover:text-gray-300 transition-colors"
+                              onClick={() => onCitationClick(target)}
+                            >
+                              <span className="text-blue-400 font-semibold">[{i + 1}]</span>
+                              <span>{target.title}</span>
+                            </button>
+                          )
+                        })}
                       </div>
                     </div>
                   )}
 
-                  {/* 推荐追问 */}
+                  {/* Follow-up questions */}
                   {message.followUpQuestions && message.followUpQuestions.length > 0 && (
-                    <div className="mt-2 pt-2 border-t border-[#333]">
-                      <p className="text-[10px] text-gray-500 mb-1.5">推荐追问：</p>
-                      <div className="space-y-1">
+                    <div className="mt-2.5 pt-2 border-t border-white/[0.06]">
+                      <div className="flex flex-wrap gap-1.5">
                         {message.followUpQuestions.map((q, i) => (
                           <button
                             key={i}
-                            className="block w-full text-left px-2 py-1.5 text-[11px] text-gray-400 bg-[#1a1a1a] rounded hover:bg-[#2a2a2a] hover:text-gray-300 transition-colors"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] text-gray-400 bg-white/[0.04] rounded-full hover:bg-white/[0.08] hover:text-gray-300 transition-colors text-left"
                             onClick={() => setInputValue(q)}
                           >
-                            <Icon icon="mdi:lightbulb-outline" className="text-amber-500 mr-1" />
-                            {q}
+                            <Icon icon="mdi:lightbulb-outline" className="text-amber-500/70 text-[10px] shrink-0" />
+                            <span className="line-clamp-1">{q}</span>
                           </button>
                         ))}
                       </div>
@@ -577,8 +602,11 @@ ${selectionText}${quoteText}${contextText}
             ))}
 
             {isLoading && messages[messages.length - 1]?.role === 'user' && (
-              <div className="flex justify-start">
-                <div className="bg-[#252525] rounded-xl px-3 py-2">
+              <div className="flex gap-2.5 pr-6">
+                <div className="shrink-0 w-6 h-6 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-500/20 flex items-center justify-center mt-1">
+                  <Icon icon="mdi:robot-outline" className="text-[11px] text-blue-400" />
+                </div>
+                <div className="bg-[#1e1e1e] border border-white/[0.04] rounded-2xl rounded-tl-sm px-3.5 py-2.5">
                   <div className="flex items-center gap-2 text-gray-400">
                     <Spinner size="sm" color="primary" />
                     <span className="text-sm">思考中...</span>

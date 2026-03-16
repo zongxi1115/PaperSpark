@@ -171,7 +171,8 @@ function convertBlocks(blocks: UnknownBlock[], imageMap: Map<string, ImageAsset>
     const block = blocks[i]
     const type = block.type || ''
 
-    if (type === 'bulletListItem' || type === 'numberedListItem') {
+    // 处理所有列表类型
+    if (type === 'bulletListItem' || type === 'numberedListItem' || type === 'checkListItem' || type === 'toggleListItem') {
       const listResult = convertList(blocks, i, imageMap)
       parts.push(listResult.latex)
       i = listResult.nextIndex - 1
@@ -209,6 +210,15 @@ function convertSingleBlock(block: UnknownBlock, imageMap: Map<string, ImageAsse
 
   if (type === 'codeBlock') {
     const code = extractPlainTextFromInline(block.content)
+    const language = String(block.props?.language || 'text')
+    // 如果有语言且非 text，使用 listings 包高亮
+    if (language && language !== 'text') {
+      return [
+        '\\begin{lstlisting}[language=' + escapeLatex(language) + ']',
+        code,
+        '\\end{lstlisting}',
+      ].join('\n')
+    }
     return `\\begin{verbatim}\n${code}\n\\end{verbatim}`
   }
 
@@ -217,6 +227,38 @@ function convertSingleBlock(block: UnknownBlock, imageMap: Map<string, ImageAsse
     const child = convertChildBlocks(block.children, imageMap)
     const body = child ? `${quote}\n${child}` : quote
     return `\\begin{quote}\n${body}\n\\end{quote}`
+  }
+
+  // Divider 块：水平分隔线
+  if (type === 'divider') {
+    return '\\noindent\\rule{\\textwidth}{0.4pt}'
+  }
+
+  // CheckListItem 块：复选框列表项
+  if (type === 'checkListItem') {
+    const text = convertInlineContent(block.content)
+    const checked = Boolean(block.props?.checked)
+    const symbol = checked ? '$\\boxtimes$' : '$\\square$'
+    const child = convertChildBlocks(block.children, imageMap)
+    if (child) {
+      return `${symbol} ${text}\n${child}`
+    }
+    return `${symbol} ${text}`
+  }
+
+  // ToggleListItem 块：可折叠列表项（使用 description 列表模拟）
+  if (type === 'toggleListItem') {
+    const text = convertInlineContent(block.content)
+    const child = convertChildBlocks(block.children, imageMap)
+    if (child) {
+      return [
+        '\\begin{description}',
+        `\\item[${text}]`,
+        child,
+        '\\end{description}',
+      ].join('\n')
+    }
+    return text
   }
 
   if (type === 'image') {
@@ -243,25 +285,95 @@ function convertSingleBlock(block: UnknownBlock, imageMap: Map<string, ImageAsse
     return lines.join('\n')
   }
 
+  // File embed 块
+  if (type === 'file') {
+    const name = escapeLatex(String(block.props?.name || 'File'))
+    const url = String(block.props?.url || '')
+    const caption = escapeLatex(String(block.props?.caption || ''))
+    if (url) {
+      const link = `\\href{${escapeLatexUrl(url)}}{${name}}`
+      return caption ? `${link} (${caption})` : link
+    }
+    return name
+  }
+
+  // Video embed 块
+  if (type === 'video') {
+    const name = escapeLatex(String(block.props?.name || 'Video'))
+    const url = String(block.props?.url || '')
+    const caption = escapeLatex(String(block.props?.caption || ''))
+    if (url) {
+      return `\\begin{quote}\\textbf{Video:} \\url{${escapeLatexUrl(url)}}${caption ? ` \\textit{(${caption})}` : ''}\\end{quote}`
+    }
+    return `\\begin{quote}\\textbf{Video:} ${name}${caption ? ` (${caption})` : ''}\\end{quote}`
+  }
+
+  // Audio embed 块
+  if (type === 'audio') {
+    const name = escapeLatex(String(block.props?.name || 'Audio'))
+    const url = String(block.props?.url || '')
+    const caption = escapeLatex(String(block.props?.caption || ''))
+    if (url) {
+      return `\\begin{quote}\\textbf{Audio:} \\url{${escapeLatexUrl(url)}}${caption ? ` \\textit{(${caption})}` : ''}\\end{quote}`
+    }
+    return `\\begin{quote}\\textbf{Audio:} ${name}${caption ? ` (${caption})` : ''}\\end{quote}`
+  }
+
   const fallback = convertInlineContent(block.content)
   if (fallback.trim()) return fallback
 
   return convertChildBlocks(block.children, imageMap)
 }
 
+/**
+ * TableContent 结构（根据 BlockNote 文档）
+ * type TableContent = {
+ *   type: "tableContent";
+ *   columnWidths: (number | undefined)[];
+ *   headerRows?: number;
+ *   headerCols?: number;
+ *   rows: { cells: TableCell[] }[];
+ * }
+ * type TableCell = {
+ *   type: "tableCell";
+ *   props: { backgroundColor, textColor, textAlignment, colspan?, rowspan? };
+ *   content: InlineContent[];
+ * }
+ */
+type TableContent = {
+  type?: 'tableContent'
+  columnWidths?: (number | undefined)[]
+  headerRows?: number
+  headerCols?: number
+  rows?: Array<{ cells?: TableCellData[] }>
+}
+
+type TableCellData = {
+  type?: 'tableCell'
+  props?: {
+    backgroundColor?: string
+    textColor?: string
+    textAlignment?: 'left' | 'center' | 'right' | 'justify'
+    colspan?: number
+    rowspan?: number
+  }
+  content?: unknown
+}
+
 function convertTable(block: UnknownBlock): string {
-  const content = block.content as { rows?: Array<{ cells?: unknown[] }> }
-  const rows = Array.isArray(content?.rows) ? content.rows : []
+  // 正确获取 TableContent 结构
+  const tableContent = block.content as TableContent | undefined
+  const rows = tableContent?.rows ?? []
   if (rows.length === 0) return ''
 
-  const colCount = Math.max(1, rows[0]?.cells?.length || 1)
+  const colCount = Math.max(1, rows[0]?.cells?.length ?? 1)
   const colSpec = `|${'c|'.repeat(colCount)}`
   const lines: string[] = [`\\begin{tabular}{${colSpec}}`, '\\hline']
 
   for (const row of rows) {
-    const cells = Array.isArray(row.cells) ? row.cells : []
-    const normalized = Array.from({ length: colCount }, (_, idx) => cells[idx] ?? '')
-    const cellText = normalized.map(convertTableCell).join(' & ')
+    const cells = row.cells ?? []
+    const normalized = Array.from({ length: colCount }, (_, idx) => cells[idx] ?? null)
+    const cellText = normalized.map(cell => convertTableCell(cell)).join(' & ')
     lines.push(`${cellText} \\\\`)
     lines.push('\\hline')
   }
@@ -270,13 +382,19 @@ function convertTable(block: UnknownBlock): string {
   return lines.join('\n')
 }
 
-function convertTableCell(cell: unknown): string {
-  if (typeof cell === 'string') return escapeLatex(cell)
+function convertTableCell(cell: TableCellData | null): string {
+  if (!cell) return ''
 
-  if (Array.isArray(cell)) {
-    return convertInlineContent(cell)
+  // 根据 BlockNote TableCell 结构处理
+  if (cell.type === 'tableCell' && cell.content != null) {
+    return convertInlineContent(cell.content)
   }
 
+  // 兼容旧格式或其他格式
+  if (typeof cell === 'string') return escapeLatex(cell)
+  if (Array.isArray(cell)) return convertInlineContent(cell)
+
+  // 尝试从 cell 对象提取内容
   if (cell && typeof cell === 'object') {
     const obj = cell as { content?: unknown; text?: string }
     if (obj.content != null) return convertInlineContent(obj.content)
@@ -292,6 +410,42 @@ function convertList(
   imageMap: Map<string, ImageAsset>
 ): { latex: string; nextIndex: number } {
   const firstType = blocks[startIndex]?.type
+  
+  // checkListItem 需要特殊处理
+  if (firstType === 'checkListItem') {
+    const lines: string[] = []
+    let i = startIndex
+    while (i < blocks.length && blocks[i]?.type === 'checkListItem') {
+      const item = blocks[i]
+      const text = convertInlineContent(item.content)
+      const checked = Boolean(item.props?.checked)
+      const symbol = checked ? '$\\boxtimes$' : '$\\square$'
+      const nested = convertChildBlocks(item.children, imageMap)
+      
+      lines.push(`${symbol} ${text}`)
+      if (nested) lines.push(nested)
+      i += 1
+    }
+    return { latex: lines.join('\n'), nextIndex: i }
+  }
+  
+  // toggleListItem 也需要特殊处理
+  if (firstType === 'toggleListItem') {
+    const lines: string[] = ['\\begin{description}']
+    let i = startIndex
+    while (i < blocks.length && blocks[i]?.type === 'toggleListItem') {
+      const item = blocks[i]
+      const text = convertInlineContent(item.content)
+      const nested = convertChildBlocks(item.children, imageMap)
+      
+      lines.push(`\\item[${text}]`)
+      if (nested) lines.push(nested)
+      i += 1
+    }
+    lines.push('\\end{description}')
+    return { latex: lines.join('\n'), nextIndex: i }
+  }
+  
   const env = firstType === 'numberedListItem' ? 'enumerate' : 'itemize'
   const lines: string[] = [`\\begin{${env}}`]
 
@@ -448,6 +602,7 @@ function generateLatexDocument(
         '\\documentclass[12pt,a4paper]{ctexart}',
         '\\usepackage{graphicx}',
         '\\usepackage{amsmath}',
+        '\\usepackage{amssymb}',
         '\\usepackage{hyperref}',
         '\\usepackage{listings}',
         '\\usepackage{xcolor}',
@@ -458,6 +613,7 @@ function generateLatexDocument(
         '\\usepackage[T1]{fontenc}',
         '\\usepackage{graphicx}',
         '\\usepackage{amsmath}',
+        '\\usepackage{amssymb}',
         '\\usepackage{hyperref}',
         '\\usepackage{listings}',
         '\\usepackage{xcolor}',
@@ -671,9 +827,26 @@ function formatCitationText(citation: CitationData): string {
   return escapeLatex(segments.join('. '))
 }
 
+/**
+ * 转义 LaTeX 特殊字符
+ * 注意：必须在处理顺序上先处理反斜杠，避免二次转义
+ */
 function escapeLatex(text: string): string {
-  return text
-    .replace(/\\/g, '\\textbackslash{}')
+  // 使用临时占位符避免二次转义
+  const PLACEHOLDER_PREFIX = '\x00ESC_'
+  const placeholders: Map<string, string> = new Map()
+  
+  let result = text
+  
+  // 先处理反斜杠，使用占位符
+  result = result.replace(/\\/g, () => {
+    const key = `${PLACEHOLDER_PREFIX}BACKSLASH_${placeholders.size}`
+    placeholders.set(key, '\\textbackslash{}')
+    return key
+  })
+  
+  // 处理其他特殊字符
+  result = result
     .replace(/&/g, '\\&')
     .replace(/%/g, '\\%')
     .replace(/\$/g, '\\$')
@@ -683,14 +856,37 @@ function escapeLatex(text: string): string {
     .replace(/}/g, '\\}')
     .replace(/~/g, '\\textasciitilde{}')
     .replace(/\^/g, '\\textasciicircum{}')
+  
+  // 还原占位符
+  for (const [key, value] of placeholders) {
+    result = result.replace(key, value)
+  }
+  
+  return result
 }
 
 function escapeLatexPath(text: string): string {
   return text.replace(/\\/g, '/').replace(/ /g, '\\ ')
 }
 
+/**
+ * 转义 URL 用于 LaTeX \url{} 或 \href{} 命令
+ * URL 中的特殊字符需要进行 URL 编码或使用 verbatim 方式
+ * 参考：hyperref 包的 URL 处理机制
+ */
 function escapeLatexUrl(url: string): string {
-  return url.replace(/\\/g, '/').replace(/}/g, '%7D').replace(/{/g, '%7B')
+  // 对于 hyperref 包，URL 中需要转义的特殊字符
+  // # % & ~ _ ^ $ 等在 URL 中常见，需要进行 URL 编码
+  let escaped = url
+    .replace(/\\/g, '/')  // 反斜杠转为正斜杠
+    .replace(/}/g, '%7D') // 大括号 URL 编码
+    .replace(/{/g, '%7B')
+    .replace(/\\/g, '%5C') // 反斜杠编码（双保险）
+    .replace(/~/g, '%7E')  // 波浪号编码，避免被 LaTeX 解释为不间断空格
+    .replace(/\^/g, '%5E') // 插入符编码
+  
+  // 如果 URL 包含可能 problematic 的字符，使用 \nolinkurl 或确保正确转义
+  return escaped
 }
 
 function buildCompileGuide(language: LatexExportLanguage): string {

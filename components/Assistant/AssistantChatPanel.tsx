@@ -28,6 +28,7 @@ import {
   acceptInsertionChanges,
   rejectInsertionChanges,
   parseSimpleToolCalls,
+  stripSimpleToolSyntax,
   convertToolCallsToRequest,
   getDocumentStructure,
   StreamingToolDetector,
@@ -990,7 +991,6 @@ export function AssistantChatPanel() {
       const detector = useDocEditing ? new StreamingToolDetector() : null
       const executedToolIndices = new Set<number>()
       const shownToolIndices = new Set<number>()
-      let streamDeltaCount = 0
 
       const executeDetectedTool = (idx: number, tool: { type: 'insert' | 'delete' | 'update'; params: Record<string, string>; contentSoFar: string }) => {
         if (executedToolIndices.has(idx)) return
@@ -1081,28 +1081,25 @@ export function AssistantChatPanel() {
             draft.content = fullContent
           })
 
-          // Streaming tool detection (every 5 deltas to avoid thrashing)
+          // Streaming tool detection
           if (detector) {
-            streamDeltaCount++
-            if (streamDeltaCount % 5 === 0 || payload.delta.includes('::')) {
-              const { detected, completedIndices } = detector.process(fullContent)
-              // Show in-progress tool cards
-              detected.forEach((tool, idx) => {
-                const key = `${assistantMessage.id}:simple:${idx}`
-                if (!tool.isComplete && !executedToolIndices.has(idx) && !shownToolIndices.has(idx)) {
-                  shownToolIndices.add(idx)
-                  setEditStates(prev => ({
-                    ...prev,
-                    [key]: { status: 'running', progress: '正在接收内容…', error: '', toolCall: { type: tool.type, params: tool.params, content: tool.contentSoFar } }
-                  }))
-                }
-              })
-              // Execute newly completed tools
-              completedIndices.forEach(idx => {
-                const tool = detected[idx]
-                if (tool) executeDetectedTool(idx, tool)
-              })
-            }
+            const { detected, completedIndices } = detector.process(fullContent)
+            // Show in-progress tool cards
+            detected.forEach((tool, idx) => {
+              const key = `${assistantMessage.id}:simple:${idx}`
+              if (!tool.isComplete && !executedToolIndices.has(idx) && !shownToolIndices.has(idx)) {
+                shownToolIndices.add(idx)
+                setEditStates(prev => ({
+                  ...prev,
+                  [key]: { status: 'running', progress: '正在接收内容…', error: '', toolCall: { type: tool.type, params: tool.params, content: tool.contentSoFar, isComplete: false } }
+                }))
+              }
+            })
+            // Execute newly completed tools
+            completedIndices.forEach(idx => {
+              const tool = detected[idx]
+              if (tool) executeDetectedTool(idx, tool)
+            })
           }
           return
         }
@@ -1174,12 +1171,17 @@ export function AssistantChatPanel() {
   }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, useDocEditing, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates])
 
   // Parse both simplified format (::insert, ::delete, ::update) and legacy edit_document JSON blocks
-  const parseEditBlocks = useCallback((content: string): { requests: EditDocumentRequest[]; toolCalls: ParsedToolCall[] } => {
+  const parseEditBlocks = useCallback((
+    content: string,
+    options?: { includeIncompleteTools?: boolean },
+  ): { requests: EditDocumentRequest[]; toolCalls: ParsedToolCall[] } => {
     const requests: EditDocumentRequest[] = []
     const toolCalls: ParsedToolCall[] = []
     
     // Parse simplified format first
-    const simpleCalls = parseSimpleToolCalls(content)
+    const simpleCalls = parseSimpleToolCalls(content, {
+      includeIncomplete: options?.includeIncompleteTools ?? false,
+    })
     if (simpleCalls.length > 0) {
       toolCalls.push(...simpleCalls)
       // Don't add to requests - toolCalls will be handled separately
@@ -1200,17 +1202,7 @@ export function AssistantChatPanel() {
   
   // Remove tool call syntax from content for display
   const removeToolCallsFromContent = useCallback((content: string): string => {
-    // Remove complete ::insert ... ::
-    let result = content.replace(/::insert\s+(before|after)?\s*(\S*)?\n[\s\S]*?\n::/g, '')
-    // Remove complete ::update blockId ... ::
-    result = result.replace(/::update\s+\S+\n[\s\S]*?\n::/g, '')
-    // Remove ::delete blockId
-    result = result.replace(/^::delete\s+\S+\s*$/gm, '')
-    // Remove trailing incomplete tool calls (during streaming)
-    result = result.replace(/::(?:insert|update)\s+[^\n]*(?:\n[\s\S]*)?$/, '')
-    // Clean up extra whitespace
-    result = result.replace(/\n{3,}/g, '\n\n').trim()
-    return result
+    return stripSimpleToolSyntax(content)
   }, [])
 
   // Auto-run edit blocks from a completed assistant message
@@ -2045,12 +2037,22 @@ export function AssistantChatPanel() {
                       </ReactMarkdown>
                       {/* Render simplified tool calls (::insert, ::delete, ::update) - 过滤掉工具调用格式 */}
                       {(() => {
-                        const { toolCalls } = parseEditBlocks(message.content)
+                        const isStreamingMessage = idx === messages.length - 1 && isLoading
+                        const { toolCalls } = parseEditBlocks(message.content, {
+                          includeIncompleteTools: isStreamingMessage,
+                        })
                         if (toolCalls.length === 0) return null
                         
                         return toolCalls.map((call, callIdx) => {
                           const key = `${message.id}:simple:${callIdx}`
-                          const state = editStates[key] ?? { status: 'idle' as EditStatus, progress: '', error: '' }
+                          const fallbackStatus: EditStatus = call.isComplete === false
+                            ? (isStreamingMessage ? 'running' : 'error')
+                            : 'idle'
+                          const state = editStates[key] ?? {
+                            status: fallbackStatus,
+                            progress: call.isComplete === false && isStreamingMessage ? '正在接收内容…' : '',
+                            error: call.isComplete === false && !isStreamingMessage ? '编辑指令未完整输出' : '',
+                          }
 
                           const handleAccept = () => {
                             try {

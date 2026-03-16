@@ -85,6 +85,82 @@ export interface ParsedToolCall {
   type: 'insert' | 'delete' | 'update'
   params: Record<string, string>
   content: string
+  isComplete?: boolean
+  sourceRange?: {
+    start: number
+    end: number
+  }
+}
+
+interface ParseSimpleToolCallsOptions {
+  includeIncomplete?: boolean
+}
+
+interface ToolHeaderMatch {
+  type: 'insert' | 'delete' | 'update'
+  params: Record<string, string>
+}
+
+interface ActiveToolCall {
+  type: 'insert' | 'update'
+  params: Record<string, string>
+  contentLines: string[]
+  start: number
+}
+
+function normalizeToolText(text: string): string {
+  return text.replace(/\r\n?/g, '\n')
+}
+
+function parseToolHeader(line: string): ToolHeaderMatch | null {
+  const trimmedLine = line.trim()
+  const match = trimmedLine.match(/^::(insert|update|delete)\b(.*)$/)
+  if (!match) return null
+
+  const type = match[1] as 'insert' | 'delete' | 'update'
+  const remainder = match[2].trim()
+
+  if (type === 'insert') {
+    const tokens = remainder.split(/\s+/).filter(Boolean)
+    let position: 'before' | 'after' = 'after'
+    let referenceId = ''
+
+    if (tokens[0] === 'before' || tokens[0] === 'after') {
+      position = tokens[0]
+      referenceId = tokens[1] ?? ''
+    } else {
+      referenceId = tokens[0] ?? ''
+    }
+
+    return {
+      type,
+      params: {
+        position,
+        referenceId,
+      },
+    }
+  }
+
+  const blockId = remainder.split(/\s+/).find(Boolean) ?? ''
+  if (!blockId) return null
+
+  return {
+    type,
+    params: { blockId },
+  }
+}
+
+function finalizeToolCall(active: ActiveToolCall, end: number, isComplete: boolean): ParsedToolCall {
+  return {
+    type: active.type,
+    params: active.params,
+    content: active.contentLines.join('\n').trim(),
+    isComplete,
+    sourceRange: {
+      start: active.start,
+      end,
+    },
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -100,7 +176,6 @@ export interface StreamingToolState {
 
 export class StreamingToolDetector {
   private prevCompleted = new Set<number>()
-  private prevDeleteCount = 0
 
   /**
    * 增量扫描全文，检测 ::insert/::update/::delete 模式
@@ -110,97 +185,20 @@ export class StreamingToolDetector {
     detected: StreamingToolState[]
     completedIndices: number[]
   } {
-    const detected: StreamingToolState[] = []
+    const detected = parseSimpleToolCalls(fullText, { includeIncomplete: true }).map((tool) => ({
+      type: tool.type,
+      params: tool.params,
+      contentSoFar: tool.content,
+      isComplete: tool.isComplete !== false,
+    })) satisfies StreamingToolState[]
     const completedIndices: number[] = []
 
-    // 匹配完成的 ::insert ... ::
-    const insertRegex = /::insert\s+(before|after)?\s*(\S*)?\n([\s\S]*?)\n::/g
-    let match
-    while ((match = insertRegex.exec(fullText)) !== null) {
-      const idx = detected.length
-      detected.push({
-        type: 'insert',
-        params: { position: match[1] || 'after', referenceId: match[2] || '' },
-        contentSoFar: match[3].trim(),
-        isComplete: true,
-      })
-      if (!this.prevCompleted.has(idx)) {
+    detected.forEach((tool, idx) => {
+      if (tool.isComplete && !this.prevCompleted.has(idx)) {
         this.prevCompleted.add(idx)
         completedIndices.push(idx)
       }
-    }
-
-    // 匹配完成的 ::update blockId ... ::
-    const updateRegex = /::update\s+(\S+)\n([\s\S]*?)\n::/g
-    while ((match = updateRegex.exec(fullText)) !== null) {
-      const idx = detected.length
-      detected.push({
-        type: 'update',
-        params: { blockId: match[1] },
-        contentSoFar: match[2].trim(),
-        isComplete: true,
-      })
-      if (!this.prevCompleted.has(idx)) {
-        this.prevCompleted.add(idx)
-        completedIndices.push(idx)
-      }
-    }
-
-    // 匹配所有 ::delete blockId，合并为批量删除
-    const deleteBlockIds: string[] = []
-    const deleteRegex = /^::delete\s+(\S+)\s*$/gm
-    while ((match = deleteRegex.exec(fullText)) !== null) {
-      const blockId = match[1]
-      if (!deleteBlockIds.includes(blockId)) {
-        deleteBlockIds.push(blockId)
-      }
-    }
-
-    // 如果有删除操作，创建一个批量删除的检测项
-    if (deleteBlockIds.length > 0) {
-      const idx = detected.length
-      detected.push({
-        type: 'delete',
-        params: { blockId: deleteBlockIds[0], blockIds: deleteBlockIds.join(',') },
-        contentSoFar: '',
-        isComplete: true,
-      })
-      // 当删除数量变化时，标记为完成
-      if (deleteBlockIds.length !== this.prevDeleteCount) {
-        this.prevDeleteCount = deleteBlockIds.length
-        if (!this.prevCompleted.has(idx)) {
-          this.prevCompleted.add(idx)
-          completedIndices.push(idx)
-        }
-      }
-    }
-
-    // 检测尾部不完整的 ::insert（正在流式输出中）
-    // 先移除所有已完成的 tool call，检查剩余文本
-    let remaining = fullText
-      .replace(/::insert\s+(before|after)?\s*(\S*)?\n[\s\S]*?\n::/g, '')
-      .replace(/::update\s+\S+\n[\s\S]*?\n::/g, '')
-      .replace(/^::delete\s+\S+\s*$/gm, '')
-
-    const trailingInsert = remaining.match(/::insert\s+(before|after)?\s*(\S*)?\n([\s\S]*)$/)
-    if (trailingInsert) {
-      detected.push({
-        type: 'insert',
-        params: { position: trailingInsert[1] || 'after', referenceId: trailingInsert[2] || '' },
-        contentSoFar: trailingInsert[3].trim(),
-        isComplete: false,
-      })
-    }
-
-    const trailingUpdate = remaining.match(/::update\s+(\S+)\n([\s\S]*)$/)
-    if (trailingUpdate) {
-      detected.push({
-        type: 'update',
-        params: { blockId: trailingUpdate[1] },
-        contentSoFar: trailingUpdate[2].trim(),
-        isComplete: false,
-      })
-    }
+    })
 
     return { detected, completedIndices }
   }
@@ -220,54 +218,91 @@ export class StreamingToolDetector {
  * 更新后的内容
  * ::
  */
-export function parseSimpleToolCalls(text: string): ParsedToolCall[] {
+export function parseSimpleToolCalls(text: string, options: ParseSimpleToolCallsOptions = {}): ParsedToolCall[] {
+  const normalizedText = normalizeToolText(text)
   const results: ParsedToolCall[] = []
-  let match
+  const lines = normalizedText.split('\n')
+  let activeTool: ActiveToolCall | null = null
+  let offset = 0
 
-  // 匹配 ::insert [position] [referenceId]
-  const insertRegex = /::insert\s+(before|after)?\s*(\S*)?\n([\s\S]*?)::/g
-  while ((match = insertRegex.exec(text)) !== null) {
-    const position = (match[1] as 'before' | 'after') || 'after'
-    const referenceId = match[2] || undefined
-    const content = match[3].trim()
-    results.push({
-      type: 'insert',
-      params: { position, referenceId: referenceId || '' },
-      content,
-    })
-  }
+  lines.forEach((line, lineIndex) => {
+    const newlineLength = lineIndex < lines.length - 1 ? 1 : 0
+    const nextOffset = offset + line.length + newlineLength
 
-  // 匹配所有 ::delete blockId，合并为批量删除
-  const deleteBlockIds: string[] = []
-  const deleteRegex = /::delete\s+(\S+)/g
-  while ((match = deleteRegex.exec(text)) !== null) {
-    const blockId = match[1]
-    if (!deleteBlockIds.includes(blockId)) {
-      deleteBlockIds.push(blockId)
+    if (activeTool) {
+      if (line.trim() === '::') {
+        results.push(finalizeToolCall(activeTool, nextOffset, true))
+        activeTool = null
+      } else {
+        activeTool.contentLines.push(line)
+      }
+      offset = nextOffset
+      return
     }
-  }
-  // 如果有删除操作，创建一个批量删除的 tool call
-  if (deleteBlockIds.length > 0) {
-    results.push({
-      type: 'delete',
-      params: { blockId: deleteBlockIds[0], blockIds: deleteBlockIds.join(',') },
-      content: '',
-    })
-  }
 
-  // 匹配 ::update blockId
-  const updateRegex = /::update\s+(\S+)\n([\s\S]*?)::/g
-  while ((match = updateRegex.exec(text)) !== null) {
-    const blockId = match[1]
-    const content = match[2].trim()
-    results.push({
-      type: 'update',
-      params: { blockId },
-      content,
-    })
+    const header = parseToolHeader(line)
+    if (!header) {
+      offset = nextOffset
+      return
+    }
+
+    if (header.type === 'delete') {
+      results.push({
+        type: 'delete',
+        params: header.params,
+        content: '',
+        isComplete: true,
+        sourceRange: {
+          start: offset,
+          end: nextOffset,
+        },
+      })
+      offset = nextOffset
+      return
+    }
+
+    activeTool = {
+      type: header.type,
+      params: header.params,
+      contentLines: [],
+      start: offset,
+    }
+
+    offset = nextOffset
+  })
+
+  if (activeTool && options.includeIncomplete) {
+    results.push(finalizeToolCall(activeTool, normalizedText.length, false))
   }
 
   return results
+}
+
+export function stripSimpleToolSyntax(text: string): string {
+  const normalizedText = normalizeToolText(text)
+  const toolCalls = parseSimpleToolCalls(normalizedText, { includeIncomplete: true })
+    .filter(call => call.sourceRange)
+    .sort((left, right) => (left.sourceRange!.start - right.sourceRange!.start))
+
+  if (toolCalls.length === 0) {
+    return normalizedText
+  }
+
+  let cursor = 0
+  let result = ''
+
+  toolCalls.forEach((call) => {
+    const range = call.sourceRange
+    if (!range || range.start < cursor) return
+    result += normalizedText.slice(cursor, range.start)
+    cursor = range.end
+  })
+
+  result += normalizedText.slice(cursor)
+
+  return result
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
 }
 
 /**

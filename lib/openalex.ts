@@ -178,6 +178,9 @@ export function normalizeOpenAlexWork(work: OpenAlexWork): SearchPaper {
   return {
     id: work.id,
     openAlexId: work.id,
+    sourceRecordId: work.id,
+    sourceProviderId: 'literature-provider-openalex',
+    sourceProviderName: 'OpenAlex',
     title: work.display_name,
     abstract,
     abstractSnippet: buildSnippet(abstract || '暂无摘要'),

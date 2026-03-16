@@ -2,6 +2,19 @@ import { NextRequest } from 'next/server'
 import { createOpenAlexToolset } from '@/lib/openalexTools'
 import { scoreKeywordMatches } from '@/lib/openalex'
 import {
+  executeMcpToolCalls,
+  extractPapersFromMcpResults,
+  planMcpToolCalls,
+} from '@/lib/literatureMcpService'
+import {
+  filterWorksLocally,
+  indexWorks,
+  rankWorksLocally,
+  withToolReport,
+} from '@/lib/literatureLocalTools'
+import { listMcpTools } from '@/lib/mcpStdioClient'
+import { createDefaultLiteratureProviders } from '@/lib/literatureProviders'
+import {
   applyAnalysisToPapers,
   buildSearchSummary,
   runAnalysisAgent,
@@ -20,19 +33,28 @@ import type {
   RankedWorksOutput,
   RelatedWorksOutput,
   SearchFilters,
+  SearchIntent,
   SearchPaper,
   SearchReview,
   SearchWorksOutput,
   StepStatus,
 } from '@/lib/literatureSearchTypes'
 import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
+import type { LiteratureProviderConfig, LiteratureProviderDiscoveredTool } from '@/lib/literatureProviders'
 
 export const maxDuration = 120
+export const runtime = 'nodejs'
 
 interface DiscoveryPassResult {
   works: SearchPaper[]
   ranked: RankedWorksOutput
   filterResult: FilterWorksOutput
+}
+
+interface McpPassResult extends DiscoveryPassResult {
+  discoveredTools: LiteratureProviderDiscoveredTool[]
+  usedTools: string[]
+  notes: string[]
 }
 
 function stageDetail(stage: LiteratureSearchStage) {
@@ -314,6 +336,185 @@ async function callTool<TResult>(
   ) as TResult
 }
 
+function getActiveLiteratureProvider(provider?: LiteratureProviderConfig) {
+  return provider || createDefaultLiteratureProviders()[0]
+}
+
+async function runLocalFilterAndRank(params: {
+  works: SearchPaper[]
+  filters: SearchFilters
+  queryGroups: QueryExpansionGroup[]
+  extraKeywords: string[]
+  report?: (event: LiteratureSearchEvent) => void
+}) {
+  const { works, filters, queryGroups, extraKeywords, report } = params
+
+  const filterResult = await withToolReport(
+    {
+      name: 'filterWorks',
+      displayName: '筛选结果',
+      icon: 'filter',
+      providerLabel: '本地聚合',
+    },
+    {
+      workCount: works.length,
+      filters,
+    },
+    tool => report?.({ type: 'tool', tool }),
+    async () => await filterWorksLocally(works, {
+      fromYear: filters.fromYear,
+      toYear: filters.toYear,
+      minCitations: filters.minCitations,
+      openAccessOnly: filters.openAccessOnly,
+      sourceTypes: filters.sourceTypes,
+      requireAbstract: false,
+      relaxIfSparse: true,
+    }),
+  )
+
+  const ranked = await withToolReport(
+    {
+      name: 'rankAndDeduplicate',
+      displayName: '排序去重',
+      icon: 'rank',
+      providerLabel: '本地聚合',
+    },
+    {
+      workCount: filterResult.works.length,
+      groupCount: queryGroups.length,
+    },
+    tool => report?.({ type: 'tool', tool }),
+    async () => await rankWorksLocally(filterResult.works, queryGroups, extraKeywords),
+  )
+
+  return {
+    filterResult,
+    ranked,
+  }
+}
+
+async function runLocalRankOnly(params: {
+  works: SearchPaper[]
+  queryGroups: QueryExpansionGroup[]
+  extraKeywords: string[]
+  report?: (event: LiteratureSearchEvent) => void
+}) {
+  const { works, queryGroups, extraKeywords, report } = params
+  return await withToolReport(
+    {
+      name: 'rankAndDeduplicate',
+      displayName: '排序去重',
+      icon: 'rank',
+      providerLabel: '本地聚合',
+    },
+    {
+      workCount: works.length,
+      groupCount: queryGroups.length,
+    },
+    tool => report?.({ type: 'tool', tool }),
+    async () => await rankWorksLocally(works, queryGroups, extraKeywords),
+  )
+}
+
+async function runMcpDiscoveryPass(params: {
+  provider: LiteratureProviderConfig
+  discoveredTools: LiteratureProviderDiscoveredTool[]
+  intent: SearchIntent
+  queryGroups: QueryExpansionGroup[]
+  filters: SearchFilters
+  modelConfig: LiteratureSearchRequest['modelConfig']
+  report?: (event: LiteratureSearchEvent) => void
+  suggestedQueries?: string[]
+}) {
+  const { provider, discoveredTools, intent, queryGroups, filters, modelConfig, report, suggestedQueries = [] } = params
+  const extraKeywords = [...intent.coreConcepts, ...intent.relatedFields]
+
+  const plan = await planMcpToolCalls({
+    phase: 'discovery',
+    provider,
+    tools: discoveredTools,
+    intent,
+    queryGroups,
+    modelConfig,
+    suggestedQueries,
+  })
+
+  const executed = await executeMcpToolCalls({
+    provider,
+    calls: plan.calls,
+    report: tool => report?.({ type: 'tool', tool }),
+  })
+
+  const extracted = await extractPapersFromMcpResults({
+    provider,
+    intent,
+    queryGroups,
+    executions: executed,
+    modelConfig,
+  })
+
+  const combined = mergeWorks(extracted.papers, queryGroups, extraKeywords)
+  const local = await runLocalFilterAndRank({
+    works: combined,
+    filters,
+    queryGroups,
+    extraKeywords,
+    report,
+  })
+
+  return {
+    works: combined,
+    ranked: local.ranked,
+    filterResult: local.filterResult,
+    discoveredTools,
+    usedTools: uniqueStrings(executed.map(item => item.toolName)),
+    notes: uniqueStrings([...plan.rationale, ...extracted.notes]),
+  } satisfies McpPassResult
+}
+
+async function runMcpAnalysisExpansion(params: {
+  provider: LiteratureProviderConfig
+  discoveredTools: LiteratureProviderDiscoveredTool[]
+  intent: SearchIntent
+  queryGroups: QueryExpansionGroup[]
+  papers: SearchPaper[]
+  modelConfig: LiteratureSearchRequest['modelConfig']
+  suggestedQueries?: string[]
+  report?: (event: LiteratureSearchEvent) => void
+}) {
+  const { provider, discoveredTools, intent, queryGroups, papers, modelConfig, suggestedQueries = [], report } = params
+  const plan = await planMcpToolCalls({
+    phase: 'analysis',
+    provider,
+    tools: discoveredTools,
+    intent,
+    queryGroups,
+    modelConfig,
+    currentPapers: papers,
+    suggestedQueries,
+  })
+
+  const executed = await executeMcpToolCalls({
+    provider,
+    calls: plan.calls,
+    report: tool => report?.({ type: 'tool', tool }),
+  })
+
+  const extracted = await extractPapersFromMcpResults({
+    provider,
+    intent,
+    queryGroups,
+    executions: executed,
+    modelConfig,
+  })
+
+  return {
+    works: extracted.papers,
+    usedTools: uniqueStrings(executed.map(item => item.toolName)),
+    notes: uniqueStrings([...plan.rationale, ...extracted.notes]),
+  }
+}
+
 async function runDiscoveryPass(
   tools: ReturnType<typeof createOpenAlexToolset>,
   intent: {
@@ -409,7 +610,7 @@ function ensureActive(signal?: AbortSignal) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json() as LiteratureSearchRequest
-  const { query, answers, modelConfig } = body
+  const { query, answers, modelConfig, literatureProvider } = body
 
   if (!modelConfig?.apiKey || !modelConfig?.modelName) {
     return Response.json(
@@ -459,11 +660,17 @@ export async function POST(req: NextRequest) {
         })
 
         const workRegistry = new Map<string, SearchPaper>()
-        const tools = createOpenAlexToolset({
-          signal: req.signal,
-          workRegistry,
-          report: tool => send({ type: 'tool', tool }),
-        })
+        const activeProvider = getActiveLiteratureProvider(literatureProvider)
+        const openAlexTools = activeProvider.kind === 'openalex'
+          ? createOpenAlexToolset({
+              signal: req.signal,
+              workRegistry,
+              report: tool => send({ type: 'tool', tool }),
+            })
+          : null
+        let discoveredTools: LiteratureProviderDiscoveredTool[] = []
+        let usedProviderTools: string[] = []
+        let providerNotes: string[] = []
 
         ensureActive(req.signal)
         pushStage('intent', 'in_progress')
@@ -498,9 +705,44 @@ export async function POST(req: NextRequest) {
 
         ensureActive(req.signal)
         pushStage('parallel-search', 'in_progress')
-        pushThinking('parallel-search', '并行拉起关键词检索与概念检索，再根据候选规模决定是否自动放宽条件。')
+        pushThinking(
+          'parallel-search',
+          activeProvider.kind === 'openalex'
+            ? '并行拉起关键词检索与概念检索，再根据候选规模决定是否自动放宽条件。'
+            : '先自动发现 MCP 工具目录，再让检索 agent 自主决定该用哪些工具。',
+        )
 
-        let discovery = await runDiscoveryPass(tools, intent, activeQueryGroups, baseFilters, req.signal)
+        if (activeProvider.kind === 'mcp') {
+          const toolListing = await listMcpTools(activeProvider)
+          discoveredTools = toolListing.tools
+          if (discoveredTools.length === 0) {
+            throw new Error('当前 MCP 没有发现可用工具。')
+          }
+          pushThinking(
+            'parallel-search',
+            `已从 ${toolListing.serverInfo?.name || activeProvider.name} 自动发现 ${discoveredTools.length} 个工具，检索 agent 会自行挑选。`,
+          )
+        }
+
+        let discovery = activeProvider.kind === 'openalex' && openAlexTools
+          ? await runDiscoveryPass(openAlexTools, intent, activeQueryGroups, baseFilters, req.signal)
+          : await runMcpDiscoveryPass({
+              provider: activeProvider,
+              discoveredTools,
+              intent,
+              queryGroups: activeQueryGroups,
+              filters: baseFilters,
+              modelConfig,
+              report: send,
+            })
+
+        if (activeProvider.kind === 'mcp') {
+          usedProviderTools = uniqueStrings([...usedProviderTools, ...(discovery as McpPassResult).usedTools])
+          providerNotes = uniqueStrings([...providerNotes, ...(discovery as McpPassResult).notes])
+          if ((discovery as McpPassResult).notes[0]) {
+            pushThinking('parallel-search', (discovery as McpPassResult).notes[0])
+          }
+        }
 
         if (discovery.filterResult.note) {
           pushThinking('parallel-search', discovery.filterResult.note)
@@ -518,10 +760,29 @@ export async function POST(req: NextRequest) {
           send({ type: 'strategy', queryGroups: activeQueryGroups, intent })
 
           const retryFilters = buildRetryFilters(baseFilters, retryCount)
-          const retryPass = await runDiscoveryPass(tools, intent, activeQueryGroups, retryFilters, req.signal)
+          const retryPass = activeProvider.kind === 'openalex' && openAlexTools
+            ? await runDiscoveryPass(openAlexTools, intent, activeQueryGroups, retryFilters, req.signal)
+            : await runMcpDiscoveryPass({
+                provider: activeProvider,
+                discoveredTools,
+                intent,
+                queryGroups: activeQueryGroups,
+                filters: retryFilters,
+                modelConfig,
+                report: send,
+                suggestedQueries: retryQueries,
+              })
 
           if (retryPass.filterResult.note) {
             pushThinking('parallel-search', retryPass.filterResult.note)
+          }
+
+          if (activeProvider.kind === 'mcp') {
+            usedProviderTools = uniqueStrings([...usedProviderTools, ...(retryPass as McpPassResult).usedTools])
+            providerNotes = uniqueStrings([...providerNotes, ...(retryPass as McpPassResult).notes])
+            if ((retryPass as McpPassResult).notes[0]) {
+              pushThinking('parallel-search', (retryPass as McpPassResult).notes[0])
+            }
           }
 
           const mergedRetryWorks = mergeWorks(
@@ -530,11 +791,18 @@ export async function POST(req: NextRequest) {
             [...intent.coreConcepts, ...intent.relatedFields],
           )
 
-          const reranked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
-            workList: mergedRetryWorks,
-            queryGroups: activeQueryGroups,
-            extraKeywords: [...intent.coreConcepts, ...intent.relatedFields],
-          }, req.signal)
+          const reranked = activeProvider.kind === 'openalex' && openAlexTools
+            ? await callTool<RankedWorksOutput>(openAlexTools.rankAndDeduplicate, {
+                workList: mergedRetryWorks,
+                queryGroups: activeQueryGroups,
+                extraKeywords: [...intent.coreConcepts, ...intent.relatedFields],
+              }, req.signal)
+            : await runLocalRankOnly({
+                works: mergedRetryWorks,
+                queryGroups: activeQueryGroups,
+                extraKeywords: [...intent.coreConcepts, ...intent.relatedFields],
+                report: send,
+              })
 
           discovery = {
             works: mergedRetryWorks,
@@ -555,54 +823,81 @@ export async function POST(req: NextRequest) {
         const activeFilters = buildRetryFilters(baseFilters, retryCount)
         let analysisEnriched = applyAnalysisToPapers(discovery.ranked.works, analysis)
 
-        const reSearchResults = analysis.newQueries.length > 0
-          ? await Promise.all(
-              analysis.newQueries.map(searchQuery =>
-                callTool<SearchWorksOutput>(tools.searchWorks, {
-                  query: searchQuery,
-                  filters: {
-                    ...activeFilters,
-                    maxResults: Math.max(activeFilters.maxResults || 8, 8),
-                  },
-                }, req.signal),
-              ),
-            )
-          : []
+        if (activeProvider.kind === 'openalex' && openAlexTools) {
+          const reSearchResults = analysis.newQueries.length > 0
+            ? await Promise.all(
+                analysis.newQueries.map(searchQuery =>
+                  callTool<SearchWorksOutput>(openAlexTools.searchWorks, {
+                    query: searchQuery,
+                    filters: {
+                      ...activeFilters,
+                      maxResults: Math.max(activeFilters.maxResults || 8, 8),
+                    },
+                  }, req.signal),
+                ),
+              )
+            : []
 
-        const relatedResults = analysis.corePaperIds.length > 0
-          ? await Promise.all(
-              analysis.corePaperIds
-                .slice(0, 2)
-                .flatMap(workId => ([
-                  callTool<RelatedWorksOutput>(tools.getRelatedWorks, { workId, direction: 'references', limit: 6 }, req.signal),
-                  callTool<RelatedWorksOutput>(tools.getRelatedWorks, { workId, direction: 'citations', limit: 6 }, req.signal),
-                ])),
-            )
-          : []
+          const relatedResults = analysis.corePaperIds.length > 0
+            ? await Promise.all(
+                analysis.corePaperIds
+                  .slice(0, 2)
+                  .flatMap(workId => ([
+                    callTool<RelatedWorksOutput>(openAlexTools.getRelatedWorks, { workId, direction: 'references', limit: 6 }, req.signal),
+                    callTool<RelatedWorksOutput>(openAlexTools.getRelatedWorks, { workId, direction: 'citations', limit: 6 }, req.signal),
+                  ])),
+              )
+            : []
 
-        const authorIds = getPrimaryAuthorIds(analysisEnriched.slice(0, 5))
-        const authorResults = authorIds.length > 0
-          ? await Promise.all(
-              authorIds.map(authorId =>
-                callTool<AuthorWorksOutput>(tools.getAuthorWorks, {
-                  authorId,
-                  fromYear: activeFilters.fromYear,
-                  limit: 5,
-                }, req.signal),
-              ),
-            )
-          : []
+          const authorIds = getPrimaryAuthorIds(analysisEnriched.slice(0, 5))
+          const authorResults = authorIds.length > 0
+            ? await Promise.all(
+                authorIds.map(authorId =>
+                  callTool<AuthorWorksOutput>(openAlexTools.getAuthorWorks, {
+                    authorId,
+                    fromYear: activeFilters.fromYear,
+                    limit: 5,
+                  }, req.signal),
+                ),
+              )
+            : []
 
-        analysisEnriched = mergeWorks(
-          [
-            ...analysisEnriched,
-            ...reSearchResults.flatMap(result => result.works),
-            ...relatedResults.flatMap(result => result.works),
-            ...authorResults.flatMap(result => result.works),
-          ],
-          activeQueryGroups,
-          [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
-        )
+          analysisEnriched = mergeWorks(
+            [
+              ...analysisEnriched,
+              ...reSearchResults.flatMap(result => result.works),
+              ...relatedResults.flatMap(result => result.works),
+              ...authorResults.flatMap(result => result.works),
+            ],
+            activeQueryGroups,
+            [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
+          )
+        } else {
+          const expansion = await runMcpAnalysisExpansion({
+            provider: activeProvider,
+            discoveredTools,
+            intent,
+            queryGroups: activeQueryGroups,
+            papers: analysisEnriched,
+            modelConfig,
+            suggestedQueries: analysis.newQueries,
+            report: send,
+          })
+          usedProviderTools = uniqueStrings([...usedProviderTools, ...expansion.usedTools])
+          providerNotes = uniqueStrings([...providerNotes, ...expansion.notes])
+          if (expansion.notes[0]) {
+            pushThinking('analysis', expansion.notes[0])
+          }
+
+          analysisEnriched = mergeWorks(
+            [
+              ...analysisEnriched,
+              ...expansion.works,
+            ],
+            activeQueryGroups,
+            [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
+          )
+        }
 
         pushStage('analysis', 'completed', `完成二次扩展，当前候选文献 ${analysisEnriched.length} 篇。`)
 
@@ -610,11 +905,18 @@ export async function POST(req: NextRequest) {
         pushStage('aggregation', 'in_progress')
         pushThinking('aggregation', '开始综合排序，并由结果检阅智能体判断是否需要再次重检。')
 
-        let finalRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
-          workList: analysisEnriched,
-          queryGroups: activeQueryGroups,
-          extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
-        }, req.signal)
+        let finalRanked = activeProvider.kind === 'openalex' && openAlexTools
+          ? await callTool<RankedWorksOutput>(openAlexTools.rankAndDeduplicate, {
+              workList: analysisEnriched,
+              queryGroups: activeQueryGroups,
+              extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
+            }, req.signal)
+          : await runLocalRankOnly({
+              works: analysisEnriched,
+              queryGroups: activeQueryGroups,
+              extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
+              report: send,
+            })
 
         let review = await runResultReviewAgent(intent, finalRanked.works.slice(0, 12), modelConfig)
         let reviewNotes = uniqueStrings(review.reviewNotes)
@@ -643,18 +945,35 @@ export async function POST(req: NextRequest) {
           send({ type: 'strategy', queryGroups: activeQueryGroups, intent })
 
           const reviewRetryFilters = buildRetryFilters(baseFilters, retryCount, review)
-          const reviewRetryPass = await runDiscoveryPass(
-            tools,
-            intent,
-            activeQueryGroups,
-            reviewRetryFilters,
-            req.signal,
-          )
+          const reviewRetryPass = activeProvider.kind === 'openalex' && openAlexTools
+            ? await runDiscoveryPass(
+                openAlexTools,
+                intent,
+                activeQueryGroups,
+                reviewRetryFilters,
+                req.signal,
+              )
+            : await runMcpDiscoveryPass({
+                provider: activeProvider,
+                discoveredTools,
+                intent,
+                queryGroups: activeQueryGroups,
+                filters: reviewRetryFilters,
+                modelConfig,
+                report: send,
+                suggestedQueries: retryQueries,
+              })
 
           reviewNotes = uniqueStrings([
             ...reviewNotes,
             reviewRetryPass.filterResult.note || '',
           ])
+
+          if (activeProvider.kind === 'mcp') {
+            usedProviderTools = uniqueStrings([...usedProviderTools, ...(reviewRetryPass as McpPassResult).usedTools])
+            providerNotes = uniqueStrings([...providerNotes, ...(reviewRetryPass as McpPassResult).notes])
+            reviewNotes = uniqueStrings([...reviewNotes, ...(reviewRetryPass as McpPassResult).notes])
+          }
 
           let recheckedWorks = mergeWorks(
             [...analysisEnriched, ...reviewRetryPass.works],
@@ -662,11 +981,18 @@ export async function POST(req: NextRequest) {
             [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
           )
 
-          const recheckedRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
-            workList: recheckedWorks,
-            queryGroups: activeQueryGroups,
-            extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
-          }, req.signal)
+          const recheckedRanked = activeProvider.kind === 'openalex' && openAlexTools
+            ? await callTool<RankedWorksOutput>(openAlexTools.rankAndDeduplicate, {
+                workList: recheckedWorks,
+                queryGroups: activeQueryGroups,
+                extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
+              }, req.signal)
+            : await runLocalRankOnly({
+                works: recheckedWorks,
+                queryGroups: activeQueryGroups,
+                extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
+                report: send,
+              })
 
           analysis = await runAnalysisAgent(intent, recheckedRanked.works, modelConfig)
           recheckedWorks = applyAnalysisToPapers(recheckedRanked.works, analysis)
@@ -677,11 +1003,18 @@ export async function POST(req: NextRequest) {
             [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
           )
 
-          finalRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
-            workList: analysisEnriched,
-            queryGroups: activeQueryGroups,
-            extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
-          }, req.signal)
+          finalRanked = activeProvider.kind === 'openalex' && openAlexTools
+            ? await callTool<RankedWorksOutput>(openAlexTools.rankAndDeduplicate, {
+                workList: analysisEnriched,
+                queryGroups: activeQueryGroups,
+                extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
+              }, req.signal)
+            : await runLocalRankOnly({
+                works: analysisEnriched,
+                queryGroups: activeQueryGroups,
+                extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries, ...review.recommendedQueries],
+                report: send,
+              })
 
           review = await runResultReviewAgent(intent, finalRanked.works.slice(0, 12), modelConfig)
           reviewNotes = uniqueStrings([...reviewNotes, ...review.reviewNotes])
@@ -707,6 +1040,15 @@ export async function POST(req: NextRequest) {
             intent,
             reviewNotes: reviewNotes.slice(0, 4),
             retryCount,
+            provider: {
+              id: activeProvider.id,
+              name: activeProvider.name,
+              kind: activeProvider.kind,
+              transport: activeProvider.transport,
+              discoveredTools: discoveredTools.map(tool => tool.name),
+              usedTools: uniqueStrings(usedProviderTools),
+              notes: uniqueStrings(providerNotes).slice(0, 4),
+            },
           },
         })
         pushStage(

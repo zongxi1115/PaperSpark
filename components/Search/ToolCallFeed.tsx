@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import type { ToolCallEvent } from '@/lib/literatureSearchTypes'
 import { OdometerNumber } from './OdometerNumber'
 
-const TOOL_CONFIG: Record<ToolCallEvent['name'], { icon: string; label: string }> = {
+const TOOL_CONFIG: Record<string, { icon: string; label: string }> = {
   searchWorks: { icon: 'search', label: '搜索文献' },
   getConceptTree: { icon: 'branch', label: '获取概念树' },
   getRelatedWorks: { icon: 'link', label: '关联文献' },
@@ -180,7 +180,10 @@ interface ToolCallFeedItemProps {
 }
 
 function ToolCallFeedItem({ call, isLatest, reduceMotion }: ToolCallFeedItemProps) {
-  const config = TOOL_CONFIG[call.name] || { icon: 'default', label: call.name }
+  const config = TOOL_CONFIG[call.name] || {
+    icon: call.icon || 'default',
+    label: call.displayName || call.name.replace(/^remote:/, ''),
+  }
   const isRunning = call.status === 'running'
   const formattedInput = formatInputSummary(call.inputSummary)
 
@@ -290,6 +293,19 @@ function ToolCallFeedItem({ call, isLatest, reduceMotion }: ToolCallFeedItemProp
           title={call.inputSummary}
         >
           {formattedInput}
+        </div>
+      )}
+
+      {call.providerLabel && (
+        <div
+          style={{
+            fontSize: 10,
+            color: 'rgba(15, 23, 42, 0.4)',
+            lineHeight: 1.4,
+            paddingLeft: 22,
+          }}
+        >
+          {call.providerLabel}
         </div>
       )}
     </motion.div>

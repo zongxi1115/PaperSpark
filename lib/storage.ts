@@ -1,5 +1,6 @@
 import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote, AssetType, AssetItem } from './types'
 import { defaultSettings } from './types'
+import { ensureLiteratureProviders } from './literatureProviders'
 
 const DOCUMENTS_KEY = 'paper_reader_documents'
 const SETTINGS_KEY = 'paper_reader_settings'
@@ -61,6 +62,10 @@ export function getSettings(): AppSettings {
     if ((!saved.providers || saved.providers.length === 0) && (saved.smallModel || saved.largeModel)) {
       merged.providers = defaultSettings.providers
     }
+    merged.literatureProviders = ensureLiteratureProviders(saved.literatureProviders)
+    merged.defaultLiteratureProviderId = merged.defaultLiteratureProviderId
+      || merged.literatureProviders.find(provider => provider.enabled)?.id
+      || defaultSettings.defaultLiteratureProviderId
     return merged
   } catch {
     return defaultSettings
@@ -69,7 +74,14 @@ export function getSettings(): AppSettings {
 
 export function saveSettings(settings: AppSettings): void {
   if (!isBrowser()) return
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+  const normalized: AppSettings = {
+    ...settings,
+    literatureProviders: ensureLiteratureProviders(settings.literatureProviders),
+    defaultLiteratureProviderId: settings.defaultLiteratureProviderId
+      || ensureLiteratureProviders(settings.literatureProviders).find(provider => provider.enabled)?.id
+      || defaultSettings.defaultLiteratureProviderId,
+  }
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(normalized))
 }
 
 // 根据模型 ID 获取模型配置

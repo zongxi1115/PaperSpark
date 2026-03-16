@@ -1,4 +1,5 @@
 import type { ModelConfig } from './types'
+import type { LiteratureProviderConfig } from './literatureProviders'
 
 export type LiteratureSearchStage =
   | 'intent'
@@ -87,6 +88,9 @@ export interface ConceptNode {
 export interface SearchPaper {
   id: string
   openAlexId: string
+  sourceRecordId?: string
+  sourceProviderId?: string
+  sourceProviderName?: string
   title: string
   abstract: string
   abstractSnippet: string
@@ -169,17 +173,14 @@ export interface RankedWorksOutput {
 
 export interface ToolCallEvent {
   id: string
-  name:
-    | 'searchWorks'
-    | 'getConceptTree'
-    | 'getRelatedWorks'
-    | 'filterWorks'
-    | 'getAuthorWorks'
-    | 'rankAndDeduplicate'
+  name: string
+  displayName?: string
+  icon?: 'search' | 'branch' | 'link' | 'filter' | 'author' | 'rank' | 'tool'
   status: 'running' | 'completed' | 'error'
   inputSummary: string
   resultCount?: number
   note?: string
+  providerLabel?: string
 }
 
 export interface ThoughtBubble {
@@ -223,12 +224,22 @@ export interface LiteratureSearchResultPayload {
   intent: SearchIntent
   reviewNotes: string[]
   retryCount: number
+  provider?: {
+    id: string
+    name: string
+    kind: LiteratureProviderConfig['kind']
+    transport: LiteratureProviderConfig['transport']
+    discoveredTools?: string[]
+    usedTools?: string[]
+    notes?: string[]
+  }
 }
 
 export interface LiteratureSearchRequest {
   query: string
   answers?: ClarificationAnswer[]
   modelConfig: ModelConfig
+  literatureProvider?: LiteratureProviderConfig
 }
 
 export type LiteratureSearchEvent =

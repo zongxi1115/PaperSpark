@@ -10,8 +10,10 @@ import {
   getModelById,
   getSelectedLargeModel,
   getSettings,
+  saveSettings,
 } from '@/lib/storage'
 import type { AppSettings, KnowledgeItem } from '@/lib/types'
+import { getSelectedLiteratureProvider } from '@/lib/literatureProviders'
 import type {
   ClarificationQuestion,
   LiteratureSearchEvent,
@@ -25,6 +27,7 @@ import type {
   ThoughtBubble,
 } from '@/lib/literatureSearchTypes'
 import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
+import { LiteratureSourceStudio } from './LiteratureSourceStudio'
 import { ToolCallFeed } from './ToolCallFeed'
 
 type AnswerState = Record<string, { value: string; customText: string }>
@@ -85,33 +88,58 @@ async function readSearchStream(
   }
 }
 
+function getPaperPrimaryUrl(paper: SearchPaper) {
+  if (paper.url) return paper.url
+  if (paper.pdfUrl) return paper.pdfUrl
+  if (paper.openAlexId.startsWith('http')) return paper.openAlexId
+
+  const isOpenAlexPaper = paper.sourceProviderId === 'literature-provider-openalex'
+    || paper.sourceProviderName === 'OpenAlex'
+    || /openalex/i.test(paper.openAlexId)
+
+  if (!isOpenAlexPaper) return undefined
+
+  const openAlexShortId = paper.openAlexId.split('/').pop()
+  return openAlexShortId ? `https://openalex.org/${openAlexShortId}` : undefined
+}
+
 function createKnowledgeItemFromPaper(paper: SearchPaper): KnowledgeItem {
-  const openAlexShortId = paper.openAlexId.split('/').pop()?.toLowerCase() || generateId()
+  const providerToken = (paper.sourceProviderId || 'literature-provider')
+    .replace(/[^a-z0-9_-]+/gi, '-')
+    .toLowerCase()
+  const recordToken = (paper.sourceRecordId || paper.openAlexId || paper.id || generateId())
+    .split('/')
+    .pop()
+    ?.replace(/[^a-z0-9_-]+/gi, '-')
+    .toLowerCase() || generateId()
   const safeFileBase = (paper.title || 'paper')
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 80) || 'paper'
   const pdfFileName = paper.pdfUrl ? `${safeFileBase}.pdf` : undefined
+  const primaryUrl = getPaperPrimaryUrl(paper)
+  const providerName = paper.sourceProviderName || '漫游搜索'
+  const tags = Array.from(new Set(['漫游搜索', providerName]))
 
   return {
-    id: `openalex-${openAlexShortId}`,
+    id: `${providerToken}-${recordToken}`,
     title: paper.title,
     authors: paper.authors,
     abstract: paper.abstract || '',
     year: paper.year ? String(paper.year) : '',
     journal: paper.venue,
     doi: paper.doi,
-    url: paper.url || `https://openalex.org/${openAlexShortId.toUpperCase()}`,
+    url: primaryUrl,
     sourceType: 'literature-search',
-    sourceId: paper.openAlexId,
+    sourceId: paper.sourceRecordId || paper.openAlexId || paper.id,
     fileName: pdfFileName,
     fileType: paper.pdfUrl ? 'pdf' : undefined,
     hasAttachment: Boolean(paper.pdfUrl),
     attachmentUrl: paper.pdfUrl,
     attachmentFileName: pdfFileName,
-    itemType: '漫游搜索',
-    tags: ['漫游搜索'],
+    itemType: `${providerName} 检索`,
+    tags,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   }
@@ -149,6 +177,7 @@ export function LiteratureSearchPanel() {
   const [answers, setAnswers] = useState<AnswerState>({})
   const [results, setResults] = useState<LiteratureSearchResultPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isSourceStudioOpen, setIsSourceStudioOpen] = useState(false)
 
   useEffect(() => {
     setSettings(getSettings())
@@ -164,6 +193,10 @@ export function LiteratureSearchPanel() {
     const selected = getModelById(settings, settings.defaultLargeModelId)
     if (!selected) return '未配置大模型'
     return `${selected.provider.name} / ${selected.model.name}`
+  }, [settings])
+
+  const selectedLiteratureProvider = useMemo(() => {
+    return getSelectedLiteratureProvider(settings)
   }, [settings])
 
   const serializedAnswers = useMemo(() => {
@@ -198,13 +231,29 @@ export function LiteratureSearchPanel() {
     setError(null)
   }
 
+  function handleSettingsChange(nextSettings: AppSettings) {
+    saveSettings(nextSettings)
+    setSettings(nextSettings)
+  }
+
   async function startSearch() {
     const query = inputValue.trim()
     if (!query) return
 
-    const modelConfig = getSelectedLargeModel(getSettings())
+    const modelConfig = getSelectedLargeModel(settings)
     if (!modelConfig.apiKey) {
       addToast({ title: '请先在设置页配置大参数模型 API Key', color: 'warning' })
+      return
+    }
+
+    if (!selectedLiteratureProvider) {
+      addToast({ title: '请先选择一个文献源', color: 'warning' })
+      return
+    }
+
+    if (selectedLiteratureProvider.kind === 'mcp' && !selectedLiteratureProvider.command?.trim()) {
+      addToast({ title: '当前 MCP 文献源还没有配置启动命令', color: 'warning' })
+      setIsSourceStudioOpen(true)
       return
     }
 
@@ -223,6 +272,7 @@ export function LiteratureSearchPanel() {
           query,
           answers: serializedAnswers,
           modelConfig,
+          literatureProvider: selectedLiteratureProvider,
         }),
         signal: controller.signal,
       })
@@ -324,6 +374,7 @@ export function LiteratureSearchPanel() {
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
+        minHeight: 0,
         background: 'linear-gradient(180deg, color-mix(in srgb, var(--bg-primary) 86%, #f5f7fb 14%) 0%, var(--bg-primary) 100%)',
       }}
     >
@@ -339,7 +390,7 @@ export function LiteratureSearchPanel() {
           <div>
             <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: 0.2 }}>论文智能检索</div>
             <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
-              基于 OpenAlex 与多智能体编排的学术资料漫游
+              保持多智能体编排不变，文献源改为可插拔，用户只需要配置命令。
             </div>
           </div>
           <div
@@ -357,6 +408,76 @@ export function LiteratureSearchPanel() {
             {modelLabel}
           </div>
         </div>
+
+        <div
+          style={{
+            marginTop: 12,
+            padding: 12,
+            borderRadius: 18,
+            border: '1px solid color-mix(in srgb, var(--border-color) 72%, transparent)',
+            background: 'linear-gradient(120deg, rgba(255,255,255,0.94), color-mix(in srgb, var(--accent-color) 7%, white))',
+            display: 'grid',
+            gap: 10,
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 0.8, color: 'var(--text-muted)' }}>
+                CURRENT SOURCE
+              </div>
+              <div style={{ marginTop: 6, fontSize: 16, fontWeight: 700, lineHeight: 1.35 }}>
+                {selectedLiteratureProvider?.name || '未选择文献源'}
+              </div>
+              <div style={{ marginTop: 5, fontSize: 12, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+                {selectedLiteratureProvider?.kind === 'mcp'
+                  ? '只保留命令配置。tool 发现、试探和结果抽取交给检索 agent 自动完成。'
+                  : '内置稳定源，适合作为默认检索底座。'}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              <SourceChip>{selectedLiteratureProvider?.transport || '未配置'}</SourceChip>
+              <SourceChip>{selectedLiteratureProvider?.kind === 'mcp' ? '自动发现工具' : '内置适配'}</SourceChip>
+              <Button
+                size="sm"
+                variant={isSourceStudioOpen ? 'solid' : 'flat'}
+                color="primary"
+                onPress={() => setIsSourceStudioOpen(current => !current)}
+              >
+                {isSourceStudioOpen ? '收起源配置' : '管理文献源'}
+              </Button>
+            </div>
+          </div>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
+              gap: 8,
+            }}
+          >
+            <SourceStat
+              label="用户输入"
+              value={selectedLiteratureProvider?.kind === 'mcp' ? '一条命令' : '零配置'}
+            />
+            <SourceStat
+              label="Agent 行为"
+              value={selectedLiteratureProvider?.kind === 'mcp' ? '发现并试探工具' : '调用内置能力'}
+            />
+            <SourceStat
+              label="UI 反馈"
+              value="展示实际调用链"
+            />
+          </div>
+        </div>
+
+        <LiteratureSourceStudio
+          isOpen={isSourceStudioOpen}
+          onClose={() => setIsSourceStudioOpen(false)}
+          settings={settings}
+          onSettingsChange={handleSettingsChange}
+          reduceMotion={reduceMotion}
+        />
 
         <div style={{ marginTop: 12 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -452,7 +573,11 @@ export function LiteratureSearchPanel() {
         ref={scrollRef}
         style={{
           flex: 1,
+          minHeight: 0,
           overflowY: 'auto',
+          overflowX: 'hidden',
+          scrollbarGutter: 'stable',
+          overscrollBehavior: 'contain',
           padding: '14px 14px 18px',
           display: 'flex',
           flexDirection: 'column',
@@ -648,6 +773,82 @@ export function LiteratureSearchPanel() {
               <div style={{ marginTop: 8, fontSize: 13, lineHeight: 1.7 }}>
                 {results.summary}
               </div>
+
+              {results.provider && (
+                <div
+                  style={{
+                    marginTop: 12,
+                    padding: '12px 12px 10px',
+                    borderRadius: 16,
+                    background: 'rgba(255,255,255,0.72)',
+                    border: '1px solid color-mix(in srgb, var(--border-color) 70%, transparent)',
+                    display: 'grid',
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 0.5 }}>
+                        执行来源
+                      </div>
+                      <div style={{ marginTop: 4, fontSize: 14, fontWeight: 700 }}>
+                        {results.provider.name}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                      <SourceChip>{results.provider.kind}</SourceChip>
+                      <SourceChip>{results.provider.transport}</SourceChip>
+                      {results.provider.discoveredTools?.length ? (
+                        <SourceChip>发现 {results.provider.discoveredTools.length} 个工具</SourceChip>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  {results.provider.discoveredTools?.length ? (
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        Agent 发现到的工具
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {results.provider.discoveredTools.map(toolName => (
+                          <SourceChip key={`${results.provider?.id}-discovered-${toolName}`}>{toolName}</SourceChip>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {results.provider.usedTools?.length ? (
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        Agent 实际使用
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {results.provider.usedTools.map(toolName => (
+                          <SourceChip key={`${results.provider?.id}-${toolName}`}>{toolName}</SourceChip>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {results.provider.notes?.length ? (
+                    <div style={{ display: 'grid', gap: 5 }}>
+                      {results.provider.notes.map(note => (
+                        <div
+                          key={note}
+                          style={{
+                            fontSize: 11,
+                            color: 'var(--text-secondary)',
+                            lineHeight: 1.6,
+                          }}
+                        >
+                          {note}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              )}
+
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
                 <MetricPill label="候选文献" value={String(results.totalCandidates)} />
                 <MetricPill label="去重数量" value={String(results.duplicatesRemoved)} />
@@ -710,7 +911,7 @@ export function LiteratureSearchPanel() {
 
             {results.papers.map((paper, index) => (
               <motion.article
-                key={paper.openAlexId}
+                key={paper.sourceRecordId || paper.openAlexId || paper.id}
                 initial={reduceMotion ? false : { opacity: 0, y: 14 }}
                 animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
                 transition={{ delay: reduceMotion ? 0 : Math.min(index * 0.04, 0.2) }}
@@ -732,16 +933,44 @@ export function LiteratureSearchPanel() {
           <div
             style={{
               margin: 'auto 0',
-              textAlign: 'center',
               color: 'var(--text-muted)',
               padding: '24px 8px 32px',
+              display: 'grid',
+              gap: 14,
             }}
           >
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-secondary)' }}>
-              从研究问题开始
+            <div>
+              <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-secondary)' }}>
+                从研究问题开始
+              </div>
+              <div style={{ fontSize: 12, marginTop: 8, lineHeight: 1.7 }}>
+                当前源是 {selectedLiteratureProvider?.name || '未选择文献源'}。输入问题后，系统会先理解意图，再由 agent 自动发现可用工具、并行检索、滚雪球扩展并输出推荐文献。
+              </div>
             </div>
-            <div style={{ fontSize: 12, marginTop: 8, lineHeight: 1.7 }}>
-              输入问题后，系统会先理解意图，再自动扩展关键词、并行检索、滚雪球扩展并输出推荐文献。
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                gap: 10,
+                textAlign: 'left',
+              }}
+            >
+              <FlowCard
+                index="01"
+                title="提出问题"
+                text="写研究目标、方法或应用场景，问题越具体，agent 规划越稳。"
+              />
+              <FlowCard
+                index="02"
+                title="自动探测"
+                text="如果是 MCP，系统会先探测这个命令实际暴露了哪些工具。"
+              />
+              <FlowCard
+                index="03"
+                title="汇总推荐"
+                text="前端会把调用链、来源说明和推荐理由一起展示出来。"
+              />
             </div>
           </div>
         )}
@@ -859,7 +1088,7 @@ export function LiteratureSearchPanel() {
                       </span>
                     </>
                   )
-                  : '支持中途停止并补充说明后重新规划'}
+                  : `当前源：${selectedLiteratureProvider?.name || '未选择'} · 支持中途停止并补充说明后重新规划`}
             </div>
 
             <div style={{ display: 'flex', gap: 8 }}>
@@ -912,6 +1141,75 @@ function MetricPill({ label, value }: { label: string; value: string }) {
   )
 }
 
+function SourceChip({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '5px 8px',
+        borderRadius: 999,
+        background: 'rgba(15, 23, 42, 0.06)',
+        fontSize: 10,
+        fontWeight: 700,
+        color: 'rgba(15, 23, 42, 0.62)',
+      }}
+    >
+      {children}
+    </span>
+  )
+}
+
+function SourceStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div
+      style={{
+        padding: '10px 11px',
+        borderRadius: 14,
+        background: 'rgba(255,255,255,0.72)',
+        border: '1px solid color-mix(in srgb, var(--border-color) 65%, transparent)',
+        display: 'grid',
+        gap: 4,
+      }}
+    >
+      <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 0.5 }}>
+        {label}
+      </div>
+      <div style={{ fontSize: 12, fontWeight: 600, lineHeight: 1.5, color: 'var(--text-primary)' }}>
+        {value}
+      </div>
+    </div>
+  )
+}
+
+function FlowCard({
+  index,
+  title,
+  text,
+}: {
+  index: string
+  title: string
+  text: string
+}) {
+  return (
+    <div
+      style={{
+        padding: '12px 13px',
+        borderRadius: 16,
+        border: '1px solid color-mix(in srgb, var(--border-color) 72%, transparent)',
+        background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
+        boxShadow: '0 10px 24px rgba(15, 23, 42, 0.04)',
+      }}
+    >
+      <div style={{ fontSize: 10, fontWeight: 800, color: 'var(--accent-color)', letterSpacing: 0.8 }}>{index}</div>
+      <div style={{ marginTop: 6, fontSize: 13, fontWeight: 700 }}>{title}</div>
+      <div style={{ marginTop: 6, fontSize: 11, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+        {text}
+      </div>
+    </div>
+  )
+}
+
 function PaperBadge({ children, tone }: { children: React.ReactNode; tone: 'success' | 'neutral' }) {
   return (
     <span
@@ -942,24 +1240,39 @@ function PaperCard({
   onSave: (paper: SearchPaper) => void
   onInsert: (paper: SearchPaper) => void
 }) {
+  const paperHref = getPaperPrimaryUrl(paper)
+
   return (
     <>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <a
-            href={paper.url || `https://openalex.org/${paper.openAlexId.split('/').pop()}`}
-            target="_blank"
-            rel="noreferrer"
-            style={{
-              fontSize: 15,
-              fontWeight: 700,
-              lineHeight: 1.45,
-              color: 'var(--text-primary)',
-              textDecoration: 'none',
-            }}
-          >
-            {paper.title}
-          </a>
+          {paperHref ? (
+            <a
+              href={paperHref}
+              target="_blank"
+              rel="noreferrer"
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                lineHeight: 1.45,
+                color: 'var(--text-primary)',
+                textDecoration: 'none',
+              }}
+            >
+              {paper.title}
+            </a>
+          ) : (
+            <div
+              style={{
+                fontSize: 15,
+                fontWeight: 700,
+                lineHeight: 1.45,
+                color: 'var(--text-primary)',
+              }}
+            >
+              {paper.title}
+            </div>
+          )}
           <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.55 }}>
             {paper.authors.slice(0, 4).join(', ') || '未知作者'}
             {paper.year ? ` · ${paper.year}` : ''}
@@ -967,6 +1280,7 @@ function PaperCard({
           </div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
+          {paper.sourceProviderName && <PaperBadge tone="neutral">{paper.sourceProviderName}</PaperBadge>}
           <PaperBadge tone="neutral">被引 {paper.citedByCount}</PaperBadge>
           <PaperBadge tone={paper.isOpenAccess ? 'success' : 'neutral'}>
             {paper.isOpenAccess ? `OA · ${paper.oaStatus || '开放'}` : '闭源'}

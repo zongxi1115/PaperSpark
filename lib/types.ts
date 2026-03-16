@@ -1,3 +1,6 @@
+import type { LiteratureProviderConfig } from './literatureProviders'
+import { createDefaultLiteratureProviders } from './literatureProviders'
+
 // 文章作者类型
 export interface ArticleAuthor {
   id: string
@@ -96,6 +99,8 @@ export type AppSettings = {
   providers: AIProvider[]
   defaultSmallModelId: string | null // 选中的小参数模型 id
   defaultLargeModelId: string | null // 选中的大参数模型 id
+  literatureProviders: LiteratureProviderConfig[]
+  defaultLiteratureProviderId: string | null
   // 保留旧配置用于兼容迁移
   smallModel?: ModelConfig
   largeModel?: ModelConfig
@@ -153,11 +158,14 @@ function getDefaultSettings(): AppSettings {
       updatedAt: new Date().toISOString(),
     },
   ]
+  const defaultLiteratureProviders = createDefaultLiteratureProviders()
 
   return {
     providers: defaultProviders,
     defaultSmallModelId: 'model-step-3.5-flash',
     defaultLargeModelId: 'model-gpt-4o',
+    literatureProviders: defaultLiteratureProviders,
+    defaultLiteratureProviderId: defaultLiteratureProviders[0]?.id || null,
     citationStyle: 'apa',
     editorThemeId: 'default',
     smallModel: {

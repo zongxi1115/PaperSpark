@@ -1,6 +1,6 @@
 'use client'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Button, Tooltip, Switch, Chip, Select, SelectItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure, Spinner } from '@heroui/react'
+import { Button, Tooltip, Switch, Chip, Select, SelectItem, Autocomplete, AutocompleteItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure, Spinner } from '@heroui/react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { readDocument } from './tools/ReadDocumentTool'
@@ -79,6 +79,7 @@ export function AssistantChatPanel() {
   const [notes, setNotes] = useState<AssistantNote[]>([])
   const [noteContent, setNoteContent] = useState('')
   const [activeMessageId, setActiveMessageId] = useState<string | null>(null)
+  const [modelSearchQuery, setModelSearchQuery] = useState('')
   const [showNotesList, setShowNotesList] = useState(false)
   const [useDocEditing, setUseDocEditing] = useState(false)
   // edit tool state: key = `${msgId}:${blockIdx}` or `${msgId}:simple:${idx}`
@@ -1445,25 +1446,37 @@ export function AssistantChatPanel() {
               </Button>
             </Tooltip>
             <span style={{ fontSize: 12, color: 'var(--text-muted)', minWidth: 40 }}>模型：</span>
-            <Select
+            <Autocomplete
               size="sm"
-              selectedKeys={settings?.defaultLargeModelId ? [settings.defaultLargeModelId] : []}
-              onChange={(e) => {
-                if (settings && e.target.value) {
-                  const newSettings = { ...settings, defaultLargeModelId: e.target.value }
+              selectedKey={settings?.defaultLargeModelId || null}
+              onSelectionChange={(key) => {
+                if (settings && key) {
+                  const newSettings = { ...settings, defaultLargeModelId: key as string }
                   setSettings(newSettings)
                 }
               }}
-              placeholder="选择模型"
+              inputValue={modelSearchQuery}
+              onInputChange={setModelSearchQuery}
+              placeholder="搜索并选择模型..."
               style={{ flex: 1 }}
-              classNames={{
-                trigger: 'bg-[var(--bg-secondary)]',
+              inputProps={{
+                classNames: {
+                  input: 'bg-[var(--bg-secondary)]',
+                  inputWrapper: 'bg-[var(--bg-secondary)]',
+                },
               }}
+              startContent={
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5 }}>
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+              }
+              allowsCustomValue={false}
             >
               {models.map(model => (
-                <SelectItem key={model.id}>{model.name}</SelectItem>
+                <AutocompleteItem key={model.id} textValue={model.name}>{model.name}</AutocompleteItem>
               ))}
-            </Select>
+            </Autocomplete>
           </div>
 
           <div style={{ display: 'grid', gap: 8 }}>

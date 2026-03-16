@@ -34,10 +34,17 @@ export function getDocument(id: string): AppDocument | null {
   return getDocuments().find(d => d.id === id) ?? null
 }
 
+function isSameDocumentPayload(a: AppDocument, b: AppDocument): boolean {
+  const { updatedAt: _aUpdatedAt, ...restA } = a
+  const { updatedAt: _bUpdatedAt, ...restB } = b
+  return JSON.stringify(restA) === JSON.stringify(restB)
+}
+
 export function saveDocument(doc: AppDocument): void {
   const docs = getDocuments()
   const idx = docs.findIndex(d => d.id === doc.id)
   if (idx >= 0) {
+    if (isSameDocumentPayload(docs[idx], doc)) return
     docs[idx] = doc
   } else {
     docs.unshift(doc)
@@ -242,10 +249,17 @@ export function getThought(id: string): Thought | null {
   return getThoughts().find(t => t.id === id) ?? null
 }
 
+function isSameThoughtPayload(a: Thought, b: Thought): boolean {
+  const { updatedAt: _aUpdatedAt, ...restA } = a
+  const { updatedAt: _bUpdatedAt, ...restB } = b
+  return JSON.stringify(restA) === JSON.stringify(restB)
+}
+
 export function saveThought(thought: Thought): void {
   const thoughts = getThoughts()
   const idx = thoughts.findIndex(t => t.id === thought.id)
   if (idx >= 0) {
+    if (isSameThoughtPayload(thoughts[idx], thought)) return
     thoughts[idx] = thought
   } else {
     thoughts.unshift(thought)

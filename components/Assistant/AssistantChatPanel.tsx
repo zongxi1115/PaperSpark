@@ -1297,6 +1297,24 @@ export function AssistantChatPanel() {
 
   const models = getModels()
 
+  // 标记是否已完成模型选择器的初始化
+  const modelSelectorInitializedRef = useRef(false)
+
+  // 仅在初始化时设置默认模型名称（一次性）
+  useEffect(() => {
+    if (
+      !modelSelectorInitializedRef.current &&
+      settings?.defaultLargeModelId &&
+      models.length > 0
+    ) {
+      const defaultModel = models.find(m => m.id === settings.defaultLargeModelId)
+      if (defaultModel) {
+        setModelSearchQuery(defaultModel.name)
+        modelSelectorInitializedRef.current = true
+      }
+    }
+  }, [settings?.defaultLargeModelId, models])
+
   const messages = currentConversation?.messages || []
 
   return (
@@ -1452,6 +1470,19 @@ export function AssistantChatPanel() {
               onSelectionChange={(key) => {
                 if (settings && key) {
                   const newSettings = { ...settings, defaultLargeModelId: key as string }
+                  setSettings(newSettings)
+                  // 视觉回填：更新输入框显示为选中模型的名称
+                  const selectedModel = models.find(m => m.id === key)
+                  if (selectedModel) {
+                    setModelSearchQuery(selectedModel.name)
+                  }
+                }
+              }}
+              onClear={() => {
+                // 清空选中值和输入框
+                setModelSearchQuery('')
+                if (settings) {
+                  const newSettings = { ...settings, defaultLargeModelId: '' }
                   setSettings(newSettings)
                 }
               }}

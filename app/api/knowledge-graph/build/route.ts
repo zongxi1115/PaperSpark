@@ -9,7 +9,7 @@ import {
   edgeExists,
   updateNodeWeight
 } from '@/lib/knowledgeGraph'
-import { updateKnowledgeItem } from '@/lib/storage'
+import { getKnowledgeItem, updateKnowledgeItem } from '@/lib/storage'
 
 export async function POST(request: NextRequest) {
   try {
@@ -206,16 +206,12 @@ export async function POST(request: NextRequest) {
     }
 
     // 7. 更新知识库条目，添加建议的标签
-    const existingTags = new Set()
-    updateKnowledgeItem(knowledgeItemId, (item) => {
-      const currentTags = item.tags || []
-      currentTags.forEach(tag => existingTags.add(tag))
-
-      const newTags = analysis.suggestedTags.filter(tag => !existingTags.has(tag))
-      return {
-        ...item,
-        tags: [...currentTags, ...newTags.slice(0, 5)] // 最多添加5个新标签
-      }
+    const knowledgeItem = getKnowledgeItem(knowledgeItemId)
+    const currentTags = knowledgeItem?.tags || []
+    const existingTags = new Set(currentTags)
+    const newTags = analysis.suggestedTags.filter(tag => !existingTags.has(tag))
+    updateKnowledgeItem(knowledgeItemId, {
+      tags: [...currentTags, ...newTags.slice(0, 5)] // 最多添加5个新标签
     })
 
     return NextResponse.json({

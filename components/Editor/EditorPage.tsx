@@ -34,7 +34,7 @@ import type { AppDocument, AppSettings, ArticleAuthor, DocumentVersion } from '@
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
-import { FormulaInputExtension } from '@/lib/formulaInputExtension'
+import { FormulaInputExtension, parseMarkdownWithFormulas, convertToInlineContent } from '@/lib/formulaInputExtension'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
 import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
 import { registerEditor, unregisterEditor } from '@/lib/editorContext'
@@ -219,7 +219,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       FormulaInputExtension(),
     ],
     // 粘贴处理器：解析 markdown 中的公式
-    pasteHandler: async ({ event, editor, defaultPasteHandler }) => {
+    pasteHandler: ({ event, editor, defaultPasteHandler }) => {
       const clipboardData = event.clipboardData
       if (!clipboardData) {
         return defaultPasteHandler()
@@ -230,9 +230,6 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       
       // 检查是否包含公式标记
       if (plainText && (plainText.includes('$') || plainText.includes('$$'))) {
-        // 导入公式解析函数
-        const { parseMarkdownWithFormulas, convertToInlineContent } = await import('@/lib/formulaInputExtension')
-        
         // 解析公式
         const parsed = parseMarkdownWithFormulas(plainText)
         

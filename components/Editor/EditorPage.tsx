@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   useCreateBlockNote,
   FormattingToolbar,
@@ -9,6 +9,7 @@ import {
   getDefaultReactSlashMenuItems,
   SideMenuController,
   SideMenu,
+  type DefaultReactSuggestionItem,
 } from '@blocknote/react'
 import { CustomDragHandleMenu } from './CustomDragHandleMenu'
 import { BlockNoteView } from '@blocknote/mantine'
@@ -57,6 +58,84 @@ interface EditorPageProps {
 
 const CONTEXT_WINDOW = 1500 // 上下文窗口大小
 const AUTO_COMPLETE_DELAY = 5000 // 5秒无输入后触发补全
+
+type SlashMenuItem = DefaultReactSuggestionItem & {
+  icon?: ReactNode
+}
+
+function buildItemSearchText(item: DefaultReactSuggestionItem): string {
+  return [item.title, ...(item.aliases ?? [])].join(' ').toLowerCase()
+}
+
+function isHeadingItem(item: DefaultReactSuggestionItem): boolean {
+  const text = buildItemSearchText(item)
+  return /heading|标题/.test(text)
+}
+
+function isHeading3Item(item: DefaultReactSuggestionItem): boolean {
+  const text = buildItemSearchText(item)
+  return /(heading\s*3|h3|三级标题|标题\s*3)/.test(text)
+}
+
+function isCollapsibleHeadingItem(item: DefaultReactSuggestionItem): boolean {
+  const text = buildItemSearchText(item)
+  return /(toggle\s*heading|collapsible|collapse|可折叠|折叠标题|切换标题)/.test(text)
+}
+
+function isEmojiItem(item: DefaultReactSuggestionItem): boolean {
+  const text = buildItemSearchText(item)
+  return /(emoji|表情)/.test(text)
+}
+
+function isTableItem(item: DefaultReactSuggestionItem): boolean {
+  const text = buildItemSearchText(item)
+  return /(table|表格)/.test(text)
+}
+
+function isImageItem(item: DefaultReactSuggestionItem): boolean {
+  const text = buildItemSearchText(item)
+  return /(image|图片)/.test(text)
+}
+
+function getPinyinInitialAliases(item: DefaultReactSuggestionItem): string[] {
+  const text = buildItemSearchText(item)
+  const aliases = new Set<string>()
+
+  const mapping: Array<{ pattern: RegExp; pinyin: string[] }> = [
+    { pattern: /(paragraph|段落|正文)/, pinyin: ['dl'] },
+    { pattern: /(bullet\s*list|unordered|无序列表)/, pinyin: ['wxlb'] },
+    { pattern: /(numbered\s*list|ordered|有序列表)/, pinyin: ['yxlb'] },
+    { pattern: /(check\s*list|todo|待办列表|任务列表)/, pinyin: ['dblb'] },
+    { pattern: /(quote|blockquote|引用|引述)/, pinyin: ['yy'] },
+    { pattern: /(code\s*block|代码块|代码)/, pinyin: ['dmk'] },
+    { pattern: /(table|表格)/, pinyin: ['bg'] },
+    { pattern: /(image|图片)/, pinyin: ['tp'] },
+    { pattern: /(video|视频)/, pinyin: ['sp'] },
+    { pattern: /(file|文件)/, pinyin: ['wj'] },
+    { pattern: /(audio|音频)/, pinyin: ['yp'] },
+    { pattern: /(divider|separator|分割线|分隔线)/, pinyin: ['fgx'] },
+    { pattern: /(callout|提示|告警)/, pinyin: ['ts'] },
+    { pattern: /(equation|formula|math|latex|公式)/, pinyin: ['gs'] },
+  ]
+
+  mapping.forEach(({ pattern, pinyin }) => {
+    if (pattern.test(text)) {
+      pinyin.forEach((alias) => aliases.add(alias))
+    }
+  })
+
+  return Array.from(aliases)
+}
+
+function withPinyinAliases(item: SlashMenuItem): SlashMenuItem {
+  if (isHeadingItem(item)) return item
+
+  const pinyinAliases = getPinyinInitialAliases(item)
+  if (pinyinAliases.length === 0) return item
+
+  const mergedAliases = Array.from(new Set([...(item.aliases ?? []), ...pinyinAliases]))
+  return { ...item, aliases: mergedAliases }
+}
 
 function extractTitle(content: Block[], articleTitle?: string): string {
   // 优先使用文章标题
@@ -1253,29 +1332,55 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               {/* 带 AI 选项的斜杠菜单 */}
               <SuggestionMenuController
                 triggerCharacter="/"
-                getItems={async (query) =>
-                  filterSuggestionItems(
-                    [
-                      ...getDefaultReactSlashMenuItems(editor),
-                      ...getAISlashMenuItems(editor),
-                      {
-                        title: '行内公式',
-                        groupName: '其他',
-                        icon: <FormulaIcon />,
-                        keywords: ['formula', 'math', '公式', '数学','latex','gs'],
-                        onItemClick: () => {
-                          editor.insertInlineContent([
-                            {
-                              type: 'formula',
-                              props: { latex: '' },
-                            },
-                          ])
+                getItems={async (query) => {
+                  const defaultItems = getDefaultReactSlashMenuItems(editor) as SlashMenuItem[]
+                  const baseItems = defaultItems.filter((item) => !isCollapsibleHeadingItem(item) && !isEmojiItem(item))
+
+                  const tableItem = baseItems.find(isTableItem)
+                  const imageItem = baseItems.find(isImageItem)
+                  const itemsWithoutQuickInsert = baseItems.filter((item) => !isTableItem(item) && !isImageItem(item))
+                  const formulaItem: SlashMenuItem = {
+                    title: '行内公式',
+                    group: '其他',
+                    icon: <FormulaIcon />,
+                    aliases: ['formula', 'math', '公式', '数学', 'latex', 'gs'],
+                    onItemClick: () => {
+                      editor.insertInlineContent([
+                        {
+                          type: 'formula',
+                          props: {
+                            latex: '',
+                            autoOpenToken: `formula-open-${Date.now()}`,
+                          },
                         },
-                      },
+                      ])
+                    },
+                  }
+
+                  const normalizedItems = itemsWithoutQuickInsert.map(withPinyinAliases)
+                  const insertItems: SlashMenuItem[] = [withPinyinAliases(formulaItem)]
+                  if (imageItem) {
+                    insertItems.push(withPinyinAliases(imageItem))
+                  }
+                  if (tableItem) {
+                    insertItems.push(withPinyinAliases(tableItem))
+                  }
+
+                  const heading3Index = normalizedItems.findIndex(isHeading3Item)
+                  if (heading3Index >= 0) {
+                    normalizedItems.splice(heading3Index + 1, 0, ...insertItems)
+                  } else {
+                    normalizedItems.push(...insertItems)
+                  }
+
+                  return filterSuggestionItems(
+                    [
+                      ...normalizedItems,
+                      ...getAISlashMenuItems(editor),
                     ],
                     query
                   )
-                }
+                }}
               />
 
               {/* 引用文献菜单：输入 [ 触发 */}

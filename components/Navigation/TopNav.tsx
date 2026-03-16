@@ -229,7 +229,7 @@ function AboutModal({ isOpen, onClose }: AboutModalProps) {
               width={800}
               height={300}
               className="w-full h-auto"
-              priority
+              unoptimized
             />
           </div>
 

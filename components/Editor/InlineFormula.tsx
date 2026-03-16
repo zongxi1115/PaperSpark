@@ -16,6 +16,9 @@ type FormulaInlineContentProps = ReactCustomInlineContentRenderProps<
       latex: {
         default: string
       }
+      autoOpenToken: {
+        default: string
+      }
     }
     content: 'none'
   },
@@ -65,6 +68,8 @@ function FormulaInlineContent({ inlineContent, updateInlineContent }: FormulaInl
   const [isEditing, setIsEditing] = useState(false)
   const [isHovered, setIsHovered] = useState(false)
   const currentLatex = inlineContent.props.latex || ''
+  const currentAutoOpenToken = inlineContent.props.autoOpenToken || ''
+  const handledAutoOpenTokenRef = useRef<string>('')
 
   // 关闭其他编辑器
   const openEditor = useCallback(() => {
@@ -89,10 +94,28 @@ function FormulaInlineContent({ inlineContent, updateInlineContent }: FormulaInl
       type: 'formula',
       props: {
         latex: newLatex,
+        autoOpenToken: '',
       },
     })
     setIsEditing(false)
   }, [updateInlineContent])
+
+  // 新创建并带有 autoOpenToken 的公式节点会自动进入编辑态
+  useEffect(() => {
+    if (!currentAutoOpenToken) return
+    if (handledAutoOpenTokenRef.current === currentAutoOpenToken) return
+
+    handledAutoOpenTokenRef.current = currentAutoOpenToken
+    openEditor()
+
+    updateInlineContent({
+      type: 'formula',
+      props: {
+        latex: currentLatex,
+        autoOpenToken: '',
+      },
+    })
+  }, [currentAutoOpenToken, currentLatex, openEditor, updateInlineContent])
 
   const handleClose = useCallback(() => {
     setIsEditing(false)
@@ -112,6 +135,7 @@ function FormulaInlineContent({ inlineContent, updateInlineContent }: FormulaInl
   return (
     <>
       <span
+        data-formula-inline="true"
         onClick={(e) => {
           e.preventDefault()
           e.stopPropagation()
@@ -158,6 +182,9 @@ export const FormulaInlineContentSpec = createReactInlineContentSpec(
       latex: {
         default: '',
       },
+      autoOpenToken: {
+        default: '',
+      },
     },
     content: 'none',
   } as const,
@@ -168,12 +195,13 @@ export const FormulaInlineContentSpec = createReactInlineContentSpec(
 
 // 导出一个更新 latex 的辅助函数（用于外部调用）
 export function createFormulaInsertHandler(editor: any) {
-  return (latex: string = '') => {
+  return (latex: string = '', autoOpen: boolean = false) => {
     editor.insertInlineContent([
       {
         type: 'formula',
         props: {
           latex,
+          autoOpenToken: autoOpen ? `formula-open-${Date.now()}` : '',
         },
       },
     ])

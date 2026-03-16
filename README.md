@@ -28,13 +28,64 @@ PaperSpark 面向科研与高阶学习场景，提供从文献导入、沉浸式
 
 ## 快速开始
 
-### 环境要求
+### 方式一：Docker 部署（推荐）
+
+适合快速体验和生产环境部署。
+
+#### 环境要求
+
+- Docker Desktop（Windows/macOS）或 Docker Engine（Linux）
+- 如需 GPU 加速：NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+
+#### 一键启动
+
+```bash
+# 1. 下载 deploy 目录
+git clone https://github.com/zongxi1115/paperspark.git
+cd paperspark/deploy
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env 填写你的 AI API Key
+
+# 3. 启动服务
+docker-compose up -d
+
+# 4. 访问应用
+# 打开浏览器 http://localhost:3000
+```
+
+#### GPU 版本
+
+```bash
+# 验证 GPU 可用
+docker run --gpus all nvidia/cuda:12.1-base nvidia-smi
+
+# 启动 GPU 版本
+docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+#### 镜像版本说明
+
+| 镜像 | 说明 |
+| --- | --- |
+| `xiaozongxi/paperspark-nextjs:latest` | Next.js 前端 |
+| `xiaozongxi/paperspark-surya:cpu` | OCR 后端 CPU 版本 |
+| `xiaozongxi/paperspark-surya:gpu-cu121` | OCR 后端 CUDA 12.1 版本 |
+
+---
+
+### 方式二：本地构建
+
+适合开发者二次开发和调试。
+
+#### 环境要求
 
 - Node.js 18+
 - pnpm 8+
 - Python 3.10+（用于微服务）
 
-### 安装与运行
+#### 安装与运行
 
 ```bash
 pnpm install
@@ -43,14 +94,14 @@ pnpm dev
 
 默认访问地址为 http://localhost:3000。
 
-### 微服务依赖安装
+#### 微服务依赖安装
 
 ```bash
 cd services/surya_ocr_service
 pip install -r requirements.txt
 ```
 
-### 微服务启动路径
+#### 微服务启动路径
 
 ```powershell
 .\scripts\start-surya-service.ps1
@@ -62,7 +113,7 @@ pip install -r requirements.txt
 SURYA_OCR_SERVICE_URL=http://127.0.0.1:8765
 ```
 
-### GPU 加速建议
+#### GPU 加速建议
 
 - 推荐在支持 CUDA 的环境中运行微服务，以获得更快的文档解析与推理速度。
 - 建议先安装与你本机 CUDA 版本匹配的 PyTorch（GPU 版），再安装其余依赖。

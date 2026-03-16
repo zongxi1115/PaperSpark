@@ -1,0 +1,90 @@
+# ============================================
+# PaperSpark 开发环境 Docker Compose
+# ============================================
+#
+# 用于本地开发测试，从源码构建镜像
+#
+# 使用方式：
+#   docker-compose up -d --build
+#
+# 发布给用户请使用 deploy/ 目录
+#
+# ============================================
+
+services:
+  # ==========================================
+  # Next.js 前端服务
+  # ==========================================
+  nextjs:
+    build:
+      context: .
+      dockerfile: Dockerfile.next
+    ports:
+      - "3000:3000"
+    environment:
+      # 后端服务地址（容器间通信）
+      - SURYA_OCR_SERVICE_URL=http://surya-ocr:8765
+      # AI 配置（从 .env.local 或环境变量获取）
+      - NEXT_PUBLIC_SMALL_MODEL_BASE_URL=${NEXT_PUBLIC_SMALL_MODEL_BASE_URL}
+      - NEXT_PUBLIC_SMALL_MODEL_API_KEY=${NEXT_PUBLIC_SMALL_MODEL_API_KEY}
+      - NEXT_PUBLIC_SMALL_MODEL_NAME=${NEXT_PUBLIC_SMALL_MODEL_NAME}
+      - NEXT_PUBLIC_LARGE_MODEL_BASE_URL=${NEXT_PUBLIC_LARGE_MODEL_BASE_URL}
+      - NEXT_PUBLIC_LARGE_MODEL_API_KEY=${NEXT_PUBLIC_LARGE_MODEL_API_KEY}
+      - NEXT_PUBLIC_LARGE_MODEL_NAME=${NEXT_PUBLIC_LARGE_MODEL_NAME}
+      - NEXT_PUBLIC_EMBEDDING_BASE_URL=${NEXT_PUBLIC_EMBEDDING_BASE_URL}
+      - NEXT_PUBLIC_EMBEDDING_API_KEY=${NEXT_PUBLIC_EMBEDDING_API_KEY}
+      - NEXT_PUBLIC_EMBEDDING_NAME=${NEXT_PUBLIC_EMBEDDING_NAME}
+    depends_on:
+      surya-ocr:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - paperspark-network
+
+  # ==========================================
+  # Surya OCR 后端服务（默认 CPU 版本）
+  # ==========================================
+  surya-ocr:
+    build:
+      context: ./services/surya_ocr_service
+      dockerfile: Dockerfile
+      args:
+        # 默认 CPU 版本，GPU 版本见 docker-compose.gpu.yml
+        TORCH_VERSION: cpu
+    ports:
+      - "8765:8765"
+    environment:
+      - SURYA_MAX_WORKERS=2
+      # AI 配置
+      - api_key=${NEXT_PUBLIC_EMBEDDING_API_KEY}
+      - base_url=${NEXT_PUBLIC_EMBEDDING_BASE_URL}
+      - embedding_name=${NEXT_PUBLIC_EMBEDDING_NAME}
+    volumes:
+      # 持久化数据
+      - surya-jobs:/app/out/surya_jobs
+      - chroma-data:/app/out/chroma_db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - paperspark-network
+
+# ==========================================
+# 网络配置
+# ==========================================
+networks:
+  paperspark-network:
+    driver: bridge
+
+# ==========================================
+# 数据卷
+# ==========================================
+volumes:
+  surya-jobs:
+    driver: local
+  chroma-data:
+    driver: local

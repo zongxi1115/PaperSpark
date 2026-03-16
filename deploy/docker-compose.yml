@@ -1,0 +1,63 @@
+# ============================================
+# PaperSpark 部署配置
+# ============================================
+#
+# 快速开始：
+#   1. 复制 .env.example 为 .env 并填写配置
+#   2. docker-compose up -d
+#   3. 访问 http://localhost:3000
+#
+# GPU 版本：
+#   docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+#
+# ============================================
+
+services:
+  nextjs:
+    image: ${DOCKER_REGISTRY:-docker.io}/${DOCKER_USER:-xiaozongxi}/paperspark-nextjs:${VERSION:-latest}
+    ports:
+      - "3000:3000"
+    environment:
+      - SURYA_OCR_SERVICE_URL=http://surya-ocr:8765
+      - NEXT_PUBLIC_SMALL_MODEL_BASE_URL=${NEXT_PUBLIC_SMALL_MODEL_BASE_URL}
+      - NEXT_PUBLIC_SMALL_MODEL_API_KEY=${NEXT_PUBLIC_SMALL_MODEL_API_KEY}
+      - NEXT_PUBLIC_SMALL_MODEL_NAME=${NEXT_PUBLIC_SMALL_MODEL_NAME}
+      - NEXT_PUBLIC_LARGE_MODEL_BASE_URL=${NEXT_PUBLIC_LARGE_MODEL_BASE_URL}
+      - NEXT_PUBLIC_LARGE_MODEL_API_KEY=${NEXT_PUBLIC_LARGE_MODEL_API_KEY}
+      - NEXT_PUBLIC_LARGE_MODEL_NAME=${NEXT_PUBLIC_LARGE_MODEL_NAME}
+      - NEXT_PUBLIC_EMBEDDING_BASE_URL=${NEXT_PUBLIC_EMBEDDING_BASE_URL}
+      - NEXT_PUBLIC_EMBEDDING_API_KEY=${NEXT_PUBLIC_EMBEDDING_API_KEY}
+      - NEXT_PUBLIC_EMBEDDING_NAME=${NEXT_PUBLIC_EMBEDDING_NAME}
+    depends_on:
+      surya-ocr:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - paperspark-network
+
+  surya-ocr:
+    image: ${DOCKER_REGISTRY:-docker.io}/${DOCKER_USER:-xiaozongxi}/paperspark-surya:${SURYA_VERSION:-cpu}
+    ports:
+      - "8765:8765"
+    environment:
+      - SURYA_MAX_WORKERS=${SURYA_MAX_WORKERS:-2}
+    volumes:
+      - surya-jobs:/app/out/surya_jobs
+      - chroma-data:/app/out/chroma_db
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+    networks:
+      - paperspark-network
+
+networks:
+  paperspark-network:
+    driver: bridge
+
+volumes:
+  surya-jobs:
+  chroma-data:

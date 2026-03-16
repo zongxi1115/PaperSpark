@@ -1,6 +1,8 @@
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
+  // Docker 部署必需：生成独立可运行的输出
+  output: 'standalone',
   transpilePackages: [
     '@blocknote/core',
     '@blocknote/react',

@@ -1,0 +1,40 @@
+# 依赖目录
+node_modules
+.pnpm-store
+
+# 构建产物
+.next
+out
+dist
+
+# 开发文件
+.git
+.github
+.vscode
+.claude
+
+# Python 缓存
+__pycache__
+*.pyc
+.pytest_cache
+
+# 环境配置（敏感信息，运行时挂载）
+.env
+.env.local
+.env*.local
+
+# IDE 配置
+*.md
+!README.md
+
+# 图片和资源（不需要在镜像中）
+md_assets
+paper-writer-error.jpg
+
+# 日志和临时文件
+*.log
+*.tsbuildinfo
+
+# 本地数据
+data
+services/surya_ocr_service/out

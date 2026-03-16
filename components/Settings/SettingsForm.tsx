@@ -1,6 +1,6 @@
 'use client'
 import setting from './setting-block.module.css'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   Button,
   Card,
@@ -640,16 +640,45 @@ function ThemeSelector() {
 
 export function SettingsForm() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
-  const [saved, setSaved] = useState(false)
   const [editingProvider, setEditingProvider] = useState<AIProvider | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
   
   // 测试嵌入模型连接状态
   const [testingEmbedding, setTestingEmbedding] = useState(false)
+  
+  // 自动保存相关
+  const isInitialized = useRef(false)
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
   useEffect(() => {
     setSettings(getSettings())
   }, [])
+  
+  // 自动保存：settings 变化后 800ms 自动保存
+  useEffect(() => {
+    // 首次加载时不触发保存
+    if (!isInitialized.current) {
+      isInitialized.current = true
+      return
+    }
+    
+    // 清除之前的定时器
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+    }
+    
+    // 800ms 后自动保存
+    saveTimeoutRef.current = setTimeout(() => {
+      saveSettings(settings)
+      addToast({ title: '设置已自动保存', color: 'success' })
+    }, 800)
+    
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+    }
+  }, [settings])
   
   // 测试嵌入模型连接
   const testEmbeddingConnection = async () => {
@@ -699,13 +728,6 @@ export function SettingsForm() {
     }
   }
 
-  const handleSave = () => {
-    saveSettings(settings)
-    setSaved(true)
-    addToast({ title: '设置已保存', color: 'success' })
-    setTimeout(() => setSaved(false), 2000)
-  }
-
   const handleReset = () => {
     setSettings(defaultSettings)
     saveSettings(defaultSettings)
@@ -738,12 +760,20 @@ export function SettingsForm() {
       }
     }
     
-    setSettings(s => ({
-      ...s,
+    const newSettings = {
+      ...settings,
       providers: newProviders,
       defaultSmallModelId: newSmallId,
       defaultLargeModelId: newLargeId,
-    }))
+    }
+    
+    // 立即保存，跳过自动保存的 toast
+    saveSettings(newSettings)
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = null
+    }
+    setSettings(newSettings)
     addToast({ title: '接口已删除', color: 'default' })
   }
 
@@ -758,7 +788,15 @@ export function SettingsForm() {
       newProviders = [...settings.providers, provider]
     }
     
-    setSettings(s => ({ ...s, providers: newProviders }))
+    const newSettings = { ...settings, providers: newProviders }
+    
+    // 立即保存，跳过自动保存的 toast
+    saveSettings(newSettings)
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = null
+    }
+    setSettings(newSettings)
     addToast({ title: existingIndex >= 0 ? '接口已更新' : '接口已添加', color: 'success' })
   }
 
@@ -1266,11 +1304,8 @@ export function SettingsForm() {
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 12, paddingTop: 4 }}>
-          <Button color="primary" onPress={handleSave} isDisabled={saved}>
-            {saved ? '已保存 ✓' : '保存设置'}
-          </Button>
           <Button variant="light" color="default" onPress={handleReset}>
-            恢复默认
+            恢复默认设置
           </Button>
         </div>
       </div>

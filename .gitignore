@@ -23,10 +23,10 @@ dist-ssr
 *.sln
 *.sw?
 
-public/fonts
 .next/
 out/
 *.pyc
 **/uploads/**
 
 AGENTS.md
+.claude/

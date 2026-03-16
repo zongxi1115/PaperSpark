@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import 'mathlive'
 import { Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Button, Textarea } from '@heroui/react'
+import { configureMathliveFontsDirectory } from '@/lib/mathliveFonts'
 
 interface FormulaEditorProps {
   isOpen: boolean
@@ -29,16 +30,7 @@ export function FormulaEditor({ isOpen, initialLatex, onSave, onClose }: Formula
 
     // 配置 MathLive 字体资源目录（必须在创建 math-field 之前设置）
     // 默认使用 public/fonts；也可通过 CSS 变量 `--mathfield-fonts-directory` 覆盖
-    const MathfieldElement = (globalThis as any).MathfieldElement as
-      | { fontsDirectory?: string | null }
-      | undefined
-    const cssFontsDirectory = getComputedStyle(document.documentElement)
-      .getPropertyValue('--mathfield-fonts-directory')
-      .trim()
-    const fontsDirectory = cssFontsDirectory || '/fonts'
-    if (MathfieldElement && MathfieldElement.fontsDirectory !== fontsDirectory) {
-      MathfieldElement.fontsDirectory = fontsDirectory
-    }
+    configureMathliveFontsDirectory()
 
     // 清除旧的 mathfield
     containerRef.current.innerHTML = ''

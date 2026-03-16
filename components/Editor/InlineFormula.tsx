@@ -4,6 +4,7 @@ import { createReactInlineContentSpec } from '@blocknote/react'
 import type { ReactCustomInlineContentRenderProps } from '@blocknote/react'
 import 'mathlive'
 import { FormulaEditor } from './FormulaEditor'
+import { configureMathliveFontsDirectory } from '@/lib/mathliveFonts'
 
 // 全局状态管理：当前打开的公式编辑器
 let currentOpenEditor: ((open: boolean) => void) | null = null
@@ -22,20 +23,11 @@ type FormulaInlineContentProps = ReactCustomInlineContentRenderProps<
 >
 
 function ensureMathliveFontsDirectory() {
-  if (typeof window === 'undefined' || typeof document === 'undefined') return
-  const MathfieldElement = (globalThis as any).MathfieldElement as
-    | { fontsDirectory?: string | null }
-    | undefined
-  if (!MathfieldElement) return
-
-  const cssFontsDirectory = getComputedStyle(document.documentElement)
-    .getPropertyValue('--mathfield-fonts-directory')
-    .trim()
-  const fontsDirectory = cssFontsDirectory || '/fonts'
-  if (MathfieldElement.fontsDirectory !== fontsDirectory) {
-    MathfieldElement.fontsDirectory = fontsDirectory
-  }
+  configureMathliveFontsDirectory()
 }
+
+// Configure as early as possible, before MathLive attempts to resolve fonts.
+ensureMathliveFontsDirectory()
 
 function MathLiveInline({ latex }: { latex: string }) {
   const spanRef = useRef<HTMLElement | null>(null)

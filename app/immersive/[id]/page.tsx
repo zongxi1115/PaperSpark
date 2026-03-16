@@ -354,6 +354,11 @@ export default function ImmersiveReaderPage() {
       existingPages.length > 0
     setSuryaReady(hasCompletedSuryaCache)
 
+    // 同步缓存状态到 localStorage（修复缓存标记与实际数据不一致的问题）
+    if (item.hasImmersiveCache !== hasCompletedSuryaCache) {
+      updateKnowledgeItem(knowledgeId, { hasImmersiveCache: hasCompletedSuryaCache })
+    }
+
     const cachedBlocks = existingPages.flatMap(page => attachPageMetrics(page.blocks, page.width, page.height))
     const extractedCachedReferences = extractReferencesFromBlocks(cachedBlocks)
 

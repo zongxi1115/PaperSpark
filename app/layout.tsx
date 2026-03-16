@@ -10,9 +10,28 @@ export const metadata: Metadata = {
   description: '专注的学术论文写作工具',
 }
 
+// 防止 SSR 主题闪烁的脚本
+const themeScript = `
+  (function() {
+    try {
+      var theme = localStorage.getItem('paper_reader_theme') || 'system';
+      var resolved = theme === 'system' 
+        ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+        : theme;
+      if (resolved === 'dark') {
+        document.documentElement.classList.add('dark');
+      }
+      document.documentElement.setAttribute('data-theme', resolved);
+    } catch (e) {}
+  })();
+`
+
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh-CN">
+    <html lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body style={{ margin: 0, height: '100vh', overflow: 'hidden' }}>
         <Providers>
           {/* Fixed TopNav */}

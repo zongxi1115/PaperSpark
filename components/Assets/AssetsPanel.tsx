@@ -24,6 +24,7 @@ import { useCreateBlockNote } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import type { Block } from '@blocknote/core'
+import type { Theme } from '@blocknote/mantine'
 import { Icon } from '@iconify/react'
 import {
   getAssets,
@@ -37,6 +38,8 @@ import {
   getSelectedSmallModel,
 } from '@/lib/storage'
 import type { AssetType, AssetItem, ModelConfig } from '@/lib/types'
+import { getThemeById, buildBlockNoteTheme } from '@/lib/editorThemes'
+import { useThemeContext } from '@/components/Providers'
 
 // 可选图标列表
 const ICON_OPTIONS = [
@@ -62,6 +65,7 @@ export function AssetsPanel() {
   const [searchQuery, setSearchQuery] = useState('')
   const [editingAsset, setEditingAsset] = useState<AssetItem | null>(null)
   const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null)
+  const { isDark } = useThemeContext()
 
   const { isOpen: isEditorOpen, onOpen: onEditorOpen, onClose: onEditorClose } = useDisclosure()
   const { isOpen: isTypeModalOpen, onOpen: onTypeModalOpen, onClose: onTypeModalClose } = useDisclosure()
@@ -469,6 +473,7 @@ export function AssetsPanel() {
               assetTypes={assetTypes}
               allTags={allTags}
               modelConfig={modelConfig}
+              isDark={isDark}
               onClose={onEditorClose}
               onSave={() => setAssets(getAssets())}
             />
@@ -581,6 +586,7 @@ function AssetEditorModal({
   assetTypes,
   allTags,
   modelConfig,
+  isDark,
   onClose,
   onSave,
 }: {
@@ -588,12 +594,21 @@ function AssetEditorModal({
   assetTypes: AssetType[]
   allTags: string[]
   modelConfig: ModelConfig | null
+  isDark: boolean
   onClose: () => void
   onSave: () => void
 }) {
   const [title, setTitle] = useState(asset.title)
   const [summary, setSummary] = useState(asset.summary || '')
   const [tags, setTags] = useState<string[]>(asset.tags || [])
+
+  // 获取编辑器主题
+  const settings = useMemo(() => getSettings(), [])
+  const activeThemeConfig = useMemo(() => getThemeById(settings.editorThemeId ?? 'default'), [settings.editorThemeId])
+  const blockNoteTheme = useMemo(() => {
+    const themes = buildBlockNoteTheme(activeThemeConfig)
+    return (isDark ? themes.dark : themes.light) as Theme
+  }, [activeThemeConfig, isDark])
 
   // 图片上传函数
   const uploadFile = useCallback(async (file: File): Promise<string> => {
@@ -795,7 +810,7 @@ function AssetEditorModal({
           background: 'var(--bg-primary)',
           padding: '12px 16px',
         }}>
-          <BlockNoteView editor={editor} onChange={handleSave} theme="light" />
+          <BlockNoteView editor={editor} onChange={handleSave} theme={blockNoteTheme} />
         </div>
       </ModalBody>
       <ModalFooter>

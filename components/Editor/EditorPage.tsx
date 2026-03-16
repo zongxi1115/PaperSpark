@@ -39,6 +39,7 @@ import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from 
 import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
 import { registerEditor, unregisterEditor } from '@/lib/editorContext'
 import { exportToLatex, type LatexExportLanguage } from '@/lib/latexExporter'
+import { useThemeContext } from '@/components/Providers'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -165,6 +166,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const [ghostText, setGhostText] = useState<string | null>(null) // ghost text 内容
   const [ghostPosition, setGhostPosition] = useState<{ top: number; left: number } | null>(null)
   const [citations, setCitations] = useState<Map<string, CitationData>>(new Map()) // 引用列表
+  const { isDark, mounted: themeMounted } = useThemeContext()
 
   // 文章元数据状态
   const [articleTitle, setArticleTitle] = useState('')
@@ -182,7 +184,9 @@ export function EditorPageContent({ docId }: EditorPageProps) {
 
   // 当前主题配置，动态更新
   const activeThemeConfig = getThemeById(settings.editorThemeId ?? 'default')
-  const activeTheme = buildBlockNoteTheme(activeThemeConfig)
+  const themes = buildBlockNoteTheme(activeThemeConfig)
+  // 根据当前主题状态选择对应的 Theme 对象
+  const activeTheme = isDark ? themes.dark : themes.light
   
   const correctTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const completeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)

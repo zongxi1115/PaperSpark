@@ -1,13 +1,16 @@
 'use client'
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { Button, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, Input, Textarea, addToast, Tooltip, Divider } from '@heroui/react'
 import { useCreateBlockNote } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import type { Block } from '@blocknote/core'
+import type { Theme } from '@blocknote/mantine'
 import { getThoughts, saveThought, deleteThought, generateId, getSettings, getSelectedSmallModel } from '@/lib/storage'
 import type { Thought, ModelConfig } from '@/lib/types'
 import type { ThoughtAIAction } from '@/lib/ai'
+import { getThemeById, buildBlockNoteTheme } from '@/lib/editorThemes'
+import { useThemeContext } from '@/components/Providers'
 
 // AI 操作类型定义
 const AI_ACTIONS: { key: ThoughtAIAction; label: string; icon: React.ReactNode; desc: string }[] = [
@@ -21,6 +24,7 @@ export function ThoughtNotesPanel() {
   const [editingThought, setEditingThought] = useState<Thought | null>(null)
   const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
+  const { isDark } = useThemeContext()
 
   // 加载
   useEffect(() => {
@@ -170,6 +174,7 @@ export function ThoughtNotesPanel() {
               key={editingThought.id}
               thought={editingThought}
               modelConfig={modelConfig}
+              isDark={isDark}
               onClose={handleClose}
               onSave={() => setThoughts(getThoughts())}
             />
@@ -183,18 +188,28 @@ export function ThoughtNotesPanel() {
 // 独立的编辑器组件
 function ThoughtEditorModal({ 
   thought, 
-  modelConfig, 
+  modelConfig,
+  isDark,
   onClose, 
   onSave 
 }: { 
   thought: Thought
   modelConfig: ModelConfig | null
+  isDark: boolean
   onClose: () => void
   onSave: () => void 
 }) {
   const [title, setTitle] = useState(thought.title)
   const [summary, setSummary] = useState(thought.summary)
   const [loading, setLoading] = useState<ThoughtAIAction | 'summarize' | null>(null)
+  
+  // 获取编辑器主题
+  const settings = useMemo(() => getSettings(), [])
+  const activeThemeConfig = useMemo(() => getThemeById(settings.editorThemeId ?? 'default'), [settings.editorThemeId])
+  const blockNoteTheme = useMemo(() => {
+    const themes = buildBlockNoteTheme(activeThemeConfig)
+    return (isDark ? themes.dark : themes.light) as Theme
+  }, [activeThemeConfig, isDark])
   
   const editor = useCreateBlockNote({
     dictionary: {
@@ -382,7 +397,7 @@ function ThoughtEditorModal({
           minHeight: 200,
           background: 'var(--bg-primary)',
         }}>
-          <BlockNoteView editor={editor} onChange={handleSave} theme="light" />
+          <BlockNoteView editor={editor} onChange={handleSave} theme={blockNoteTheme} />
         </div>
       </ModalBody>
       <ModalFooter>

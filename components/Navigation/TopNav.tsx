@@ -1,7 +1,10 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Button, Divider } from '@heroui/react'
+import { Button, Divider, Tooltip } from '@heroui/react'
+import { useThemeContext } from '@/components/Providers'
+import { Icon } from '@iconify/react'
+
 function ThoughtIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -14,11 +17,22 @@ function ThoughtIcon() {
 
 export function TopNav() {
   const pathname = usePathname()
+  const { theme, setTheme, resolvedTheme, mounted } = useThemeContext()
 
   const isEditor = pathname.startsWith('/editor')
   const isDocuments = pathname === '/documents'
   const isThoughts = pathname === '/thoughts'
   const isSettings = pathname === '/settings'
+
+  // 切换主题的快捷方式：在 light/dark 之间切换（跳过 system）
+  const toggleTheme = () => {
+    if (theme === 'system') {
+      // 如果当前是 system，根据实际主题切换到相反的固定主题
+      setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')
+    } else {
+      setTheme(theme === 'dark' ? 'light' : 'dark')
+    }
+  }
 
   return (
     <nav
@@ -93,6 +107,28 @@ export function TopNav() {
             设置
           </Button>
         </Link>
+      </div>
+
+      {/* 右侧主题切换按钮 */}
+      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center' }}>
+        <Tooltip 
+          content={mounted ? (resolvedTheme === 'dark' ? '切换到浅色模式' : '切换到深色模式') : '加载中...'}
+          placement="bottom"
+        >
+          <Button
+            isIconOnly
+            size="sm"
+            variant="light"
+            onPress={toggleTheme}
+            isDisabled={!mounted}
+          >
+            <Icon 
+              icon={mounted && resolvedTheme === 'dark' ? 'solar:sun-bold' : 'solar:moon-bold'} 
+              width={18}
+              style={{ color: 'var(--text-secondary)' }}
+            />
+          </Button>
+        </Tooltip>
       </div>
     </nav>
   )

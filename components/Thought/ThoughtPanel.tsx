@@ -5,6 +5,7 @@ import { getThoughts, saveThought, deleteThought, generateId } from '@/lib/stora
 import type { Thought } from '@/lib/types'
 import { ThoughtCard } from './ThoughtCard'
 import { ThoughtEditor } from './ThoughtEditor'
+import { useThemeContext } from '@/components/Providers'
 
 export function ThoughtPanel() {
   const [thoughts, setThoughts] = useState<Thought[]>([])
@@ -12,6 +13,7 @@ export function ThoughtPanel() {
   const { isOpen, onOpen, onClose } = useDisclosure()
   const [editingTitle, setEditingTitle] = useState('')
   const [editingSummary, setEditingSummary] = useState('')
+  const { isDark } = useThemeContext()
 
   // 加载想法列表
   useEffect(() => {
@@ -160,6 +162,7 @@ export function ThoughtPanel() {
                 thought={editingThought}
                 title={editingTitle}
                 summary={editingSummary}
+                isDark={isDark}
                 onTitleChange={handleTitleChange}
                 onSummaryChange={handleSummaryChange}
                 onSave={handleSave}

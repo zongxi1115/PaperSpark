@@ -331,7 +331,7 @@ export function LiteratureSearchPanel() {
         style={{
           padding: '14px 14px 12px',
           borderBottom: '1px solid color-mix(in srgb, var(--border-color) 76%, transparent)',
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.96), rgba(255,255,255,0.86))',
+          background: 'var(--bg-primary)',
           backdropFilter: 'blur(10px)',
         }}
       >
@@ -346,8 +346,8 @@ export function LiteratureSearchPanel() {
             style={{
               padding: '6px 8px',
               borderRadius: 10,
-              background: 'color-mix(in srgb, var(--accent-color) 10%, white)',
-              color: 'color-mix(in srgb, var(--accent-color) 80%, black)',
+              background: 'color-mix(in srgb, var(--accent-color) 10%, var(--bg-primary))',
+              color: 'var(--accent-color)',
               fontSize: 11,
               fontWeight: 600,
               maxWidth: 150,
@@ -465,7 +465,7 @@ export function LiteratureSearchPanel() {
               padding: 14,
               borderRadius: 16,
               border: '1px solid color-mix(in srgb, var(--border-color) 72%, transparent)',
-              background: 'linear-gradient(180deg, rgba(248,250,252,0.92), rgba(255,255,255,0.96))',
+              background: 'var(--bg-secondary)',
             }}
           >
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: 0.6 }}>
@@ -519,7 +519,7 @@ export function LiteratureSearchPanel() {
                   padding: '12px 13px',
                   borderRadius: 14,
                   border: '1px solid color-mix(in srgb, var(--border-color) 75%, transparent)',
-                  background: 'color-mix(in srgb, var(--bg-secondary) 82%, white)',
+                  background: 'var(--bg-tertiary)',
                 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
@@ -638,7 +638,7 @@ export function LiteratureSearchPanel() {
               style={{
                 padding: 14,
                 borderRadius: 16,
-                background: 'linear-gradient(135deg, color-mix(in srgb, var(--accent-color) 8%, white), color-mix(in srgb, #0f172a 3%, white))',
+                background: 'color-mix(in srgb, var(--accent-color) 8%, var(--bg-secondary))',
                 border: '1px solid color-mix(in srgb, var(--accent-color) 16%, transparent)',
               }}
             >
@@ -663,7 +663,7 @@ export function LiteratureSearchPanel() {
                     marginTop: 12,
                     padding: '10px 12px',
                     borderRadius: 14,
-                    background: 'rgba(255,255,255,0.72)',
+                    background: 'var(--bg-tertiary)',
                     border: '1px solid color-mix(in srgb, var(--border-color) 72%, transparent)',
                     display: 'grid',
                     gap: 6,
@@ -697,8 +697,7 @@ export function LiteratureSearchPanel() {
                   padding: 14,
                   borderRadius: 18,
                   border: '1px solid color-mix(in srgb, var(--border-color) 78%, transparent)',
-                  background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
-                  boxShadow: '0 14px 32px rgba(15, 23, 42, 0.06)',
+                  background: 'var(--bg-secondary)',
                 }}
               >
                 <div style={{ fontSize: 13, fontWeight: 700 }}>当前仍未形成可推荐文献列表</div>
@@ -718,8 +717,7 @@ export function LiteratureSearchPanel() {
                   padding: 14,
                   borderRadius: 18,
                   border: '1px solid color-mix(in srgb, var(--border-color) 78%, transparent)',
-                  background: 'linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.92))',
-                  boxShadow: '0 14px 32px rgba(15, 23, 42, 0.06)',
+                  background: 'var(--bg-secondary)',
                 }}
               >
                 <PaperCard paper={paper} onSave={savePaper} onInsert={insertPaperCitation} />
@@ -751,8 +749,8 @@ export function LiteratureSearchPanel() {
             style={{
               padding: '12px 14px',
               borderRadius: 14,
-              background: 'color-mix(in srgb, #ef4444 8%, white)',
-              color: '#b91c1c',
+              background: 'color-mix(in srgb, #ef4444 8%, var(--bg-primary))',
+              color: '#f87171',
               fontSize: 12,
               lineHeight: 1.6,
             }}
@@ -767,7 +765,7 @@ export function LiteratureSearchPanel() {
           position: 'relative',
           padding: '12px 12px 14px',
           borderTop: '1px solid color-mix(in srgb, var(--border-color) 80%, transparent)',
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.88), rgba(255,255,255,0.98))',
+          background: 'var(--bg-primary)',
           backdropFilter: 'blur(12px)',
         }}
       >
@@ -795,8 +793,7 @@ export function LiteratureSearchPanel() {
             position: 'relative',
             borderRadius: 18,
             border: '1px solid color-mix(in srgb, var(--border-color) 80%, transparent)',
-            background: 'linear-gradient(180deg, rgba(248,250,252,0.98), rgba(255,255,255,0.98))',
-            boxShadow: '0 12px 28px rgba(15, 23, 42, 0.05)',
+            background: 'var(--bg-secondary)',
           }}
         >
           <textarea
@@ -901,7 +898,7 @@ function MetricPill({ label, value }: { label: string; value: string }) {
         gap: 6,
         padding: '5px 8px',
         borderRadius: 999,
-        background: 'rgba(255,255,255,0.7)',
+        background: 'var(--bg-tertiary)',
         fontSize: 11,
         color: 'var(--text-secondary)',
       }}
@@ -921,10 +918,10 @@ function PaperBadge({ children, tone }: { children: React.ReactNode; tone: 'succ
         fontSize: 10,
         fontWeight: 700,
         background: tone === 'success'
-          ? 'color-mix(in srgb, #10b981 12%, white)'
-          : 'var(--bg-secondary)',
+          ? 'color-mix(in srgb, #10b981 12%, var(--bg-primary))'
+          : 'var(--bg-tertiary)',
         color: tone === 'success'
-          ? '#047857'
+          ? '#34d399'
           : 'var(--text-secondary)',
       }}
     >
@@ -983,7 +980,7 @@ function PaperCard({
           marginTop: 12,
           padding: '10px 12px',
           borderRadius: 14,
-          background: 'color-mix(in srgb, var(--accent-color) 7%, white)',
+          background: 'color-mix(in srgb, var(--accent-color) 7%, var(--bg-tertiary))',
           color: 'var(--text-primary)',
           fontSize: 12,
           lineHeight: 1.6,
@@ -1015,7 +1012,7 @@ function PaperCard({
                 fontSize: 10,
                 padding: '4px 7px',
                 borderRadius: 999,
-                background: 'color-mix(in srgb, var(--accent-color) 10%, white)',
+                background: 'color-mix(in srgb, var(--accent-color) 10%, var(--bg-primary))',
                 color: 'var(--accent-color)',
               }}
             >
@@ -1087,7 +1084,7 @@ function ClarificationPanel({
         bottom: 'calc(100% + 10px)',
         borderRadius: 18,
         border: '1px solid color-mix(in srgb, #8b5cf6 22%, var(--border-color))',
-        background: 'linear-gradient(180deg, color-mix(in srgb, #8b5cf6 7%, white), white)',
+        background: 'color-mix(in srgb, #8b5cf6 7%, var(--bg-primary))',
         boxShadow: '0 18px 36px rgba(15, 23, 42, 0.12)',
         padding: 14,
         display: 'grid',
@@ -1097,7 +1094,7 @@ function ClarificationPanel({
       }}
     >
       <div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#6d28d9' }}>答题器</div>
+        <div style={{ fontSize: 12, fontWeight: 700, color: '#a78bfa' }}>答题器</div>
         <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 4, lineHeight: 1.6 }}>
           当前问题仍偏宽。先补充几个约束，系统会据此重新规划检索策略。
         </div>
@@ -1111,7 +1108,7 @@ function ClarificationPanel({
             style={{
               padding: 12,
               borderRadius: 14,
-              background: 'rgba(255,255,255,0.86)',
+              background: 'var(--bg-secondary)',
               border: '1px solid color-mix(in srgb, var(--border-color) 70%, transparent)',
             }}
           >
@@ -1131,8 +1128,8 @@ function ClarificationPanel({
                       cursor: 'pointer',
                       border: `1px solid ${selected ? 'color-mix(in srgb, #8b5cf6 38%, transparent)' : 'var(--border-color)'}`,
                       background: selected
-                        ? 'color-mix(in srgb, #8b5cf6 9%, white)'
-                        : 'white',
+                        ? 'color-mix(in srgb, #8b5cf6 9%, var(--bg-primary))'
+                        : 'var(--bg-primary)',
                     }}
                   >
                     <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -1174,7 +1171,8 @@ function ClarificationPanel({
                           padding: '8px 10px',
                           fontSize: 12,
                           outline: 'none',
-                          background: 'rgba(255,255,255,0.9)',
+                          background: 'var(--bg-tertiary)',
+                          color: 'var(--text-primary)',
                         }}
                       />
                     )}
@@ -1192,7 +1190,7 @@ function ClarificationPanel({
           bottom: 0,
           marginTop: 4,
           paddingTop: 10,
-          background: 'linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.98))',
+          background: 'var(--bg-primary)',
           backdropFilter: 'blur(8px)',
           display: 'flex',
           alignItems: 'center',

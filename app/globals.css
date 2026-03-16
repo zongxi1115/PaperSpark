@@ -23,6 +23,20 @@
   --radius-lg: 16px;
 }
 
+/* 暗色模式变量 */
+.dark {
+  --bg-primary: #0f172a;
+  --bg-secondary: #1e293b;
+  --bg-tertiary: #334155;
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --border-color: #334155;
+  --accent-color: #60a5fa;
+  --accent-hover: #3b82f6;
+  --accent-light: #1e3a5f;
+}
+
 * {
   box-sizing: border-box;
 }

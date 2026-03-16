@@ -1,4 +1,4 @@
-import { lightDefaultTheme, type Theme } from '@blocknote/mantine'
+import { lightDefaultTheme, darkDefaultTheme, type Theme } from '@blocknote/mantine'
 
 export interface EditorThemeConfig {
   id: string
@@ -11,6 +11,8 @@ export interface EditorThemeConfig {
   borderRadius?: number
   /** 编辑器背景色覆盖（浅色模式） */
   lightEditorBackground?: string
+  /** 编辑器背景色覆盖（暗色模式） */
+  darkEditorBackground?: string
 }
 
 export const EDITOR_THEMES: EditorThemeConfig[] = [
@@ -58,6 +60,7 @@ export const EDITOR_THEMES: EditorThemeConfig[] = [
       'https://fonts.googleapis.com/css2?family=Crimson+Pro:ital,wght@0,200..900;1,200..900&display=swap',
     borderRadius: 4,
     lightEditorBackground: '#fdfaf5',
+    darkEditorBackground: '#1a1815',
   },
   {
     id: 'jetbrains-mono',
@@ -78,30 +81,57 @@ export function getThemeById(id: string): EditorThemeConfig {
 }
 
 /**
- * 将 EditorThemeConfig 转换为 BlockNote 的 Theme 对象。
- * light 和 dark 均基于 lightDefaultTheme，确保始终呈现浅色背景，
- * 并叠加自定义字体、圆角与背景色。
+ * 将 EditorThemeConfig 转换为 BlockNote 的 LightAndDarkThemes 对象。
+ * 返回 { light: Theme, dark: Theme }，BlockNote 会根据 data-color-scheme 自动切换。
+ * 
+ * @see https://www.blocknotejs.org/docs/react/styling-theming/themes#light-and-dark-themes
  */
 export function buildBlockNoteTheme(config: EditorThemeConfig): { light: Theme; dark: Theme } {
-  const overrides: Theme = {
+  // 浅色模式配置
+  const lightBg = config.lightEditorBackground || (lightDefaultTheme.colors?.editor?.background || '#ffffff')
+  
+  const lightOverrides: Theme = {
     ...lightDefaultTheme,
     fontFamily: config.fontFamily,
     borderRadius: config.borderRadius ?? 6,
-    ...(config.lightEditorBackground
-      ? {
-          colors: {
-            ...lightDefaultTheme.colors,
-            editor: {
-              ...lightDefaultTheme.colors?.editor,
-              background: config.lightEditorBackground,
-            },
-          },
-        }
-      : {}),
+    colors: {
+      ...lightDefaultTheme.colors,
+      editor: {
+        ...lightDefaultTheme.colors?.editor,
+        background: lightBg,
+        text: '#1e293b',
+      },
+      menu: {
+        ...lightDefaultTheme.colors?.menu,
+        background: '#ffffff',
+        text: '#1e293b',
+      },
+    },
   }
 
-  // 无论系统深/浅色模式，都强制使用浅色主题颜色 + 自定义字体
-  return { light: overrides, dark: overrides }
+  // 暗色模式配置
+  const darkBg = config.darkEditorBackground || (darkDefaultTheme.colors?.editor?.background || '#0f172a')
+  
+  const darkOverrides: Theme = {
+    ...darkDefaultTheme,
+    fontFamily: config.fontFamily,
+    borderRadius: config.borderRadius ?? 6,
+    colors: {
+      ...darkDefaultTheme.colors,
+      editor: {
+        ...darkDefaultTheme.colors?.editor,
+        background: darkBg,
+        text: '#f1f5f9',
+      },
+      menu: {
+        ...darkDefaultTheme.colors?.menu,
+        background: '#1e293b',
+        text: '#f1f5f9',
+      },
+    },
+  }
+
+  return { light: lightOverrides, dark: darkOverrides }
 }
 
 /**

@@ -1,18 +1,21 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react'
 import { useCreateBlockNote } from '@blocknote/react'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import type { Block } from '@blocknote/core'
+import type { Theme } from '@blocknote/mantine'
 import { Button, Divider, Textarea, Tooltip, addToast, Spinner } from '@heroui/react'
 import { saveThought, getSettings, getSelectedSmallModel } from '@/lib/storage'
 import type { Thought, ModelConfig } from '@/lib/types'
 import type { ThoughtAIAction } from '@/lib/ai'
+import { getThemeById, buildBlockNoteTheme } from '@/lib/editorThemes'
 
 interface ThoughtEditorProps {
   thought: Thought
   title: string
   summary: string
+  isDark: boolean
   onTitleChange: (value: string) => void
   onSummaryChange: (value: string) => void
   onSave: (thought: Thought) => void
@@ -44,6 +47,7 @@ export function ThoughtEditor({
   thought,
   title,
   summary,
+  isDark,
   onTitleChange,
   onSummaryChange,
   onSave
@@ -52,6 +56,14 @@ export function ThoughtEditor({
   const [loading, setLoading] = useState<ThoughtAIAction | null>(null)
   const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // 获取编辑器主题
+  const settings = useMemo(() => getSettings(), [])
+  const activeThemeConfig = useMemo(() => getThemeById(settings.editorThemeId ?? 'default'), [settings.editorThemeId])
+  const blockNoteTheme = useMemo(() => {
+    const themes = buildBlockNoteTheme(activeThemeConfig)
+    return (isDark ? themes.dark : themes.light) as Theme
+  }, [activeThemeConfig, isDark])
 
   const editor = useCreateBlockNote({
     dictionary: {
@@ -275,7 +287,7 @@ export function ThoughtEditor({
           className='px-4 py-4'
           editor={editor}
           onChange={handleChange}
-          theme="light"
+          theme={blockNoteTheme}
         />
       </div>
     </div>

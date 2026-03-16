@@ -20,12 +20,16 @@ import {
   addToast,
   Chip,
   Tooltip,
+  RadioGroup,
+  Radio,
 } from '@heroui/react'
 import { getSettings, saveSettings, generateId } from '@/lib/storage'
 import type { AppSettings, FeatureSelectItem, AIProvider, AIModel } from '@/lib/types'
 import { defaultSettings, selectFeatures } from '@/lib/types'
 import { EDITOR_THEMES, injectGoogleFont } from '@/lib/editorThemes'
 import { Icon } from '@iconify/react'
+import { useThemeContext } from '@/components/Providers'
+import type { ThemeMode } from '@/lib/theme'
 
 // 获取所有可用模型（用于下拉选择，排除禁用的模型）
 function getAllModels(providers: AIProvider[]): { model: AIModel; provider: AIProvider }[] {
@@ -562,6 +566,78 @@ function ProviderCard({
   )
 }
 
+// 主题选择器组件
+function ThemeSelector() {
+  const { theme, setTheme, resolvedTheme, mounted } = useThemeContext()
+
+  // SSR 安全：等待客户端挂载
+  if (!mounted) {
+    return (
+      <div style={{ display: 'flex', gap: 12 }}>
+        <div style={{ flex: 1, height: 80, background: 'var(--bg-tertiary)', borderRadius: 8 }} />
+        <div style={{ flex: 1, height: 80, background: 'var(--bg-tertiary)', borderRadius: 8 }} />
+        <div style={{ flex: 1, height: 80, background: 'var(--bg-tertiary)', borderRadius: 8 }} />
+      </div>
+    )
+  }
+
+  const options: { value: ThemeMode; label: string; icon: string; description: string }[] = [
+    { value: 'light', label: '浅色', icon: 'solar:sun-bold', description: '始终使用浅色模式' },
+    { value: 'dark', label: '深色', icon: 'solar:moon-bold', description: '始终使用深色模式' },
+    { value: 'system', label: '跟随系统', icon: 'solar:monitor-bold', description: '自动跟随系统设置' },
+  ]
+
+  return (
+    <div style={{ display: 'flex', gap: 12 }}>
+      {options.map((option) => {
+        const isSelected = theme === option.value
+        return (
+          <div
+            key={option.value}
+            onClick={() => setTheme(option.value)}
+            style={{
+              flex: 1,
+              padding: '16px 12px',
+              border: `2px solid ${isSelected ? 'var(--accent-color)' : 'var(--border-color)'}`,
+              borderRadius: 10,
+              cursor: 'pointer',
+              background: isSelected ? 'color-mix(in srgb, var(--accent-color) 10%, transparent)' : 'var(--bg-secondary)',
+              transition: 'all 0.15s ease',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 8,
+              textAlign: 'center',
+            }}
+          >
+            <Icon 
+              icon={option.icon} 
+              width={24} 
+              style={{ color: isSelected ? 'var(--accent-color)' : 'var(--text-muted)' }} 
+            />
+            <p style={{ 
+              fontWeight: 600, 
+              fontSize: 14, 
+              margin: 0,
+              color: isSelected ? 'var(--accent-color)' : 'var(--text-primary)',
+            }}>
+              {option.label}
+            </p>
+            <p style={{ 
+              fontSize: 11, 
+              color: 'var(--text-muted)', 
+              margin: 0,
+              lineHeight: 1.3,
+            }}>
+              {option.description}
+            </p>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 export function SettingsForm() {
   const [settings, setSettings] = useState<AppSettings>(defaultSettings)
   const [saved, setSaved] = useState(false)
@@ -775,6 +851,20 @@ export function SettingsForm() {
             </CardBody>
           </Card>
         )}
+
+        {/* 外观设置 */}
+        <Card shadow="sm">
+          <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+            <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>外观设置</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              切换应用主题，选择跟随系统或手动设置
+            </p>
+          </CardHeader>
+          <Divider />
+          <CardBody style={{ padding: 16 }}>
+            <ThemeSelector />
+          </CardBody>
+        </Card>
 
         {/* Feature toggles */}
         <Card shadow="sm">

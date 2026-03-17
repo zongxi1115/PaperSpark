@@ -318,6 +318,7 @@ export interface AssistantMessage {
   content: string
   toolEvents?: AssistantToolEvent[]
   citations?: AssistantCitation[]
+  checkpointId?: string
   createdAt: string
 }
 

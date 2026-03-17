@@ -419,3 +419,15 @@ PaperSpark 已提供基本 LaTeX 导出能力，步骤如下
 2. 系统会生成一个 LaTeX Zip 包，内含 main.tex、图片资源、参考文献和编译说明。
 3. 解压后可直接使用 xelatex 或 pdflatex 编译。
 4. 含公式、图片、引用的论文草稿可保持较高一致性，后续可进一步使用模板调整格式。
+
+
+
+## Star History
+
+<a href="https://www.star-history.com/?repos=zongxi1115%2FPaperSpark&type=date&legend=top-left">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=zongxi1115/PaperSpark&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=zongxi1115/PaperSpark&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/image?repos=zongxi1115/PaperSpark&type=date&legend=top-left" />
+ </picture>
+</a>

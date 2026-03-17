@@ -41,9 +41,12 @@ import {
   getAgents, 
   getSettings, 
   getKnowledgeItems,
+  getDocument,
+  getLastDocId,
   getAssets,
   getAssetTypes,
   saveAsset,
+  saveDocument,
   getSelectedLargeModel,
   getConversations,
   saveConversation,
@@ -59,7 +62,49 @@ import { getVectorDocumentsByDocumentId } from '@/lib/pdfCache'
 import { getFullTextByKnowledgeId } from '@/lib/pdfCache'
 import { searchMyKnowledgeBase as runKnowledgeSearch } from '@/lib/assistantKnowledge'
 import { indexKnowledgeForRAG } from '@/lib/rag'
-import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote, AssistantToolEvent, AssistantCitation, AssetItem } from '@/lib/types'
+import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote, AssistantToolEvent, AssistantCitation, AssetItem, ArticleAuthor } from '@/lib/types'
+
+const ASSISTANT_CHECKPOINTS_KEY = 'paper_reader_assistant_doc_checkpoints'
+
+interface AssistantDocCheckpoint {
+  id: string
+  messageId: string
+  conversationId?: string
+  documentId: string
+  documentTitle: string
+  content: unknown[]
+  articleTitle?: string
+  articleAuthors?: ArticleAuthor[]
+  articleAbstract?: string
+  articleKeywords?: string[]
+  articleDate?: string
+  createdAt: string
+}
+
+function deepClone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T
+}
+
+function getAssistantCheckpoints(): AssistantDocCheckpoint[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = localStorage.getItem(ASSISTANT_CHECKPOINTS_KEY)
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed as AssistantDocCheckpoint[] : []
+  } catch {
+    return []
+  }
+}
+
+function saveAssistantCheckpoints(checkpoints: AssistantDocCheckpoint[]): void {
+  if (typeof window === 'undefined') return
+  localStorage.setItem(ASSISTANT_CHECKPOINTS_KEY, JSON.stringify(checkpoints))
+}
+
+function getAssistantCheckpointById(id: string): AssistantDocCheckpoint | null {
+  return getAssistantCheckpoints().find(item => item.id === id) ?? null
+}
 
 export function AssistantChatPanel() {
   const [conversations, setConversations] = useState<AssistantConversation[]>([])
@@ -443,6 +488,83 @@ export function AssistantChatPanel() {
 
   const removeMention = useCallback((id: string, type: 'knowledge' | 'asset') => {
     setMentions(prev => prev.filter(item => !(item.id === id && item.type === type)))
+  }, [])
+
+  const createPreEditCheckpoint = useCallback((message: AssistantMessage): string | null => {
+    if (message.checkpointId) return message.checkpointId
+
+    const editor = getEditor()
+    if (!editor) return null
+
+    const currentDocId = getLastDocId()
+    if (!currentDocId) return null
+
+    const currentDoc = getDocument(currentDocId)
+    if (!currentDoc) return null
+
+    const checkpointId = generateId()
+    const checkpoint: AssistantDocCheckpoint = {
+      id: checkpointId,
+      messageId: message.id,
+      conversationId: currentConversation?.id,
+      documentId: currentDoc.id,
+      documentTitle: currentDoc.title,
+      content: deepClone((editor.document || []) as unknown[]),
+      articleTitle: currentDoc.articleTitle,
+      articleAuthors: currentDoc.articleAuthors,
+      articleAbstract: currentDoc.articleAbstract,
+      articleKeywords: currentDoc.articleKeywords,
+      articleDate: currentDoc.articleDate,
+      createdAt: new Date().toISOString(),
+    }
+
+    const all = getAssistantCheckpoints()
+    all.push(checkpoint)
+    saveAssistantCheckpoints(all)
+
+    return checkpointId
+  }, [currentConversation?.id])
+
+  const handleRestoreCheckpoint = useCallback((message: AssistantMessage) => {
+    if (!message.checkpointId) {
+      addToast({ title: '未找到检查点', color: 'warning' })
+      return
+    }
+
+    const checkpoint = getAssistantCheckpointById(message.checkpointId)
+    if (!checkpoint) {
+      addToast({ title: '检查点不存在或已失效', color: 'warning' })
+      return
+    }
+
+    const editor = getEditor()
+    if (!editor) {
+      addToast({ title: '编辑器未就绪', color: 'warning' })
+      return
+    }
+
+    try {
+      const currentBlocks = [...editor.document]
+      editor.replaceBlocks(currentBlocks as any, checkpoint.content as any)
+
+      const doc = getDocument(checkpoint.documentId)
+      if (doc) {
+        saveDocument({
+          ...doc,
+          content: deepClone(checkpoint.content),
+          articleTitle: checkpoint.articleTitle,
+          articleAuthors: checkpoint.articleAuthors,
+          articleAbstract: checkpoint.articleAbstract,
+          articleKeywords: checkpoint.articleKeywords,
+          articleDate: checkpoint.articleDate,
+          updatedAt: new Date().toISOString(),
+        })
+      }
+
+      addToast({ title: '已还原到检查点', color: 'success' })
+    } catch {
+      addToast({ title: '还原失败', color: 'danger' })
+    }
   }, [])
 
   const buildMentionKnowledgeCandidates = useCallback(async (query: string, options?: { allowIndexing?: boolean }) => {
@@ -996,6 +1118,15 @@ export function AssistantChatPanel() {
         if (executedToolIndices.has(idx)) return
         executedToolIndices.add(idx)
 
+        if (!assistantMessage.checkpointId) {
+          const checkpointId = createPreEditCheckpoint(assistantMessage)
+          if (checkpointId) {
+            applyAssistantUpdate(draft => {
+              draft.checkpointId = checkpointId
+            })
+          }
+        }
+
         const key = `${assistantMessage.id}:simple:${idx}`
         const call: ParsedToolCall = { type: tool.type, params: tool.params, content: tool.contentSoFar }
         const abort = new AbortController()
@@ -1170,6 +1301,8 @@ export function AssistantChatPanel() {
     }
   }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, useDocEditing, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates])
 
+  const messages = currentConversation?.messages || []
+
   // Parse both simplified format (::insert, ::delete, ::update) and legacy edit_document JSON blocks
   const parseEditBlocks = useCallback((
     content: string,
@@ -1211,6 +1344,24 @@ export function AssistantChatPanel() {
     
     // Handle simplified tool calls
     if (toolCalls.length > 0) {
+      const msg = messages.find(item => item.id === msgId)
+      if (msg && !msg.checkpointId) {
+        const checkpointId = createPreEditCheckpoint(msg)
+        if (checkpointId && currentConversation) {
+          const updatedMessages = currentConversation.messages.map(item =>
+            item.id === msgId ? { ...item, checkpointId } : item,
+          )
+          const updatedConversation: AssistantConversation = {
+            ...currentConversation,
+            messages: updatedMessages,
+            updatedAt: new Date().toISOString(),
+          }
+          setCurrentConversation(updatedConversation)
+          saveConversation(updatedConversation)
+          setConversations(getConversations())
+        }
+      }
+
       toolCalls.forEach((call, idx) => {
         const key = `${msgId}:simple:${idx}`
 
@@ -1239,6 +1390,24 @@ export function AssistantChatPanel() {
 
     // Handle legacy format
     if (requests.length > 0) {
+      const msg = messages.find(item => item.id === msgId)
+      if (msg && !msg.checkpointId) {
+        const checkpointId = createPreEditCheckpoint(msg)
+        if (checkpointId && currentConversation) {
+          const updatedMessages = currentConversation.messages.map(item =>
+            item.id === msgId ? { ...item, checkpointId } : item,
+          )
+          const updatedConversation: AssistantConversation = {
+            ...currentConversation,
+            messages: updatedMessages,
+            updatedAt: new Date().toISOString(),
+          }
+          setCurrentConversation(updatedConversation)
+          saveConversation(updatedConversation)
+          setConversations(getConversations())
+        }
+      }
+
       requests.forEach((req, idx) => {
         const key = `${msgId}:${idx}`
         const abort = new AbortController()
@@ -1260,7 +1429,7 @@ export function AssistantChatPanel() {
         })
       })
     }
-  }, [parseEditBlocks])
+  }, [parseEditBlocks, messages, createPreEditCheckpoint, currentConversation])
 
   // 停止生成
   const handleStop = () => {
@@ -1306,8 +1475,6 @@ export function AssistantChatPanel() {
       }
     }
   }, [settings?.defaultLargeModelId, models])
-
-  const messages = currentConversation?.messages || []
 
   return (
     <div style={{ 
@@ -1623,6 +1790,24 @@ export function AssistantChatPanel() {
                     color: message.role === 'user' ? 'var(--text-primary)' : 'var(--text-secondary)',
                   }}
                 >
+                  {message.role === 'assistant' && message.checkpointId && (
+                    <div style={{ marginBottom: 6 }}>
+                      <button
+                        onClick={() => handleRestoreCheckpoint(message)}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          padding: 0,
+                          fontSize: 11,
+                          color: 'var(--accent-color)',
+                          textDecoration: 'underline',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        还原检查点
+                      </button>
+                    </div>
+                  )}
                   {message.role === 'assistant' && message.toolEvents && message.toolEvents.length > 0 && (
                     <div style={{ display: 'grid', gap: 4, marginBottom: 10, fontSize: 11, color: 'var(--text-muted)' }}>
                       {message.toolEvents.map(event => (

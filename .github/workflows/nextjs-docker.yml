@@ -1,0 +1,47 @@
+name: Build and Push Next.js Image
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "app/**"
+      - "components/**"
+      - "lib/**"
+      - "public/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "next.config.ts"
+      - "Dockerfile.next"
+      - ".github/workflows/nextjs-docker.yml"
+  workflow_dispatch:
+
+jobs:
+  docker:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[docker]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push nextjs
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.next
+          push: true
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/paperspark-nextjs:latest
+          cache-from: type=gha,scope=nextjs
+          cache-to: type=gha,mode=max,scope=nextjs

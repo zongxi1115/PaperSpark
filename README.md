@@ -32,6 +32,8 @@ PaperSpark 面向科研与高阶学习场景，提供从文献导入、沉浸式
 
 适合快速体验和生产环境部署。
 
+首次接触 Docker 的用户建议先看完整部署教程：`deploy/README.md`（含 Docker Hub Token 获取、GitHub Actions 云端构建、镜像拉取与更新）。
+
 #### 环境要求
 
 - Docker Desktop（Windows/macOS）或 Docker Engine（Linux）

@@ -1,6 +1,7 @@
 fastapi
 uvicorn
-surya-ocr
+pydantic
+python-multipart
 chromadb
-openai
 httpx
+surya-ocr

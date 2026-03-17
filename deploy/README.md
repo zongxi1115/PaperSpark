@@ -1,45 +1,173 @@
 # PaperSpark 部署指南
 
-## 快速开始
+这份文档按“第一次接触 Docker”的方式来写，跟着命令一步步执行即可。
 
-### 1. 安装 Docker
+## 0. 先确认你要做哪件事
 
-- [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/)
-- [Docker Engine for Linux](https://docs.docker.com/engine/install/)
+1. 只想使用现成镜像部署应用：看「A. 拉取镜像并部署」。
+2. 想把你自己的镜像自动发布到 Docker Hub：看「B. 云端自动构建并推送镜像」。
 
-### 2. 下载部署文件
+---
+
+## A. 拉取镜像并部署（新手推荐）
+
+### A1. 安装 Docker
+
+- Windows/macOS: [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Linux: [Docker Engine](https://docs.docker.com/engine/install/)
+
+安装后先执行一次命令，确认 Docker 正常：
 
 ```bash
-# 克隆或下载 deploy 目录
-git clone https://github.com/你的用户名/paperspark.git
+docker --version
+docker compose version
+```
+
+### A2. 下载项目并进入部署目录
+
+```bash
+git clone https://github.com/zongxi1115/paperspark.git
 cd paperspark/deploy
 ```
 
-### 3. 配置环境变量
+### A3. 配置环境变量
 
 ```bash
-# 复制配置模板
+# Linux/macOS
 cp .env.example .env
 
-# 编辑 .env 文件，填写你的 API Key
+# Windows PowerShell
+Copy-Item .env.example .env
 ```
 
-### 4. 启动服务
+然后打开 .env 文件，至少填好以下几组配置：
+
+1. NEXT_PUBLIC_SMALL_MODEL_* 
+2. NEXT_PUBLIC_LARGE_MODEL_* 
+3. NEXT_PUBLIC_EMBEDDING_*
+
+如果你要使用仓库默认镜像，可保持以下默认值：
+
+```env
+DOCKER_REGISTRY=docker.io
+DOCKER_USER=xiaozongxi
+VERSION=latest
+SURYA_VERSION=cpu
+```
+
+### A4. 启动服务
 
 ```bash
 # CPU 版本（默认）
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f
-
-# 停止服务
-docker-compose down
+docker compose up -d
 ```
 
-### 5. 访问应用
+### A5. 检查服务是否启动成功
 
-打开浏览器访问 http://localhost:3000
+```bash
+docker compose ps
+docker compose logs -f nextjs
+docker compose logs -f surya-ocr
+```
+
+浏览器打开：http://localhost:3000
+
+### A6. 常用维护命令
+
+```bash
+# 停止
+docker compose down
+
+# 更新镜像后重新启动
+docker compose pull
+docker compose up -d
+```
+
+
+
+## B. 用户如何选择 CPU 或 GPU
+
+前端镜像始终是同一个：`xiaozongxi/paperspark-nextjs:latest`。
+
+是否使用 GPU，只影响 OCR 服务（`xiaozongxi/paperspark-surya:*` 标签与 compose 启动方式）。
+
+### B1. 先看一眼怎么选
+
+| 场景 | 推荐 | 原因 |
+|------|------|------|
+| 普通电脑、无 NVIDIA 显卡 | CPU | 兼容性最高，直接可跑 |
+| 有 NVIDIA 显卡、已装容器工具链 | GPU | OCR 更快，长文档体验更好 |
+
+### B2. 选择 CPU（默认）
+
+在 `.env` 中设置：
+
+```env
+SURYA_VERSION=cpu
+```
+
+然后启动：
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+### B3. 选择 GPU（CUDA 12.1）
+
+前提条件：
+
+1. 主机有 NVIDIA GPU。
+2. 已安装 NVIDIA 驱动。
+3. 已安装 NVIDIA Container Toolkit。
+
+可先验证：
+
+```bash
+docker run --gpus all nvidia/cuda:12.1-base nvidia-smi
+```
+
+在 `.env` 中设置：
+
+```env
+SURYA_GPU_VERSION=gpu-cu121
+SURYA_MAX_WORKERS=4
+```
+
+然后启动（注意要叠加 gpu compose 文件）：
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml pull
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+### B4. CPU 与 GPU 相互切换
+
+从 CPU 切 GPU，或 GPU 切 CPU，按这个顺序即可：
+
+```bash
+docker compose down
+# 修改 .env 中 SURYA_VERSION 或 SURYA_GPU_VERSION
+docker compose pull
+docker compose up -d
+```
+
+如果你要切到 GPU，请使用带 `-f docker-compose.gpu.yml` 的命令。
+
+### B5. 如何确认当前跑的是哪个版本
+
+```bash
+docker compose ps
+docker compose logs -f surya-ocr
+```
+
+如果是 GPU 模式，日志里通常会出现 CUDA 相关信息；也可以执行：
+
+```bash
+docker compose exec surya-ocr python -c "import torch; print('cuda=', torch.cuda.is_available())"
+```
+
+输出 `cuda= True` 表示已正确使用 GPU。
 
 ---
 
@@ -67,10 +195,9 @@ docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 | 镜像标签 | 说明 |
 |---------|------|
-| `paperspark/paperspark-nextjs:latest` | Next.js 前端 |
-| `paperspark/paperspark-surya:cpu` | OCR 后端（CPU 版本） |
-| `paperspark/paperspark-surya:gpu-cu118` | OCR 后端（CUDA 11.8） |
-| `paperspark/paperspark-surya:gpu-cu121` | OCR 后端（CUDA 12.1，推荐） |
+| `xiaozongxi/paperspark-nextjs:latest` | Next.js 前端 |
+| `xiaozongxi/paperspark-surya:cpu` | OCR 后端（CPU 版本） |
+| `xiaozongxi/paperspark-surya:gpu-cu121` | OCR 后端（CUDA 12.1，推荐） |
 
 ---
 
@@ -86,6 +213,15 @@ docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ---
 
 ## 常见问题
+
+### Q: Actions 里提示 unauthorized: authentication required？
+
+一般是 Docker Hub 凭据问题，按顺序检查：
+
+1. DOCKERHUB_USERNAME 是否是 Docker Hub 用户名（不是邮箱）。
+2. DOCKERHUB_TOKEN 是否是 Access Token（不是账号密码）。
+3. token 是否仍然有效（过期或撤销后会失败）。
+4. Secrets 名称是否完全一致：DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN。
 
 ### Q: 服务启动后访问不了？
 
@@ -120,32 +256,3 @@ docker-compose up -d
 ```bash
 docker run --rm -v paperspark_chroma-data:/data -v $(pwd):/backup alpine tar czf /backup/chroma-backup.tar.gz /data
 ```
-
----
-
-## 高级配置
-
-### 使用私有镜像仓库
-
-```bash
-# .env 文件中设置
-DOCKER_REGISTRY=registry.example.com
-```
-
-### 自定义端口
-
-修改 `docker-compose.yml` 中的 ports 配置：
-
-```yaml
-services:
-  nextjs:
-    ports:
-      - "8080:3000"  # 改为 8080 端口
-```
-
-### 生产环境部署建议
-
-1. 使用 HTTPS（配置反向代理如 Nginx）
-2. 设置资源限制
-3. 配置日志收集
-4. 定期备份数据卷

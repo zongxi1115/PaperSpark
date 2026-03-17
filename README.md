@@ -253,16 +253,28 @@ pnpm dev
 #### 微服务依赖安装
 
 ```bash
-cd services/surya_ocr_service
-pip install -r requirements.txt
+python scripts/start_surya_service.py
 ```
 
 #### 微服务启动路径
 
-回到根目录，执行
+启动器会交互提示安装依赖与 CPU/GPU 版本选择，并实时输出安装与启动日志。
 
-```powershell
-.\scripts\start-surya-service.ps1
+也可使用无交互参数：
+
+```bash
+# CPU 模式（自动安装）
+python scripts/start_surya_service.py --accelerator cpu
+
+# GPU 模式（示例：CUDA 12.1）
+python scripts/start_surya_service.py --accelerator gpu --cuda cu121
+
+# 仅启动，不安装依赖
+python scripts/start_surya_service.py --accelerator skip-install
+
+# macOS/Linux shell 包装脚本
+chmod +x scripts/start-surya-service.sh
+./scripts/start-surya-service.sh --accelerator cpu
 ```
 
 默认服务地址为 http://127.0.0.1:8765。
@@ -274,7 +286,7 @@ SURYA_OCR_SERVICE_URL=http://127.0.0.1:8765
 #### GPU 
 
 - 推荐在支持 CUDA 的环境中运行微服务，以获得更快的文档解析与推理速度。
-- 建议先安装与你本机 CUDA 版本匹配的 PyTorch（GPU 版），再安装其余依赖。
+- 启动器会按你的选择自动安装匹配通道的 PyTorch（支持 `cu118`/`cu121`/`cu124`/`cu126`）。
 - 若无 GPU，会自动以 CPU 方式运行，但大文件处理耗时会明显增加。
 - 后续将考虑找到surya-ocr的更轻量级替代方案，以降低对 GPU 的依赖。
 

@@ -2,12 +2,41 @@
 
 ## Start
 
-```powershell
-cd d:\vibe_projs\paper_reader
-.\scripts\start-surya-service.ps1
+```bash
+cd /path/to/paper_reader
+python scripts/start_surya_service.py
 ```
 
-The script activates `conda base` first, then starts FastAPI with `uvicorn`.
+macOS/Linux 可使用 shell 包装脚本：
+
+```bash
+cd /path/to/paper_reader
+chmod +x scripts/start-surya-service.sh
+./scripts/start-surya-service.sh
+```
+
+该启动器是跨平台脚本（Windows/macOS/Linux），运行后会交互提示：
+
+- 是否安装/更新依赖
+- 选择 CPU 或 GPU
+- GPU 模式下选择 CUDA 通道
+
+安装阶段使用 `uv`，并逐步实时输出日志，然后启动 FastAPI（`uvicorn`）。
+
+如需无交互启动，可使用：
+
+```bash
+python scripts/start_surya_service.py --accelerator cpu
+# 或
+python scripts/start_surya_service.py --accelerator gpu --cuda cu121
+# 仅启动服务，不安装依赖
+python scripts/start_surya_service.py --accelerator skip-install
+
+# shell 包装脚本同样支持参数透传
+./scripts/start-surya-service.sh --accelerator gpu --cuda cu121
+```
+
+保留原有 PowerShell 脚本 `scripts/start-surya-service.ps1` 供兼容使用。
 
 Default URL: `http://127.0.0.1:8765`
 

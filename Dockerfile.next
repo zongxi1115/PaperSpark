@@ -14,7 +14,7 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 WORKDIR /app
 
 # 复制依赖描述文件
-COPY package.json pnpm-lock.yaml ./
+COPY package.json pnpm-lock.yaml .npmrc ./
 
 # 安装依赖
 RUN pnpm install --frozen-lockfile

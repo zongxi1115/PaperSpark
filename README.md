@@ -6,10 +6,12 @@
 
 AI 驱动的论文阅读、知识沉淀与学术写作工作台
 
+![Docker](https://img.shields.io/badge/Docker-ready-blue?logo=docker)
 [![Next.js](https://img.shields.io/badge/Next.js-15-black?logo=nextdotjs)](https://nextjs.org/)
 [![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript)](https://www.typescriptlang.org/)
 [![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-orange)](LICENSE)
+
 
 </div>
 
@@ -319,6 +321,71 @@ paper_reader/
 | 文档处理 | pdfjs-dist, mathlive, JSZip |
 | 图谱可视化 | @xyflow/react |
 | 样式系统 | Tailwind CSS v4 |
+
+## CLI 数据快照
+
+为了方便其他 AI 工具直接读取 PaperSpark 中的本地数据，项目现在提供了“快照导出 + CLI 查询”这一套链路。
+
+### 1. 导出工作区快照
+
+打开应用的设置页，在“CLI 数据快照”卡片中点击“同步到本地服务”。
+
+- 这会把浏览器里的本地数据同步到运行中的 Next 服务
+- CLI 后续可直接通过 HTTP 调用服务，不需要依赖 `pnpm`
+- 适合本地已经跑着 `pnpm dev` 或部署好的场景
+
+示例：
+
+```powershell
+.\paperspark-data.ps1 summary --server http://127.0.0.1:3000
+.\paperspark-data.ps1 list knowledge --server http://127.0.0.1:3000
+.\paperspark-data.ps1 get knowledge <knowledgeId> --field immersive.fullText --raw --server http://127.0.0.1:3000
+.\paperspark-data.ps1 search "transformer" --server http://127.0.0.1:3000
+```
+
+服务端同步后的原始数据接口为：
+
+```text
+GET /api/workspace-cli/snapshot
+POST /api/workspace-cli/snapshot
+```
+
+### 2. 导出 JSON 快照
+
+如果不想依赖运行中的服务，也可以点击“导出 JSON 快照”。
+
+- 导出的快照会统一打包以下内容：
+  - 文档与版本历史
+  - 知识库元数据
+  - 沉浸式阅读缓存中的全文、页面信息、导读、翻译、批注
+  - 资产库与随记
+  - 助手会话、便签与知识图谱
+- 建议将文件保存为 `out/paperspark-workspace-snapshot.json`
+
+### 2. 使用 CLI 查询
+
+```bash
+# 查看快照总体统计
+pnpm data:cli summary
+
+# 列出所有知识库条目
+pnpm data:cli list knowledge
+
+# 读取某篇知识项的完整 JSON
+pnpm data:cli get knowledge <knowledgeId>
+
+# 直接输出某篇精读文章的全文
+pnpm data:cli get knowledge <knowledgeId> --field immersive.fullText --raw
+
+# 全局检索文档 / 知识库 / 资产 / 随记 / 会话
+pnpm data:cli search "transformer"
+```
+
+如果快照不在默认位置，可显式指定：
+
+```bash
+pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.json
+```
 
 ## Roadmap
 

@@ -29,6 +29,7 @@ import { defaultSettings, selectFeatures } from '@/lib/types'
 import { EDITOR_THEMES, injectGoogleFont } from '@/lib/editorThemes'
 import { Icon } from '@iconify/react'
 import { useThemeContext } from '@/components/Providers'
+import { WorkspaceSnapshotCard } from '@/components/Settings/WorkspaceSnapshotCard'
 import type { ThemeMode } from '@/lib/theme'
 
 // 获取所有可用模型（用于下拉选择，排除禁用的模型）
@@ -1301,6 +1302,8 @@ export function SettingsForm() {
             </div>
           </CardBody>
         </Card>
+
+        <WorkspaceSnapshotCard />
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 12, paddingTop: 4 }}>

@@ -1,4 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { extractMetadata, generateSummary } from '@/lib/ai'
 import type { ModelConfig } from '@/lib/types'
 
@@ -6,6 +9,27 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 const SURYA_SERVICE_URL = process.env.SURYA_OCR_SERVICE_URL || 'http://127.0.0.1:8765'
+const SURYA_BINDING_DIR = path.join(process.cwd(), 'out', 'surya')
+const SURYA_BINDING_FILE = path.join(SURYA_BINDING_DIR, 'job-bindings.json')
+
+interface SuryaJobBinding {
+  fingerprint: string
+  jobId: string
+  fileName: string
+  pageRange?: string
+  outputName?: string
+  status: 'queued' | 'processing' | 'completed' | 'failed'
+  stage?: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface SuryaJobBindingStore {
+  version: 1
+  updatedAt: string
+  byFingerprint: Record<string, SuryaJobBinding>
+  byJobId: Record<string, string>
+}
 
 interface SuryaParseResponse {
   document_name: string
@@ -58,6 +82,116 @@ interface SuryaResultRequest {
   fileName?: string
 }
 
+function createEmptyBindingStore(): SuryaJobBindingStore {
+  return {
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    byFingerprint: {},
+    byJobId: {},
+  }
+}
+
+async function readBindingStore() {
+  try {
+    const raw = await fs.readFile(SURYA_BINDING_FILE, 'utf8')
+    const parsed = JSON.parse(raw) as Partial<SuryaJobBindingStore>
+    if (
+      parsed &&
+      parsed.version === 1 &&
+      parsed.byFingerprint &&
+      typeof parsed.byFingerprint === 'object' &&
+      parsed.byJobId &&
+      typeof parsed.byJobId === 'object'
+    ) {
+      return parsed as SuryaJobBindingStore
+    }
+    return createEmptyBindingStore()
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code
+    if (code === 'ENOENT') {
+      return createEmptyBindingStore()
+    }
+    throw error
+  }
+}
+
+async function writeBindingStore(store: SuryaJobBindingStore) {
+  const nextStore: SuryaJobBindingStore = {
+    ...store,
+    updatedAt: new Date().toISOString(),
+  }
+  await fs.mkdir(SURYA_BINDING_DIR, { recursive: true })
+  await fs.writeFile(SURYA_BINDING_FILE, JSON.stringify(nextStore, null, 2), 'utf8')
+}
+
+async function updateBindingStore(mutator: (store: SuryaJobBindingStore) => void) {
+  const store = await readBindingStore()
+  mutator(store)
+  await writeBindingStore(store)
+}
+
+function upsertBinding(store: SuryaJobBindingStore, binding: SuryaJobBinding) {
+  const previous = store.byFingerprint[binding.fingerprint]
+  if (previous && previous.jobId !== binding.jobId) {
+    delete store.byJobId[previous.jobId]
+  }
+
+  store.byFingerprint[binding.fingerprint] = binding
+  store.byJobId[binding.jobId] = binding.fingerprint
+}
+
+function removeBindingByFingerprint(store: SuryaJobBindingStore, fingerprint: string) {
+  const existing = store.byFingerprint[fingerprint]
+  if (!existing) return
+  delete store.byJobId[existing.jobId]
+  delete store.byFingerprint[fingerprint]
+}
+
+async function buildSubmissionFingerprint(params: {
+  file: File
+  pageRange?: string
+  outputName?: string
+}) {
+  const contentBuffer = Buffer.from(await params.file.arrayBuffer())
+  const fileContentHash = createHash('sha256').update(contentBuffer).digest('hex')
+  const key = [
+    params.file.name,
+    String(params.file.size),
+    params.file.type || '',
+    params.pageRange || '',
+    params.outputName || '',
+    fileContentHash,
+  ].join('|')
+
+  return createHash('sha256').update(key).digest('hex')
+}
+
+async function syncBindingStatusByJobId(jobId: string, payload: Partial<SuryaJobStatusResponse> | null | undefined) {
+  if (!jobId || !payload?.status) return
+
+  await updateBindingStore((store) => {
+    const fingerprint = store.byJobId[jobId]
+    if (!fingerprint) return
+
+    const existing = store.byFingerprint[fingerprint]
+    if (!existing) {
+      delete store.byJobId[jobId]
+      return
+    }
+
+    upsertBinding(store, {
+      ...existing,
+      status: payload.status || existing.status,
+      stage: payload.stage || existing.stage,
+      updatedAt: new Date().toISOString(),
+    })
+
+    if (payload.status === 'failed') {
+      removeBindingByFingerprint(store, fingerprint)
+    }
+  })
+}
+
 async function proxyToSurya(path: string, init?: RequestInit) {
   return fetch(`${SURYA_SERVICE_URL}${path}`, {
     cache: 'no-store',
@@ -91,6 +225,46 @@ async function handleJobSubmission(request: NextRequest) {
     upstreamForm.set('output_name', outputName)
   }
 
+  const normalizedPageRange = typeof pageRange === 'string' && pageRange.trim() ? pageRange.trim() : undefined
+  const normalizedOutputName = typeof outputName === 'string' && outputName.trim() ? outputName.trim() : undefined
+  const fingerprint = await buildSubmissionFingerprint({
+    file,
+    pageRange: normalizedPageRange,
+    outputName: normalizedOutputName,
+  })
+
+  const bindingStore = await readBindingStore()
+  const existingBinding = bindingStore.byFingerprint[fingerprint]
+  if (existingBinding) {
+    const statusResponse = await proxyToSurya(`/jobs/${existingBinding.jobId}`)
+    const statusPayload = await statusResponse.json().catch(() => null) as SuryaJobStatusResponse | null
+
+    if (statusResponse.ok && statusPayload?.job_id) {
+      await updateBindingStore((store) => {
+        upsertBinding(store, {
+          ...existingBinding,
+          status: statusPayload.status,
+          stage: statusPayload.stage,
+          updatedAt: new Date().toISOString(),
+        })
+      })
+
+      return NextResponse.json({
+        success: true,
+        job_id: existingBinding.jobId,
+        status: statusPayload.status,
+        stage: statusPayload.stage,
+        reused: true,
+      })
+    }
+
+    if (statusPayload?.status === 'failed' || statusResponse.status === 404) {
+      await updateBindingStore((store) => {
+        removeBindingByFingerprint(store, fingerprint)
+      })
+    }
+  }
+
   const parseResponse = await proxyToSurya('/jobs', {
     method: 'POST',
     body: upstreamForm,
@@ -102,6 +276,28 @@ async function handleJobSubmission(request: NextRequest) {
       { error: 'Surya 任务提交失败', detail: payload?.detail || payload?.error || null },
       { status: parseResponse.status },
     )
+  }
+
+  if (payload?.job_id && typeof payload.job_id === 'string') {
+    const now = new Date().toISOString()
+    const nextBinding: SuryaJobBinding = {
+      fingerprint,
+      jobId: payload.job_id,
+      fileName: file.name,
+      pageRange: normalizedPageRange,
+      outputName: normalizedOutputName,
+      status: payload.status === 'failed' ? 'failed' : (payload.status || 'queued'),
+      stage: payload.stage,
+      createdAt: now,
+      updatedAt: now,
+    }
+
+    await updateBindingStore((store) => {
+      upsertBinding(store, nextBinding)
+      if (nextBinding.status === 'failed') {
+        removeBindingByFingerprint(store, fingerprint)
+      }
+    })
   }
 
   return NextResponse.json(payload)
@@ -128,8 +324,11 @@ async function handleJobResult(request: NextRequest) {
   }
 
   if (payload.status !== 'completed' || !payload.parsed) {
+    await syncBindingStatusByJobId(body.jobId, payload)
     return NextResponse.json(payload, { status: resultResponse.status })
   }
+
+  await syncBindingStatusByJobId(body.jobId, payload)
 
   const responsePayload: Record<string, unknown> = {
     success: true,
@@ -170,7 +369,11 @@ export async function GET(request: NextRequest) {
 
     const upstreamPath = includeResult ? `/jobs/${jobId}/result` : `/jobs/${jobId}`
     const response = await proxyToSurya(upstreamPath)
-    const payload = await response.json().catch(() => null)
+    const payload = await response.json().catch(() => null) as SuryaJobStatusResponse | null
+
+    if (!includeResult && payload?.job_id) {
+      await syncBindingStatusByJobId(payload.job_id, payload)
+    }
 
     return NextResponse.json(payload, { status: response.status })
   } catch (error) {

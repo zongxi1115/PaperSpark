@@ -158,6 +158,49 @@ function getBlockPlainText(block: Block): string {
   return b.content?.filter(c => c.type === 'text').map(c => c.text).join('') ?? ''
 }
 
+function sanitizeInlineContent(content: unknown): unknown[] {
+  if (!Array.isArray(content)) return []
+  return content.filter((item) => {
+    if (!item || typeof item !== 'object') return false
+    const type = (item as { type?: unknown }).type
+    return typeof type === 'string' && type.length > 0
+  })
+}
+
+function sanitizeBlockTree(content: unknown): Block[] {
+  if (!Array.isArray(content)) return []
+
+  const sanitizeNode = (node: unknown): Block | null => {
+    if (!node || typeof node !== 'object') return null
+
+    const block = node as Record<string, unknown>
+    const type = block.type
+    if (typeof type !== 'string' || type.length === 0) return null
+
+    const sanitized: Record<string, unknown> = { ...block }
+
+    if ('content' in sanitized) {
+      sanitized.content = sanitizeInlineContent(sanitized.content)
+    }
+
+    if (Array.isArray(sanitized.children)) {
+      sanitized.children = sanitized.children
+        .map((child) => sanitizeNode(child))
+        .filter((child): child is Block => child !== null)
+    }
+
+    return sanitized as unknown as Block
+  }
+
+  return content
+    .map((node) => sanitizeNode(node))
+    .filter((node): node is Block => node !== null)
+}
+
+function getSafeCurrentDocumentBlocks(editor: ReturnType<typeof useCreateBlockNote>): Block[] {
+  return (editor.document as Array<Block | null | undefined>).filter((b): b is Block => Boolean(b))
+}
+
 /**
  * 获取光标位置周围的上下文文本
  * 返回 { context: 带有 | 标记光标位置的文本, cursorGlobalPos: 全局光标位置 }
@@ -475,13 +518,18 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     if (loaded) {
       setDoc(loaded)
       setLastDocId(docId)
-      if (loaded.content && (loaded.content as Block[]).length > 0) {
-        editor.replaceBlocks(editor.document, loaded.content as Block[])
-        setBlocks(editor.document as Block[])
+      const safeLoadedContent = sanitizeBlockTree(loaded.content)
+      if (safeLoadedContent.length > 0) {
+        try {
+          editor.replaceBlocks(getSafeCurrentDocumentBlocks(editor), safeLoadedContent)
+        } catch {
+          addToast({ title: '文档包含兼容性内容，已自动跳过异常块', color: 'warning' })
+        }
+        setBlocks(safeLoadedContent)
         
         // 提取已有的引用（从行内内容中）
         const extractedCitations = new Map<string, CitationData>()
-        const content = loaded.content as Block[]
+        const content = safeLoadedContent
         
         // 遍历所有块的内容，查找引用
         content.forEach(block => {
@@ -638,8 +686,15 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     saveDocumentVersion(autoVersion)
     
     // 恢复版本内容
-    editor.replaceBlocks(editor.document, version.content as Block[])
-    setBlocks(version.content as Block[])
+    const safeVersionContent = sanitizeBlockTree(version.content)
+    if (safeVersionContent.length > 0) {
+      try {
+        editor.replaceBlocks(getSafeCurrentDocumentBlocks(editor), safeVersionContent)
+      } catch {
+        addToast({ title: '历史版本包含兼容性内容，已自动跳过异常块', color: 'warning' })
+      }
+    }
+    setBlocks(safeVersionContent)
     
     // 恢复文章元数据
     if (version.articleTitle !== undefined) setArticleTitle(version.articleTitle)
@@ -651,7 +706,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     // 保存恢复后的文档
     const updated: AppDocument = {
       ...doc,
-      content: version.content,
+      content: safeVersionContent,
       articleTitle: version.articleTitle,
       articleAuthors: version.articleAuthors,
       articleAbstract: version.articleAbstract,

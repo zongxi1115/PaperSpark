@@ -1,6 +1,7 @@
 import JSZip from 'jszip'
 import type { AppDocument } from '@/lib/types'
 import type { CitationData } from '@/components/Editor/CitationBlock'
+import { canvasBlockToImageBlob } from '@/lib/canvasExport'
 
 type ImageAsset = {
   filename: string
@@ -8,6 +9,7 @@ type ImageAsset = {
 }
 
 type UnknownBlock = {
+  id?: string
   type?: string
   content?: unknown
   children?: UnknownBlock[]
@@ -15,6 +17,7 @@ type UnknownBlock = {
 }
 
 const IMAGE_NAME_PREFIX = 'image_'
+const CANVAS_NAME_PREFIX = 'canvas_'
 
 export type LatexExportLanguage = 'auto' | 'zh' | 'en'
 
@@ -80,6 +83,26 @@ async function collectImages(blocks: UnknownBlock[], imageMap: Map<string, Image
             const ext = pickImageExtension(url, blob.type)
             const filename = uniqueImageName(`${IMAGE_NAME_PREFIX}${imageIndex}.${ext}`, usedNames)
             imageMap.set(url, { filename, blob })
+            imageIndex += 1
+          }
+        }
+      }
+
+      if (block.type === 'canvas') {
+        const assetKey = getCanvasAssetKey(block)
+        if (assetKey && !imageMap.has(assetKey)) {
+          const graphData = String(block.props?.graphData || '')
+          const previewDataUrl = String(block.props?.previewDataUrl || '')
+          const blob = graphData
+            ? await canvasBlockToImageBlob(graphData, false)
+            : previewDataUrl
+              ? await resolveImageBlob(previewDataUrl)
+              : null
+
+          if (blob) {
+            const ext = pickImageExtension(previewDataUrl || `${CANVAS_NAME_PREFIX}${imageIndex}.png`, blob.type)
+            const filename = uniqueImageName(`${CANVAS_NAME_PREFIX}${imageIndex}.${ext}`, usedNames)
+            imageMap.set(assetKey, { filename, blob })
             imageIndex += 1
           }
         }
@@ -162,6 +185,15 @@ function uniqueImageName(baseName: string, used: Set<string>): string {
   const next = `${name}_${i}${ext}`
   used.add(next)
   return next
+}
+
+function getCanvasAssetKey(block: UnknownBlock): string | null {
+  const graphData = String(block.props?.graphData || '')
+  const previewDataUrl = String(block.props?.previewDataUrl || '')
+  if (block.id) return `canvas:${block.id}`
+  if (graphData) return `canvas:${graphData}`
+  if (previewDataUrl) return `canvas:${previewDataUrl}`
+  return null
 }
 
 function convertBlocks(blocks: UnknownBlock[], imageMap: Map<string, ImageAsset>): string {
@@ -283,6 +315,19 @@ function convertSingleBlock(block: UnknownBlock, imageMap: Map<string, ImageAsse
 
     lines.push('\\end{figure}')
     return lines.join('\n')
+  }
+
+  if (type === 'canvas') {
+    const assetKey = getCanvasAssetKey(block)
+    const canvasAsset = assetKey ? imageMap.get(assetKey) : null
+    if (!canvasAsset) return ''
+
+    return [
+      '\\begin{figure}[h]',
+      '\\centering',
+      `\\includegraphics[width=0.92\\textwidth]{images/${escapeLatexPath(canvasAsset.filename)}}`,
+      '\\end{figure}',
+    ].join('\n')
   }
 
   // File embed 块

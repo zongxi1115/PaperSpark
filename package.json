@@ -20,6 +20,15 @@
     "typescript": "~5.9.3"
   },
   "dependencies": {
+    "@antv/x6": "^2.19.2",
+    "@antv/x6-plugin-clipboard": "^2.1.6",
+    "@antv/x6-plugin-export": "^2.1.6",
+    "@antv/x6-plugin-history": "^2.2.4",
+    "@antv/x6-plugin-keyboard": "^2.2.3",
+    "@antv/x6-plugin-selection": "^2.2.2",
+    "@antv/x6-plugin-snapline": "^2.1.7",
+    "@antv/x6-plugin-stencil": "^2.1.5",
+    "@antv/x6-react-shape": "^2.2.3",
     "@ai-sdk/openai": "^3.0.41",
     "@blocknote/core": "^0.47.1",
     "@blocknote/mantine": "^0.47.1",

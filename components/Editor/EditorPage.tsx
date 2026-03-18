@@ -15,7 +15,7 @@ import { CustomDragHandleMenu } from './CustomDragHandleMenu'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import { filterSuggestionItems } from '@blocknote/core/extensions'
-import { BlockNoteSchema, defaultInlineContentSpecs } from '@blocknote/core'
+import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core'
 import type { Block } from '@blocknote/core'
 import {
   AIExtension,
@@ -42,9 +42,14 @@ import { registerEditor, unregisterEditor } from '@/lib/editorContext'
 import { exportToLatex, type LatexExportLanguage } from '@/lib/latexExporter'
 import { insertMarkdownBlocksAtCursor, looksLikeMarkdownContent } from '@/lib/blocknoteMarkdown'
 import { useThemeContext } from '@/components/Providers'
+import { CanvasBlockSpec } from './CanvasBlock'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
+  blockSpecs: {
+    ...defaultBlockSpecs,
+    canvas: CanvasBlockSpec,
+  },
   inlineContentSpecs: {
     ...defaultInlineContentSpecs,
     formula: FormulaInlineContentSpec,
@@ -1356,9 +1361,18 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                       ])
                     },
                   }
+                  const canvasItem: SlashMenuItem = {
+                    title: '画板',
+                    group: '其他',
+                    aliases: ['canvas', 'diagram', '图', 'huaban', 'hb'],
+                    onItemClick: () => {
+                      const cursorBlock = editor.getTextCursorPosition().block
+                      editor.insertBlocks([{ type: 'canvas' as any }], cursorBlock, 'after')
+                    },
+                  }
 
                   const normalizedItems = itemsWithoutQuickInsert.map(withPinyinAliases)
-                  const insertItems: SlashMenuItem[] = [withPinyinAliases(formulaItem)]
+                  const insertItems: SlashMenuItem[] = [withPinyinAliases(formulaItem), withPinyinAliases(canvasItem)]
                   if (imageItem) {
                     insertItems.push(withPinyinAliases(imageItem))
                   }

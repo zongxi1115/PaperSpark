@@ -269,6 +269,12 @@ export function CanvasEditor({
     }
 
     const handleBlankClick = () => {
+      if (editingNodeId) {
+        const node = session.graph.getCellById?.(editingNodeId)
+        if (node?.isNode?.()) {
+          setCanvasNodeLabel(node, nodeLabelDraft.trim(), isDark)
+        }
+      }
       setSelectedEdgeId(null)
       setEditingNodeId(null)
       setEdgeToolbarRect(null)

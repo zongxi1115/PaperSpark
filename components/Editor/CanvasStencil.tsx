@@ -46,9 +46,9 @@ function PaletteItemCard({
     >
       <div
         style={{
-          width: 24,
-          height: 24,
-          borderRadius: 8,
+          width: 32,
+          height: 32,
+          borderRadius: 10,
           display: 'grid',
           placeItems: 'center',
           color: item.color,
@@ -56,7 +56,7 @@ function PaletteItemCard({
           flexShrink: 0,
         }}
       >
-        <Icon icon={item.icon} width={14} />
+        <Icon icon={item.icon} width={20} />
       </div>
       <div style={{ minWidth: 0, flex: 1, fontSize: 12, fontWeight: 700, color: isDark ? '#e2e8f0' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {item.label}
@@ -86,19 +86,19 @@ function PaletteIconButton({
         }}
         aria-label={item.label}
         style={{
-          width: 24,
-          height: 24,
+          width: 32,
+          height: 32,
           display: 'grid',
           placeItems: 'center',
           border: 'none',
           background: 'transparent',
           color: item.color,
           cursor: 'grab',
-          borderRadius: 8,
+          borderRadius: 10,
           opacity: 0.92,
         }}
       >
-        <Icon icon={item.icon} width={14} />
+        <Icon icon={item.icon} width={20} />
       </button>
     </Tooltip>
   )
@@ -213,7 +213,7 @@ export function CanvasStencil({ groups, collapsed, isDark, onToggle, onInsert }:
                         <div
                           style={{
                             display: 'grid',
-                            gridTemplateColumns: 'repeat(6, minmax(0, 1fr))',
+                            gridTemplateColumns: 'repeat(5, minmax(0, 1fr))',
                             gap: 4,
                             padding: '2px 4px 0',
                           }}

@@ -401,7 +401,11 @@ pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.jso
 
 ## Roadmap
 
-- [] 版本控制+diff可视化
+- [ ] Word解析
+- [ ] 画布
+- [ ] 批量解析加入任务
+- [ ] 云服务部署支持数据库持久化
+- [ ] 教程文档撰写
 
 ## 致谢
 

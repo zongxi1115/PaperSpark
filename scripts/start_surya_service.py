@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# encoding: utf-8
 from __future__ import annotations
 
 import argparse
@@ -99,6 +99,8 @@ def start_uvicorn(project_root: Path, host: str, port: int, reload: bool) -> int
 
     cmd = [
         sys.executable,
+        "-X",
+        "utf8",
         "-m",
         "uvicorn",
         "services.surya_ocr_service.main:app",

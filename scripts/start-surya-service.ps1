@@ -10,6 +10,8 @@ conda activate base
 $env:PYTHONIOENCODING = "utf-8"
 
 $args = @(
+  "-X", "utf8",
+  "-m", "uvicorn",
   "services.surya_ocr_service.main:app",
   "--host", $ListenHost,
   "--port", $Port
@@ -19,4 +21,4 @@ if ($Reload) {
   $args += "--reload"
 }
 
-uvicorn @args
+python @args

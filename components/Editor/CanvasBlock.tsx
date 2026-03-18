@@ -179,6 +179,7 @@ function CanvasPreview(props: CanvasBlockRenderProps) {
       {editorOpen ? (
         <CanvasEditor
           graphData={String(props.block.props.graphData || '')}
+          previewDataUrl={previewDataUrl}
           width={width}
           height={height}
           isDark={isDark}

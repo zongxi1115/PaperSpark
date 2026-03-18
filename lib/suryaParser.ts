@@ -60,6 +60,11 @@ export interface SuryaParseResult {
 
 const SURYA_POLL_INTERVAL_MS = 5000
 const SURYA_JOB_TIMEOUT_MS = 15 * 60 * 1000
+const SURYA_RETRY_BASE_DELAY_MS = 500
+const SURYA_RETRY_MAX_DELAY_MS = 5000
+const SURYA_RETRY_MAX_ATTEMPTS = 5
+
+const RETRYABLE_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504])
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value))
@@ -159,11 +164,54 @@ function sleep(ms: number) {
   return new Promise(resolve => setTimeout(resolve, ms))
 }
 
+function getRetryDelay(attempt: number) {
+  const exponentialDelay = SURYA_RETRY_BASE_DELAY_MS * (2 ** Math.max(0, attempt - 1))
+  const boundedDelay = Math.min(exponentialDelay, SURYA_RETRY_MAX_DELAY_MS)
+  // Add jitter to avoid synchronized retries from multiple clients.
+  const jitter = Math.floor(Math.random() * 250)
+  return boundedDelay + jitter
+}
+
+async function fetchWithExponentialBackoff(
+  input: RequestInfo | URL,
+  init: RequestInit,
+  operationName: string,
+) {
+  let lastError: unknown = null
+
+  for (let attempt = 1; attempt <= SURYA_RETRY_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetch(input, init)
+      if (
+        response.ok ||
+        !RETRYABLE_STATUS_CODES.has(response.status) ||
+        attempt === SURYA_RETRY_MAX_ATTEMPTS
+      ) {
+        return response
+      }
+    } catch (error) {
+      lastError = error
+      if (attempt === SURYA_RETRY_MAX_ATTEMPTS) {
+        break
+      }
+    }
+
+    await sleep(getRetryDelay(attempt))
+  }
+
+  const suffix = lastError instanceof Error ? `: ${lastError.message}` : ''
+  throw new Error(`${operationName} 请求重试失败${suffix}`)
+}
+
 async function submitSuryaJob(form: FormData) {
-  const response = await fetch('/api/pdf/surya', {
-    method: 'POST',
-    body: form,
-  })
+  const response = await fetchWithExponentialBackoff(
+    '/api/pdf/surya',
+    {
+      method: 'POST',
+      body: form,
+    },
+    'Surya 任务提交',
+  )
 
   if (!response.ok) {
     const payload = await response.json().catch(() => null)
@@ -177,9 +225,13 @@ async function pollSuryaJob(jobId: string) {
   const startedAt = Date.now()
 
   while (true) {
-    const response = await fetch(`/api/pdf/surya?jobId=${encodeURIComponent(jobId)}`, {
-      cache: 'no-store',
-    })
+    const response = await fetchWithExponentialBackoff(
+      `/api/pdf/surya?jobId=${encodeURIComponent(jobId)}`,
+      {
+        cache: 'no-store',
+      },
+      'Surya 状态轮询',
+    )
 
     const payload = await response.json().catch(() => null) as SuryaJobStatusResponse | null
     if (!response.ok) {
@@ -213,17 +265,21 @@ async function fetchSuryaResult(params: {
   modelConfig?: ModelConfig
   fileName: string
 }) {
-  const response = await fetch('/api/pdf/surya', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jobId: params.jobId,
-      includeMetadata: params.includeMetadata,
-      includeSummary: params.includeSummary,
-      modelConfig: params.modelConfig,
-      fileName: params.fileName,
-    }),
-  })
+  const response = await fetchWithExponentialBackoff(
+    '/api/pdf/surya',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobId: params.jobId,
+        includeMetadata: params.includeMetadata,
+        includeSummary: params.includeSummary,
+        modelConfig: params.modelConfig,
+        fileName: params.fileName,
+      }),
+    },
+    'Surya 结果获取',
+  )
 
   const payload = await response.json().catch(() => null)
   if (!response.ok) {

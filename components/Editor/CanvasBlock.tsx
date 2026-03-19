@@ -92,15 +92,15 @@ function CanvasPreview(props: CanvasBlockRenderProps) {
         }}
       >
         {previewDataUrl ? (
-          <div style={{ position: 'relative', aspectRatio, minHeight: 220, background: isDark ? '#08111f' : '#f8fafc' }}>
+          <div style={{ position: 'relative', aspectRatio, minHeight: 220, background: isDark ? '#08111f' : '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <img
               src={previewDataUrl}
               alt="画板预览"
               draggable={false}
               style={{
-                width: '100%',
-                height: '100%',
-                objectFit: 'cover',
+                maxWidth: '100%',
+                maxHeight: '100%',
+                objectFit: 'contain',
                 display: 'block',
               }}
             />

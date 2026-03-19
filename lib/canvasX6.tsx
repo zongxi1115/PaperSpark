@@ -1063,6 +1063,13 @@ export async function createCanvasGraphSession(options: {
       maxScale: 2.5,
       factor: 1.08,
     },
+    interacting: {
+      edgeMovable: true,
+      edgeLabelMovable: true,
+      vertexMovable: true,
+      vertexAddable: true,
+      vertexDeletable: true,
+    },
     connecting: {
       allowBlank: true,
       allowLoop: false,
@@ -1166,7 +1173,7 @@ export async function createCanvasGraphSession(options: {
 
 export function getViewportRect(): CanvasOriginRect {
   if (typeof window === 'undefined') {
-    return { x: 0, y: 0, width: 1280, height: 800 }
+    return { x: 0, y: 0, width: 800, height: 600 }
   }
 
   return {

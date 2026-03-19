@@ -119,6 +119,7 @@ export function CanvasEditor({
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null)
   const [nodeLabelDraft, setNodeLabelDraft] = useState('')
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null)
+  const [edgeEditing, setEdgeEditing] = useState(false)
   const [edgeToolbarRect, setEdgeToolbarRect] = useState<FloatingRect | null>(null)
   const [edgeLabelDraft, setEdgeLabelDraft] = useState('')
 
@@ -163,7 +164,7 @@ export function CanvasEditor({
       setSelectedNodeRect(null)
     }
 
-    if (selectedEdgeId) {
+    if (selectedEdgeId && edgeEditing) {
       const edge = session.graph.getCellById?.(selectedEdgeId)
       if (edge?.isEdge?.()) {
         setEdgeToolbarRect(getGraphCellRect(session.graph, edge))
@@ -173,7 +174,7 @@ export function CanvasEditor({
     } else {
       setEdgeToolbarRect(null)
     }
-  }, [selectedEdgeId, selectedNodeId, session])
+  }, [edgeEditing, selectedEdgeId, selectedNodeId, session])
 
   useEffect(() => {
     setMounted(true)
@@ -241,6 +242,7 @@ export function CanvasEditor({
       }
       if (selectedCells.length > 1) {
         setSelectedEdgeId(null)
+        setEdgeEditing(false)
         setEdgeToolbarRect(null)
       }
       refreshFloatingUi()
@@ -260,12 +262,25 @@ export function CanvasEditor({
 
     const handleEdgeClick = ({ edge, e }: any) => {
       e?.stopPropagation?.()
+      const edgeId = String(edge?.id ?? '')
       setEditingNodeId(null)
       setSelectedNodeId(null)
       setSelectedNodeRect(null)
-      setSelectedEdgeId(String(edge?.id ?? ''))
+      setSelectedEdgeId(edgeId)
+      setEdgeEditing(false)
       setEdgeLabelDraft(getCanvasEdgeLabel(edge))
+      setEdgeToolbarRect(null)
       refreshFloatingUi()
+    }
+
+    const handleEdgeContextMenu = ({ edge, e }: any) => {
+      e?.preventDefault?.()
+      e?.stopPropagation?.()
+      const edgeId = String(edge?.id ?? '')
+      setSelectedEdgeId(edgeId)
+      setEdgeEditing(true)
+      setEdgeLabelDraft(getCanvasEdgeLabel(edge))
+      requestAnimationFrame(() => refreshFloatingUi())
     }
 
     const handleBlankClick = () => {
@@ -276,6 +291,7 @@ export function CanvasEditor({
         }
       }
       setSelectedEdgeId(null)
+      setEdgeEditing(false)
       setEditingNodeId(null)
       setEdgeToolbarRect(null)
       setSelectionToolbarRect(null)
@@ -284,6 +300,7 @@ export function CanvasEditor({
     const handleNodeDblClick = ({ node, e }: any) => {
       e?.stopPropagation?.()
       setSelectedEdgeId(null)
+      setEdgeEditing(false)
       setSelectedNodeId(String(node?.id ?? ''))
       setEditingNodeId(String(node?.id ?? ''))
       setNodeLabelDraft(getCanvasNodeLabel(node))
@@ -292,6 +309,7 @@ export function CanvasEditor({
 
     const handleEdgeRemoved = () => {
       setSelectedEdgeId(null)
+      setEdgeEditing(false)
       setEdgeToolbarRect(null)
       setEdgeLabelDraft('')
     }
@@ -303,6 +321,7 @@ export function CanvasEditor({
     graph.on('edge:change:labels', refreshFloatingUi)
     graph.on('edge:change:vertices', refreshFloatingUi)
     graph.on('edge:click', handleEdgeClick)
+    graph.on('edge:contextmenu', handleEdgeContextMenu)
     graph.on('node:dblclick', handleNodeDblClick)
     graph.on('blank:click', handleBlankClick)
     graph.on('edge:removed', handleEdgeRemoved)
@@ -321,6 +340,7 @@ export function CanvasEditor({
       graph.off('edge:change:labels', refreshFloatingUi)
       graph.off('edge:change:vertices', refreshFloatingUi)
       graph.off('edge:click', handleEdgeClick)
+      graph.off('edge:contextmenu', handleEdgeContextMenu)
       graph.off('node:dblclick', handleNodeDblClick)
       graph.off('blank:click', handleBlankClick)
       graph.off('edge:removed', handleEdgeRemoved)
@@ -518,6 +538,7 @@ export function CanvasEditor({
 
     edge.remove?.()
     setSelectedEdgeId(null)
+    setEdgeEditing(false)
     setEdgeToolbarRect(null)
     setEdgeLabelDraft('')
   }, [selectedEdgeId, session])
@@ -542,6 +563,9 @@ export function CanvasEditor({
               graph: session.graph,
               format: 'jpeg',
               isDark,
+              maxWidth: 1200,
+              maxHeight: 900,
+              quality: 0.88,
             }),
             new Promise<string>((_, reject) => {
               window.setTimeout(() => reject(new Error('缩略图生成超时')), 4000)
@@ -587,6 +611,22 @@ export function CanvasEditor({
         event.stopPropagation()
         const target = event.target as HTMLElement | null
         const isInputTarget = Boolean(target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable))
+
+        // 拦截撤回/重做快捷键
+        if ((event.ctrlKey || event.metaKey) && (event.key === 'z' || event.key === 'y' || event.key === 'Z')) {
+          event.preventDefault()
+          if (event.key === 'z' || event.key === 'Z') {
+            if (event.shiftKey) {
+              session?.history.redo?.()
+            } else {
+              session?.history.undo?.()
+            }
+          } else if (event.key === 'y') {
+            session?.history.redo?.()
+          }
+          return
+        }
+
         if (event.key === 'Escape' && !isInputTarget) {
           event.preventDefault()
           void handleClose()

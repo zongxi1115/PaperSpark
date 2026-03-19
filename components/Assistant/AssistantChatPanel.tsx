@@ -2229,8 +2229,9 @@ export function AssistantChatPanel() {
                           includeIncompleteTools: isStreamingMessage,
                         })
                         if (toolCalls.length === 0) return null
-                        
-                        return toolCalls.map((call, callIdx) => {
+
+                        // 收集所有工具调用的状态
+                        const toolCallStates = toolCalls.map((call, callIdx) => {
                           const key = `${message.id}:simple:${callIdx}`
                           const fallbackStatus: EditStatus = call.isComplete === false
                             ? (isStreamingMessage ? 'running' : 'error')
@@ -2240,53 +2241,159 @@ export function AssistantChatPanel() {
                             progress: call.isComplete === false && isStreamingMessage ? '正在接收内容…' : '',
                             error: call.isComplete === false && !isStreamingMessage ? '编辑指令未完整输出' : '',
                           }
+                          return { call, callIdx, key, state }
+                        })
 
-                          const handleAccept = () => {
+                        // 计算 reviewing 状态的数量
+                        const reviewingKeys = toolCallStates
+                          .filter(item => item.state.status === 'reviewing')
+                          .map(item => item.key)
+                        const hasMultipleReviewing = reviewingKeys.length > 1
+
+                        // 一键接受所有 reviewing 状态的操作
+                        const handleAcceptAll = () => {
+                          reviewingKeys.forEach(key => {
                             try {
                               acceptInsertionChanges(key)
                             } catch {
                               // ignore errors
                             }
                             setEditStates(prev => ({ ...prev, [key]: { status: 'accepted', progress: '', error: '' } }))
-                            // 强制刷新编辑器视图
-                            const editor = getEditor()
-                            if (editor) {
-                              editor._tiptapEditor.view.dispatch(
-                                editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
-                              )
-                            }
+                          })
+                          const editor = getEditor()
+                          if (editor) {
+                            editor._tiptapEditor.view.dispatch(
+                              editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                            )
                           }
-                          const handleReject = () => {
+                        }
+
+                        // 一键拒绝所有 reviewing 状态的操作
+                        const handleRejectAll = () => {
+                          reviewingKeys.forEach(key => {
                             try {
                               rejectInsertionChanges(key)
                             } catch (e) {
                               console.warn('Reject changes failed:', e)
                             }
                             setEditStates(prev => ({ ...prev, [key]: { status: 'rejected', progress: '', error: '' } }))
-                            // 强制刷新编辑器视图
-                            const editor = getEditor()
-                            if (editor) {
-                              editor._tiptapEditor.view.dispatch(
-                                editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
-                              )
-                            }
+                          })
+                          const editor = getEditor()
+                          if (editor) {
+                            editor._tiptapEditor.view.dispatch(
+                              editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                            )
                           }
-                          
-                          return (
-                            <SimpleTool
-                              key={key}
-                              type={call.type}
-                              params={call.params}
-                              content={call.content}
-                              status={state.status}
-                              progress={state.progress}
-                              error={state.error}
-                              onAccept={handleAccept}
-                              onReject={handleReject}
-                              opKey={key}
-                            />
-                          )
-                        })
+                        }
+                        
+                        return (
+                          <>
+                            {/* 多个 reviewing 时显示一键操作按钮 */}
+                            {hasMultipleReviewing && (
+                              <div style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 8,
+                                padding: '8px 12px',
+                                marginBottom: 8,
+                                background: 'rgba(0, 153, 255, 0.08)',
+                                border: '1px solid rgba(0, 153, 255, 0.2)',
+                                borderRadius: 8,
+                              }}>
+                                <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1 }}>
+                                  有 {reviewingKeys.length} 处编辑待确认
+                                </span>
+                                <button
+                                  onClick={handleAcceptAll}
+                                  style={{
+                                    background: 'var(--accent-color)',
+                                    color: 'white',
+                                    border: 'none',
+                                    borderRadius: 4,
+                                    padding: '4px 10px',
+                                    fontSize: 11,
+                                    fontWeight: 500,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                    <polyline points="20 6 9 17 4 12" />
+                                  </svg>
+                                  全部接受
+                                </button>
+                                <button
+                                  onClick={handleRejectAll}
+                                  style={{
+                                    background: 'transparent',
+                                    color: 'var(--text-muted)',
+                                    border: '1px solid var(--border-color)',
+                                    borderRadius: 4,
+                                    padding: '4px 10px',
+                                    fontSize: 11,
+                                    cursor: 'pointer',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: 4,
+                                  }}
+                                >
+                                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <line x1="18" y1="6" x2="6" y2="18" />
+                                    <line x1="6" y1="6" x2="18" y2="18" />
+                                  </svg>
+                                  全部拒绝
+                                </button>
+                              </div>
+                            )}
+                            {toolCallStates.map(({ call, key, state }) => {
+                              const handleAccept = () => {
+                                try {
+                                  acceptInsertionChanges(key)
+                                } catch {
+                                  // ignore errors
+                                }
+                                setEditStates(prev => ({ ...prev, [key]: { status: 'accepted', progress: '', error: '' } }))
+                                const editor = getEditor()
+                                if (editor) {
+                                  editor._tiptapEditor.view.dispatch(
+                                    editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                                  )
+                                }
+                              }
+                              const handleReject = () => {
+                                try {
+                                  rejectInsertionChanges(key)
+                                } catch (e) {
+                                  console.warn('Reject changes failed:', e)
+                                }
+                                setEditStates(prev => ({ ...prev, [key]: { status: 'rejected', progress: '', error: '' } }))
+                                const editor = getEditor()
+                                if (editor) {
+                                  editor._tiptapEditor.view.dispatch(
+                                    editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                                  )
+                                }
+                              }
+                              
+                              return (
+                                <SimpleTool
+                                  key={key}
+                                  type={call.type}
+                                  params={call.params}
+                                  content={call.content}
+                                  status={state.status}
+                                  progress={state.progress}
+                                  error={state.error}
+                                  onAccept={handleAccept}
+                                  onReject={handleReject}
+                                  opKey={key}
+                                />
+                              )
+                            })}
+                          </>
+                        )
                       })()}
                       {idx === messages.length - 1 && isLoading && (
                         <span 
@@ -2691,6 +2798,8 @@ export function AssistantChatPanel() {
                 display: 'grid',
                 gap: 4,
                 zIndex: 20,
+                maxHeight: 280,
+                overflowY: 'auto',
               }}>
                 {mentionCandidates.map(candidate => (
                   <button
@@ -2717,7 +2826,15 @@ export function AssistantChatPanel() {
                     <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>
                       {candidate.title}
                     </span>
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                    <span style={{
+                      fontSize: 11,
+                      color: 'var(--text-muted)',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 3,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                    }}>
                       {candidate.type === 'knowledge' ? '知识库' : '资产库'} · {candidate.subtitle}
                     </span>
                   </button>

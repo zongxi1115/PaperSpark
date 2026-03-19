@@ -6,4 +6,5 @@ chromadb
 httpx
 surya-ocr
 mammoth
+beautifulsoup4
 reportlab

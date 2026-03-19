@@ -71,6 +71,8 @@ type CanvasRuntime = {
 }
 
 const LEGACY_NODE_SHAPE = 'paperspark-canvas-node'
+const ICON_DEFAULT_LONGEST_EDGE = 64
+const ICON_MIN_SIZE = 24
 
 export const DEFAULT_CANVAS_WIDTH = 1200
 export const DEFAULT_CANVAS_HEIGHT = 720
@@ -100,31 +102,31 @@ const CANVAS_PRESETS: CanvasPaletteItem[] = [
   { id: 'multiDocument', label: '多文档', description: '多份资料', icon: 'mdi:file-multiple-outline', color: '#ec4899', group: 'flow', variant: 'multiDocument', width: 154, height: 110, minWidth: 104, minHeight: 72 },
   { id: 'storage', label: '数据存储', description: '数据库或磁盘', icon: 'mdi:database-outline', color: '#2563eb', group: 'flow', variant: 'cylinder', width: 150, height: 100, minWidth: 104, minHeight: 72 },
 
-  { id: 'server', label: '服务器', description: '后端服务图标', icon: 'mdi:server-outline', iconAsset: 'server', color: '#0f766e', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 16, minHeight: 16 },
-  { id: 'client', label: '客户端', description: '桌面或网页图标', icon: 'mdi:monitor-dashboard', iconAsset: 'client', color: '#7c3aed', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'browser', label: '浏览器', description: '浏览器图标', icon: 'mdi:web', iconAsset: 'browser', color: '#2563eb', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'mobile', label: '移动端', description: '手机图标', icon: 'mdi:cellphone', iconAsset: 'mobile', color: '#2563eb', group: 'architecture', variant: 'icon', width: 18, height: 26, minWidth: 12, minHeight: 16 },
-  { id: 'gateway', label: '网关', description: '访问入口图标', icon: 'mdi:api', iconAsset: 'gateway', color: '#ea580c', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'apiIcon', label: 'API', description: '接口服务图标', icon: 'mdi:api', iconAsset: 'api', color: '#2563eb', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'cloud', label: '云服务', description: '云资源图标', icon: 'mdi:cloud-outline', iconAsset: 'cloud', color: '#0284c7', group: 'architecture', variant: 'icon', width: 28, height: 20, minWidth: 16, minHeight: 12 },
-  { id: 'databaseIcon', label: '数据库', description: '数据库图标', icon: 'mdi:database-outline', iconAsset: 'database', color: '#0891b2', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'folderIcon', label: '文件夹', description: '文件夹图标', icon: 'mdi:folder-outline', iconAsset: 'folder', color: '#ca8a04', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'bucketIcon', label: '存储桶', description: '对象存储图标', icon: 'mdi:bucket-outline', iconAsset: 'bucket', color: '#0f766e', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'searchIcon', label: '搜索', description: '搜索图标', icon: 'mdi:magnify', iconAsset: 'search', color: '#0284c7', group: 'architecture', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
-  { id: 'userIcon', label: '用户', description: '用户图标', icon: 'mdi:account-outline', iconAsset: 'user', color: '#9333ea', group: 'architecture', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
-  { id: 'usersIcon', label: '用户组', description: '多用户图标', icon: 'mdi:account-group-outline', iconAsset: 'users', color: '#9333ea', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'shieldIcon', label: '安全', description: '安全图标', icon: 'mdi:shield-check-outline', iconAsset: 'shield', color: '#16a34a', group: 'architecture', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
-  { id: 'lockIcon', label: '权限', description: '锁图标', icon: 'mdi:lock-outline', iconAsset: 'lock', color: '#16a34a', group: 'architecture', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
+  { id: 'server', label: '服务器', description: '后端服务图标', icon: 'mdi:server-outline', iconAsset: 'server', color: '#0f766e', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 16, minHeight: 16 },
+  { id: 'client', label: '客户端', description: '桌面或网页图标', icon: 'mdi:monitor-dashboard', iconAsset: 'client', color: '#7c3aed', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'browser', label: '浏览器', description: '浏览器图标', icon: 'mdi:web', iconAsset: 'browser', color: '#2563eb', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'mobile', label: '移动端', description: '手机图标', icon: 'mdi:cellphone', iconAsset: 'mobile', color: '#2563eb', group: 'architecture', variant: 'icon', width: 36, height: 52, minWidth: 12, minHeight: 16 },
+  { id: 'gateway', label: '网关', description: '访问入口图标', icon: 'mdi:api', iconAsset: 'gateway', color: '#ea580c', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'apiIcon', label: 'API', description: '接口服务图标', icon: 'mdi:api', iconAsset: 'api', color: '#2563eb', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'cloud', label: '云服务', description: '云资源图标', icon: 'mdi:cloud-outline', iconAsset: 'cloud', color: '#0284c7', group: 'architecture', variant: 'icon', width: 56, height: 40, minWidth: 16, minHeight: 12 },
+  { id: 'databaseIcon', label: '数据库', description: '数据库图标', icon: 'mdi:database-outline', iconAsset: 'database', color: '#0891b2', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'folderIcon', label: '文件夹', description: '文件夹图标', icon: 'mdi:folder-outline', iconAsset: 'folder', color: '#ca8a04', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'bucketIcon', label: '存储桶', description: '对象存储图标', icon: 'mdi:bucket-outline', iconAsset: 'bucket', color: '#0f766e', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'searchIcon', label: '搜索', description: '搜索图标', icon: 'mdi:magnify', iconAsset: 'search', color: '#0284c7', group: 'architecture', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
+  { id: 'userIcon', label: '用户', description: '用户图标', icon: 'mdi:account-outline', iconAsset: 'user', color: '#9333ea', group: 'architecture', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
+  { id: 'usersIcon', label: '用户组', description: '多用户图标', icon: 'mdi:account-group-outline', iconAsset: 'users', color: '#9333ea', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'shieldIcon', label: '安全', description: '安全图标', icon: 'mdi:shield-check-outline', iconAsset: 'shield', color: '#16a34a', group: 'architecture', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
+  { id: 'lockIcon', label: '权限', description: '锁图标', icon: 'mdi:lock-outline', iconAsset: 'lock', color: '#16a34a', group: 'architecture', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
   { id: 'module', label: '模块框', description: '系统分区', icon: 'mdi:view-dashboard-outline', color: '#16a34a', group: 'architecture', variant: 'rectangle', minWidth: 92, minHeight: 56 },
-  { id: 'queue', label: '队列', description: '异步通道图标', icon: 'mdi:transit-connection-variant', iconAsset: 'queue', color: '#9333ea', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'chartIcon', label: '图表', description: '指标图标', icon: 'mdi:chart-box-outline', iconAsset: 'chart', color: '#dc2626', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'uploadIcon', label: '上传', description: '上传流向图标', icon: 'mdi:upload-outline', iconAsset: 'upload', color: '#0d9488', group: 'architecture', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
-  { id: 'downloadIcon', label: '下载', description: '下载流向图标', icon: 'mdi:download-outline', iconAsset: 'download', color: '#0284c7', group: 'architecture', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
-  { id: 'mailIcon', label: '消息', description: '消息通知图标', icon: 'mdi:email-outline', iconAsset: 'mail', color: '#ea580c', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'terminalIcon', label: '终端', description: '命令行图标', icon: 'mdi:console', iconAsset: 'terminal', color: '#475569', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'globeIcon', label: '网络', description: '全球网络图标', icon: 'mdi:web', iconAsset: 'globe', color: '#0284c7', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'settingsIcon', label: '配置', description: '配置图标', icon: 'mdi:cog-outline', iconAsset: 'settings', color: '#64748b', group: 'architecture', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
-  { id: 'chip', label: '算力', description: '计算模块图标', icon: 'mdi:memory', iconAsset: 'chip', color: '#0d9488', group: 'architecture', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
+  { id: 'queue', label: '队列', description: '异步通道图标', icon: 'mdi:transit-connection-variant', iconAsset: 'queue', color: '#9333ea', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'chartIcon', label: '图表', description: '指标图标', icon: 'mdi:chart-box-outline', iconAsset: 'chart', color: '#dc2626', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'uploadIcon', label: '上传', description: '上传流向图标', icon: 'mdi:upload-outline', iconAsset: 'upload', color: '#0d9488', group: 'architecture', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
+  { id: 'downloadIcon', label: '下载', description: '下载流向图标', icon: 'mdi:download-outline', iconAsset: 'download', color: '#0284c7', group: 'architecture', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
+  { id: 'mailIcon', label: '消息', description: '消息通知图标', icon: 'mdi:email-outline', iconAsset: 'mail', color: '#ea580c', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'terminalIcon', label: '终端', description: '命令行图标', icon: 'mdi:console', iconAsset: 'terminal', color: '#475569', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'globeIcon', label: '网络', description: '全球网络图标', icon: 'mdi:web', iconAsset: 'globe', color: '#0284c7', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'settingsIcon', label: '配置', description: '配置图标', icon: 'mdi:cog-outline', iconAsset: 'settings', color: '#64748b', group: 'architecture', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
+  { id: 'chip', label: '算力', description: '计算模块图标', icon: 'mdi:memory', iconAsset: 'chip', color: '#0d9488', group: 'architecture', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
 
   { id: 'dataset', label: '数据集', description: '论文数据源', icon: 'mdi:database-search-outline', color: '#059669', group: 'paper', variant: 'cylinder', width: 150, height: 100, minWidth: 104, minHeight: 72 },
   { id: 'model', label: '模型 / 算法', description: '方法模块', icon: 'mdi:brain', color: '#7c3aed', group: 'paper', variant: 'rounded', minWidth: 92, minHeight: 56 },
@@ -132,12 +134,12 @@ const CANVAS_PRESETS: CanvasPaletteItem[] = [
   { id: 'result', label: '实验结果', description: '输出结论', icon: 'mdi:chart-box-outline', color: '#dc2626', group: 'paper', variant: 'document', width: 148, height: 104, minWidth: 98, minHeight: 72 },
   { id: 'comparison', label: '对比表', description: '实验对照', icon: 'mdi:table-large', color: '#ea580c', group: 'paper', variant: 'comparison', width: 154, height: 98, minWidth: 104, minHeight: 72 },
   { id: 'annotation', label: '批注框', description: '箭头说明', icon: 'mdi:comment-text-outline', color: '#475569', group: 'paper', variant: 'annotation', width: 162, height: 98, minWidth: 112, minHeight: 72 },
-  { id: 'paperIcon', label: '论文', description: '论文文档图标', icon: 'mdi:file-document-outline', iconAsset: 'paper', color: '#ea580c', group: 'paper', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'robotIcon', label: '模型', description: '智能模型图标', icon: 'mdi:robot-outline', iconAsset: 'robot', color: '#7c3aed', group: 'paper', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'notebookIcon', label: '笔记', description: '笔记图标', icon: 'mdi:notebook-outline', iconAsset: 'notebook', color: '#0f766e', group: 'paper', variant: 'icon', width: 24, height: 24, minWidth: 12, minHeight: 12 },
-  { id: 'ideaIcon', label: '想法', description: '灵感图标', icon: 'mdi:lightbulb-outline', iconAsset: 'idea', color: '#f59e0b', group: 'paper', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
-  { id: 'citationIcon', label: '引用', description: '引用图标', icon: 'mdi:format-quote-close', iconAsset: 'citation', color: '#2563eb', group: 'paper', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
-  { id: 'labIcon', label: '实验', description: '实验图标', icon: 'mdi:flask-outline', iconAsset: 'lab', color: '#dc2626', group: 'paper', variant: 'icon', width: 22, height: 22, minWidth: 12, minHeight: 12 },
+  { id: 'paperIcon', label: '论文', description: '论文文档图标', icon: 'mdi:file-document-outline', iconAsset: 'paper', color: '#ea580c', group: 'paper', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'robotIcon', label: '模型', description: '智能模型图标', icon: 'mdi:robot-outline', iconAsset: 'robot', color: '#7c3aed', group: 'paper', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'notebookIcon', label: '笔记', description: '笔记图标', icon: 'mdi:notebook-outline', iconAsset: 'notebook', color: '#0f766e', group: 'paper', variant: 'icon', width: 48, height: 48, minWidth: 12, minHeight: 12 },
+  { id: 'ideaIcon', label: '想法', description: '灵感图标', icon: 'mdi:lightbulb-outline', iconAsset: 'idea', color: '#f59e0b', group: 'paper', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
+  { id: 'citationIcon', label: '引用', description: '引用图标', icon: 'mdi:format-quote-close', iconAsset: 'citation', color: '#2563eb', group: 'paper', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
+  { id: 'labIcon', label: '实验', description: '实验图标', icon: 'mdi:flask-outline', iconAsset: 'lab', color: '#dc2626', group: 'paper', variant: 'icon', width: 44, height: 44, minWidth: 12, minHeight: 12 },
   { id: 'textLabel', label: '自由文本', description: '独立文本标签', icon: 'mdi:format-text', color: '#334155', group: 'paper', variant: 'text', width: 180, height: 52, minWidth: 88, minHeight: 36 },
 ]
 
@@ -372,6 +374,38 @@ function getPresetVariantPath(variant: CanvasShapeVariant) {
   }
 }
 
+function syncIconNodeGlyph(node: any) {
+  const data = node?.getData?.() ?? {}
+  if (String(data.variant ?? '') !== 'icon') return
+
+  const size = node?.getSize?.() ?? { width: 48, height: 48 }
+  const width = Math.max(Number(size.width ?? 48), 1)
+  const height = Math.max(Number(size.height ?? 48), 1)
+  const inset = Math.max(Math.round(Math.min(width, height) * 0.08), 3)
+
+  node?.attr?.({
+    icon: {
+      x: inset,
+      y: inset,
+      width: Math.max(width - inset * 2, 1),
+      height: Math.max(height - inset * 2, 1),
+      preserveAspectRatio: 'xMidYMid meet',
+    },
+  })
+}
+
+function getIconDefaultSize(preset: CanvasPaletteItem) {
+  const baseWidth = Math.max(Number(preset.width ?? 48), 12)
+  const baseHeight = Math.max(Number(preset.height ?? 48), 12)
+  const longestEdge = Math.max(baseWidth, baseHeight)
+  const scale = ICON_DEFAULT_LONGEST_EDGE / Math.max(longestEdge, 1)
+
+  return {
+    width: Math.max(Math.round(baseWidth * scale), ICON_MIN_SIZE),
+    height: Math.max(Math.round(baseHeight * scale), ICON_MIN_SIZE),
+  }
+}
+
 function createPortConfig(isDark: boolean) {
   const stroke = isDark ? '#cbd5e1' : '#64748b'
   const fill = isDark ? '#0f172a' : '#ffffff'
@@ -559,18 +593,16 @@ function getVariantAttrs(
         },
         icon: {
           'xlink:href': getIconAssetDataUri(iconAsset, color),
-          x: 4,
-          y: 4,
-          width: 16,
-          height: 16,
+          refX: 4,
+          refY: 4,
           refWidth: 'calc(w-8)',
           refHeight: 'calc(h-8)',
           preserveAspectRatio: 'xMidYMid meet',
         },
         text: {
           ...getNodeLabelAttrs(label, isDark),
-          opacity: label.trim() ? 1 : 0.4,
-          text: label.trim() || '双击编辑',
+          opacity: label.trim() ? 1 : 0,
+          text: label.trim() || '',
           fontSize: 9,
           fontWeight: 600,
           refY: '100%',
@@ -588,7 +620,7 @@ function getVariantAttrs(
         text: {
           ...getNodeLabelAttrs(label, isDark),
           opacity: label.trim() ? 1 : 0.35,
-          text: label.trim() || '双击编辑文字',
+          text: label.trim() || '',
           fontSize: 16,
           fontWeight: 700,
           fill: label.trim() ? getCanvasTextColor(isDark) : hexToRgba('#64748b', isDark ? 0.72 : 0.64),
@@ -629,8 +661,9 @@ function buildNodeMetadata(
   }> = {},
 ) {
   const label = String(overrides.label ?? '')
-  const width = Number(overrides.width ?? preset.width ?? 148)
-  const height = Number(overrides.height ?? preset.height ?? 88)
+  const iconSize = preset.variant === 'icon' ? getIconDefaultSize(preset) : null
+  const width = Number(overrides.width ?? iconSize?.width ?? preset.width ?? 148)
+  const height = Number(overrides.height ?? iconSize?.height ?? preset.height ?? 88)
   const markup = getPresetVariantMarkup(preset.variant)
   const path = getPresetVariantPath(preset.variant)
   const ports = preset.variant === 'text' ? { groups: {}, items: [] } : createPortConfig(isDark)
@@ -646,9 +679,13 @@ function buildNodeMetadata(
       color: preset.color,
       iconAsset: preset.iconAsset ?? '',
       variant: preset.variant,
-      minWidth: preset.minWidth ?? 72,
-      minHeight: preset.minHeight ?? 56,
-      keepAspect: Boolean(preset.keepAspect),
+      minWidth: preset.variant === 'icon'
+        ? Math.max(Number(preset.minWidth ?? ICON_MIN_SIZE), ICON_MIN_SIZE)
+        : (preset.minWidth ?? 72),
+      minHeight: preset.variant === 'icon'
+        ? Math.max(Number(preset.minHeight ?? ICON_MIN_SIZE), ICON_MIN_SIZE)
+        : (preset.minHeight ?? 56),
+      keepAspect: preset.variant === 'icon' ? true : Boolean(preset.keepAspect),
     },
   }
 
@@ -930,6 +967,7 @@ export function applyCanvasNodeTheme(node: any, isDark: boolean) {
   node.setData?.(nextData)
   node.setPorts?.(preset.variant === 'text' ? { groups: {}, items: [] } : createPortConfig(isDark))
   node.attr?.(getVariantAttrs(preset.variant, String(nextData.color), isDark, String(nextData.label), String(nextData.iconAsset)))
+  syncIconNodeGlyph(node)
 }
 
 export function setCanvasNodeLabel(node: any, label: string, isDark: boolean) {
@@ -1014,8 +1052,9 @@ export function insertCanvasPresetNode(options: {
   const preset = getPresetById(options.presetId)
   if (!preset) return null
 
-  const width = preset.width ?? 148
-  const height = preset.height ?? 88
+  const iconSize = preset.variant === 'icon' ? getIconDefaultSize(preset) : null
+  const width = iconSize?.width ?? preset.width ?? 148
+  const height = iconSize?.height ?? preset.height ?? 88
   return options.graph.addNode(
     buildNodeMetadata(preset, options.isDark, {
       x: Number(options.point.x) - width / 2,
@@ -1053,7 +1092,7 @@ export async function createCanvasGraphSession(options: {
     },
     panning: {
       enabled: true,
-      eventTypes: ['rightMouseDown', 'mouseWheelDown'],
+      eventTypes: ['rightMouseDown'],
     },
     mousewheel: {
       enabled: true,
@@ -1146,6 +1185,11 @@ export async function createCanvasGraphSession(options: {
   bindAutoCreateNode(graph, options.isDark)
   bindPortVisibility(graph)
 
+  const handleNodeResize = ({ node }: any) => {
+    syncIconNodeGlyph(node)
+  }
+  graph.on('node:change:size', handleNodeResize)
+
   if (options.graphData) {
     try {
       const parsed = normalizeCanvasGraphData(JSON.parse(options.graphData), options.isDark)
@@ -1166,6 +1210,7 @@ export async function createCanvasGraphSession(options: {
   return {
     ...sessionBase,
     dispose: () => {
+      graph.off('node:change:size', handleNodeResize)
       graph.dispose?.()
     },
   }

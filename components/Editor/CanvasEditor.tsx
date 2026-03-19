@@ -594,14 +594,6 @@ export function CanvasEditor({
 
   if (!mounted) return null
 
-  const nodeHintVisible = Boolean(
-    selectedNodeRect &&
-    selectedNodeId &&
-    !editingNodeId &&
-    session?.graph.getCellById?.(selectedNodeId)?.isNode?.() &&
-    !getCanvasNodeLabel(session.graph.getCellById(selectedNodeId)).trim(),
-  )
-
   return createPortal(
     <div
       ref={rootRef}
@@ -911,21 +903,6 @@ export function CanvasEditor({
             zIndex: 10010,
           }}
         />
-      ) : null}
-
-      {nodeHintVisible && selectedNodeRect && selectionCount <= 1 ? (
-        <div
-          style={{
-            position: 'fixed',
-            left: selectedNodeRect.left + selectedNodeRect.width / 2,
-            top: selectedNodeRect.top + selectedNodeRect.height + 18,
-            transform: 'translateX(-50%)',
-            zIndex: 10020,
-            pointerEvents: 'none',
-          }}
-        >
-          <Chip size="sm" variant="flat">双击编辑文字</Chip>
-        </div>
       ) : null}
     </div>,
     document.body,

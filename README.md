@@ -401,12 +401,12 @@ pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.jso
 
 ## Roadmap
 
-- [ ] Word解析
+- [x] Word解析
 - [ ] 画布
 - [ ] 批量解析加入任务
 - [ ] 云服务部署支持数据库持久化
 - [ ] 教程文档撰写
-- [ ] 打包为桌面应用
+- [ ] 有机会或许可以尝试弄一个marketplace?但是离这个生态好像有点远哈哈哈
 
 ## 致谢
 

@@ -293,6 +293,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const [correcting, setCorrecting] = useState(false)
   const [ghostText, setGhostText] = useState<string | null>(null) // ghost text 内容
   const [ghostPosition, setGhostPosition] = useState<{ top: number; left: number } | null>(null)
+  const [ghostVisible, setGhostVisible] = useState(false) // 用于控制 opacity 动画
+  const lastCursorPositionRef = useRef<{ top: number; left: number } | null>(null) // 记录上次光标位置
   const [citations, setCitations] = useState<Map<string, CitationData>>(new Map()) // 引用列表
   const { isDark, mounted: themeMounted } = useThemeContext()
 
@@ -497,17 +499,68 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           selection.removeAllRanges()
           selection.addRange(range)
         }
-        setGhostText(null)
-        setGhostPosition(null)
+        setGhostVisible(false)
+        setTimeout(() => {
+          setGhostText(null)
+          setGhostPosition(null)
+        }, 150)
       } else if (e.key !== 'Tab' && ghostTextRef.current) {
         // 任意其他键清除 ghost text
-        setGhostText(null)
-        setGhostPosition(null)
+        setGhostVisible(false)
+        setTimeout(() => {
+          setGhostText(null)
+          setGhostPosition(null)
+        }, 150)
+      }
+    }
+    
+    // 编辑器失去焦点时隐藏提示
+    const handleBlur = () => {
+      if (ghostTextRef.current) {
+        setGhostVisible(false)
+        setTimeout(() => {
+          setGhostText(null)
+          setGhostPosition(null)
+        }, 150)
+      }
+    }
+
+    // 检测光标位置变化
+    const handleSelectionChange = () => {
+      if (!ghostTextRef.current || !lastCursorPositionRef.current) return
+      
+      const selection = window.getSelection()
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0)
+        const rect = range.getBoundingClientRect()
+        const currentPosition = { top: rect.bottom + 2, left: rect.left }
+        
+        // 如果光标位置变化超过阈值，隐藏提示
+        const lastPos = lastCursorPositionRef.current
+        const threshold = 5
+        if (Math.abs(currentPosition.top - lastPos.top) > threshold || 
+            Math.abs(currentPosition.left - lastPos.left) > threshold) {
+          setGhostVisible(false)
+          setTimeout(() => {
+            setGhostText(null)
+            setGhostPosition(null)
+          }, 150)
+        }
       }
     }
     
     document.addEventListener('keydown', handleKeyDown, { capture: true })
-    return () => document.removeEventListener('keydown', handleKeyDown, { capture: true })
+    document.addEventListener('selectionchange', handleSelectionChange)
+    
+    // 监听编辑器容器失去焦点
+    const editorElement = document.querySelector('.bn-editor')
+    editorElement?.addEventListener('blur', handleBlur, true)
+    
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown, { capture: true })
+      document.removeEventListener('selectionchange', handleSelectionChange)
+      editorElement?.removeEventListener('blur', handleBlur, true)
+    }
   }, [])
 
   // Load document on mount
@@ -925,8 +978,13 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           if (selection && selection.rangeCount > 0) {
             const range = selection.getRangeAt(0)
             const rect = range.getBoundingClientRect()
+            // 提示在光标正下方，与光标左对齐
+            const position = { top: rect.bottom + 2, left: rect.left }
             setGhostText(completion.trim())
-            setGhostPosition({ top: rect.bottom, left: rect.right })
+            setGhostPosition(position)
+            lastCursorPositionRef.current = position
+            // 延迟显示以触发动画
+            setTimeout(() => setGhostVisible(true), 10)
           }
         }
       }
@@ -954,8 +1012,11 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     saveDocument(updated)
 
     // 清除之前的 ghost text
-    setGhostText(null)
-    setGhostPosition(null)
+    setGhostVisible(false)
+    setTimeout(() => {
+      setGhostText(null)
+      setGhostPosition(null)
+    }, 150)
     
     // 重新索引引用（延迟执行，避免频繁更新）
     setTimeout(() => {
@@ -1136,6 +1197,9 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               whiteSpace: 'pre-wrap',
               maxWidth: '400px',
               lineHeight: 1.6,
+              opacity: ghostVisible ? 1 : 0,
+              transform: ghostVisible ? 'translateY(0)' : 'translateY(-4px)',
+              transition: 'opacity 150ms ease-out, transform 150ms ease-out',
             }}
           >
             {ghostText}

@@ -374,14 +374,47 @@ export function KnowledgePanel() {
     try {
       let data: { fileName: string; fileType: NonNullable<KnowledgeItem['fileType']>; fileSize?: number; url?: string }
       let localFileId: string | undefined
+      let fileToProcess = pendingFile
 
       if (importTab === 'upload' && pendingFile) {
+        // 检查是否为 Word 文件，如果是则先转换为 PDF
+        const fileName = pendingFile.name.toLowerCase()
+        const isWordFile = fileName.endsWith('.doc') || fileName.endsWith('.docx')
+        
+        if (isWordFile) {
+          addToast({ title: '正在将 Word 转换为 PDF...', color: 'primary' })
+          
+          const convertFormData = new FormData()
+          convertFormData.append('file', pendingFile)
+          
+          const convertRes = await fetch('/api/knowledge/convert-to-pdf', {
+            method: 'POST',
+            body: convertFormData,
+          })
+          
+          if (!convertRes.ok) {
+            const errorData = await convertRes.json()
+            throw new Error(errorData.error || 'Word 转 PDF 失败')
+          }
+          
+          // 获取转换后的 PDF 文件
+          const pdfBlob = await convertRes.blob()
+          // 从 header 获取文件名并解码 URL 编码
+          const encodedFileName = convertRes.headers.get('X-Converted-Filename')
+          const pdfFileName = encodedFileName 
+            ? decodeURIComponent(encodedFileName)
+            : pendingFile.name.replace(/\.(docx?|dotx?)$/i, '.pdf')
+          
+          fileToProcess = new File([pdfBlob], pdfFileName, { type: 'application/pdf' })
+          addToast({ title: 'Word 转换完成，正在导入...', color: 'success' })
+        }
+
         // 先将文件存储到 IndexedDB，用于沉浸式阅读时获取
-        const storeResult = await storeFile(pendingFile)
+        const storeResult = await storeFile(fileToProcess)
         localFileId = storeResult.id
 
         const formData = new FormData()
-        formData.append('file', pendingFile)
+        formData.append('file', fileToProcess)
         const res = await fetch('/api/knowledge/upload', { method: 'POST', body: formData })
         if (!res.ok) throw new Error('Upload failed')
         data = await res.json()
@@ -394,22 +427,24 @@ export function KnowledgePanel() {
       }
 
       const now = new Date().toISOString()
+      // 确保 fileName 是解码后的
+      const decodedFileName = data.fileName ? decodeURIComponent(data.fileName) : data.fileName
       const newItem: KnowledgeItem = {
         id: generateId(),
-        title: importTitle || data.fileName,
+        title: importTitle || decodedFileName,
         authors: importAuthors ? importAuthors.split(',').map(a => a.trim()).filter(Boolean) : [],
         abstract: importAbstract || '',
         year: importYear || '',
         journal: importJournal || '',
         sourceType: importTab === 'url' ? 'url' : 'upload',
         sourceId: localFileId, // IndexedDB 文件 ID，用于沉浸式阅读获取 PDF
-        fileName: data.fileName,
+        fileName: decodedFileName,
         fileType: data.fileType,
         fileSize: data.fileSize,
         url: importTab === 'url' ? importUrl : undefined,
         hasAttachment: importTab === 'url',
         attachmentUrl: importTab === 'url' ? importUrl : undefined,
-        attachmentFileName: importTab === 'url' ? data.fileName : undefined,
+        attachmentFileName: importTab === 'url' ? decodedFileName : undefined,
         createdAt: now,
         updatedAt: now,
       }
@@ -1066,6 +1101,11 @@ export function KnowledgePanel() {
                       </p>
                       <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
                         {(pendingFile.size / 1024).toFixed(1)} KB
+                        {pendingFile.name.toLowerCase().match(/\.(docx?|dotx?)$/) && (
+                          <span style={{ marginLeft: 8, color: 'var(--accent-color)' }}>
+                            (将自动转换为 PDF)
+                          </span>
+                        )}
                       </p>
                     </div>
                   ) : (
@@ -1074,7 +1114,7 @@ export function KnowledgePanel() {
                         点击选择文件
                       </p>
                       <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                        支持 PDF、DOC、DOCX 格式
+                        支持 PDF、DOC、DOCX 格式（Word 文件将自动转换为 PDF）
                       </p>
                     </div>
                   )}

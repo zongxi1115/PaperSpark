@@ -1,6 +1,6 @@
 'use client'
 import { useState } from 'react'
-import { AnimatePresence, motion } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { Tooltip } from '@heroui/react'
 import { KnowledgePanel } from '@/components/Knowledge/KnowledgePanel'
 import { AssetsPanel } from '@/components/Assets/AssetsPanel'
@@ -86,72 +86,81 @@ export function RightSidebar() {
 
   return (
     <div style={{ display: 'flex', height: '100%' }}>
-      {/* 展开的面板 */}
-      <AnimatePresence initial={false}>
-        {activeTab && (
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 10 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            style={{
-              position: 'relative',
-              width: panelWidth,
-              background: 'var(--bg-primary)',
-              borderLeft: '1px solid var(--border-color)',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              flexShrink: 0,
-            }}
-          >
-            {/* 面板标题 */}
-            <div style={{ 
-              padding: '12px 16px', 
-              borderBottom: '1px solid var(--border-color)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}>
-              <span style={{ fontSize: 14, fontWeight: 600 }}>
-                {sidebarItems.find(i => i.id === activeTab)?.label}
-              </span>
-            </div>
+      {/* 展开的面板 - 始终挂载，用动画控制显示 */}
+      <motion.div
+        initial={false}
+        animate={{
+          width: activeTab ? panelWidth : 0,
+          opacity: activeTab ? 1 : 0,
+        }}
+        transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+        style={{
+          position: 'relative',
+          background: 'var(--bg-primary)',
+          borderLeft: '1px solid var(--border-color)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          flexShrink: 0,
+        }}
+      >
+        {/* 面板标题 */}
+        <div style={{ 
+          padding: '12px 16px', 
+          borderBottom: '1px solid var(--border-color)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 600 }}>
+            {activeTab ? sidebarItems.find(i => i.id === activeTab)?.label : ''}
+          </span>
+        </div>
 
-            {/* 面板内容 */}
-            <div style={{ flex: 1, overflow: 'hidden' }}>
-              {activeTab === 'assistant' && <AssistantChatPanel />}
-              {activeTab === 'knowledge' && <KnowledgePanel />}
-              {activeTab === 'search' && <LiteratureSearchPanel />}
-              {activeTab === 'assets' && <AssetsPanel />}
-              {activeTab === 'agents' && <AgentSettingsPanel />}
-              {activeTab === 'read' && <ReadingPanel />}
-            </div>
+        {/* 面板内容 - 所有面板保持挂载，用 CSS 控制显示隐藏以保持状态 */}
+        <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+          <div style={{ display: activeTab === 'assistant' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+            <AssistantChatPanel />
+          </div>
+          <div style={{ display: activeTab === 'knowledge' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+            <KnowledgePanel />
+          </div>
+          <div style={{ display: activeTab === 'search' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+            <LiteratureSearchPanel />
+          </div>
+          <div style={{ display: activeTab === 'assets' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+            <AssetsPanel />
+          </div>
+          <div style={{ display: activeTab === 'agents' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+            <AgentSettingsPanel />
+          </div>
+          <div style={{ display: activeTab === 'read' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+            <ReadingPanel />
+          </div>
+        </div>
 
-            {/* 可拖拽调整宽度 */}
-            <div
-              onMouseDown={handleMouseDown}
-              onMouseEnter={() => setIsHoveringHandle(true)}
-              onMouseLeave={() => setIsHoveringHandle(false)}
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                bottom: 0,
-                width: 6,
-                cursor: 'col-resize',
-                zIndex: 10,
-                background: (isResizing || isHoveringHandle)
-                  ? 'var(--accent-color)'
-                  : 'transparent',
-                opacity: isResizing ? 1 : isHoveringHandle ? 0.5 : 0,
-                transition: 'background 0.15s, opacity 0.15s',
-              }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
+        {/* 可拖拽调整宽度 */}
+        <div
+          onMouseDown={handleMouseDown}
+          onMouseEnter={() => setIsHoveringHandle(true)}
+          onMouseLeave={() => setIsHoveringHandle(false)}
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            bottom: 0,
+            width: 6,
+            cursor: 'col-resize',
+            zIndex: 10,
+            background: (isResizing || isHoveringHandle)
+              ? 'var(--accent-color)'
+              : 'transparent',
+            opacity: isResizing ? 1 : isHoveringHandle ? 0.5 : 0,
+            transition: 'background 0.15s, opacity 0.15s',
+          }}
+        />
+      </motion.div>
 
       {/* 图标侧边栏 */}
       <aside

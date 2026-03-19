@@ -20,6 +20,7 @@ from chromadb.config import Settings
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+import fastapi
 from pydantic import BaseModel
 
 
@@ -844,3 +845,289 @@ def rag_list_collections() -> dict[str, Any]:
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============ DOCX 转 PDF 功能 ============
+
+from io import BytesIO
+from typing import BinaryIO
+import os
+import platform
+import base64
+
+import mammoth
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image
+from reportlab.lib.enums import TA_LEFT, TA_JUSTIFY
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.lib.utils import ImageReader
+from bs4 import BeautifulSoup
+
+
+# 注册中文字体
+def register_chinese_font() -> str:
+    """注册中文字体，返回字体名称"""
+    # 尝试注册 Windows 系统字体
+    system = platform.system()
+    
+    font_paths = []
+    if system == 'Windows':
+        font_paths = [
+            'C:/Windows/Fonts/simhei.ttf',  # 黑体
+            'C:/Windows/Fonts/msyh.ttc',    # 微软雅黑
+            'C:/Windows/Fonts/simsun.ttc',  # 宋体
+        ]
+    elif system == 'Darwin':  # macOS
+        font_paths = [
+            '/System/Library/Fonts/PingFang.ttc',
+            '/Library/Fonts/Arial Unicode.ttf',
+        ]
+    else:  # Linux
+        font_paths = [
+            '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',
+            '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc',
+        ]
+    
+    for path in font_paths:
+        if os.path.exists(path):
+            try:
+                font_name = 'ChineseFont'
+                pdfmetrics.registerFont(TTFont(font_name, path))
+                return font_name
+            except Exception as e:
+                print(f"[Font] Failed to register {path}: {e}")
+                continue
+    
+    # 没有找到中文字体，使用默认字体
+    print("[Font] No Chinese font found, using default")
+    return 'Helvetica'
+
+
+# 全局字体名称
+CHINESE_FONT_NAME = register_chinese_font()
+
+
+class DocxConvertResponse(BaseModel):
+    success: bool
+    message: str = ""
+    pdf_size: int | None = None
+
+
+def make_image_converter():
+    """创建 mammoth 图片转换器，将图片转为 base64 数据 URL"""
+    import base64
+    counter = [0]  # 使用列表实现闭包中的可变计数
+    
+    @mammoth.images.img_element
+    def convert_image(image):
+        counter[0] += 1
+        with image.open() as image_bytes:
+            image_data = image_bytes.read()
+        
+        # 转为 base64 数据 URL
+        b64_data = base64.b64encode(image_data).decode('utf-8')
+        # 检测图片类型
+        if image_data[:4] == b'\x89PNG':
+            mime_type = 'image/png'
+        elif image_data[:2] == b'\xff\xd8':
+            mime_type = 'image/jpeg'
+        elif image_data[:6] in (b'GIF87a', b'GIF89a'):
+            mime_type = 'image/gif'
+        else:
+            mime_type = 'image/png'
+        
+        src = f"data:{mime_type};base64,{b64_data}"
+        print(f"[DOCX Image] Converted image #{counter[0]}, type: {mime_type}, size: {len(image_data)} bytes")
+        
+        return {"src": src}
+    
+    return convert_image
+
+
+def html_to_pdf(html_content: str, output: BinaryIO, title: str = "Document") -> int:
+    """将 HTML 内容转换为 PDF，返回 PDF 字节数"""
+    
+    # 创建 PDF 文档
+    doc = SimpleDocTemplate(
+        output,
+        pagesize=A4,
+        rightMargin=2 * cm,
+        leftMargin=2 * cm,
+        topMargin=2 * cm,
+        bottomMargin=2 * cm,
+    )
+
+    # 获取样式
+    styles = getSampleStyleSheet()
+
+    # 自定义样式 - 使用中文字体
+    styles.add(ParagraphStyle(
+        name='DocTitle',
+        fontName=CHINESE_FONT_NAME,
+        fontSize=18,
+        spaceAfter=20,
+        alignment=TA_LEFT,
+    ))
+    styles.add(ParagraphStyle(
+        name='DocHeading',
+        fontName=CHINESE_FONT_NAME,
+        fontSize=14,
+        spaceBefore=12,
+        spaceAfter=8,
+    ))
+    styles.add(ParagraphStyle(
+        name='DocBody',
+        fontName=CHINESE_FONT_NAME,
+        fontSize=11,
+        leading=16,
+        alignment=TA_JUSTIFY,
+        spaceAfter=8,
+    ))
+
+    # 解析 HTML
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    # 构建文档内容
+    story = []
+
+    # 添加标题
+    story.append(Paragraph(title, styles['DocTitle']))
+    story.append(Spacer(1, 0.5 * cm))
+
+    # 页面可用宽度（用于图片缩放）
+    available_width = A4[0] - 4 * cm  # 左右边距各 2cm
+
+    # 遍历 HTML 元素
+    for element in soup.descendants:
+        if element.name == 'p':
+            text = element.get_text(strip=True)
+            if text:
+                # 转义特殊字符
+                text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                try:
+                    story.append(Paragraph(text, styles['DocBody']))
+                except Exception:
+                    story.append(Paragraph(text, styles['DocBody']))
+        elif element.name in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
+            text = element.get_text(strip=True)
+            if text:
+                text = text.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                try:
+                    story.append(Paragraph(text, styles['DocHeading']))
+                except Exception:
+                    story.append(Paragraph(text, styles['DocHeading']))
+        elif element.name == 'br':
+            story.append(Spacer(1, 0.3 * cm))
+        elif element.name == 'img':
+            # 处理图片
+            src = element.get('src', '')
+            image_data = None
+            
+            if src.startswith('data:'):
+                # base64 数据 URL
+                try:
+                    # 解析 data:image/xxx;base64,yyy 格式
+                    import base64
+                    header, data = src.split(',', 1)
+                    image_data = base64.b64decode(data)
+                except Exception as e:
+                    print(f"[Image] Failed to decode base64 image: {e}")
+            
+            if image_data:
+                try:
+                    # 使用 ImageReader 从字节数据创建图片
+                    img_reader = ImageReader(BytesIO(image_data))
+                    img_width, img_height = img_reader.getSize()
+                    
+                    # 缩放图片以适应页面宽度
+                    scale = min(1.0, available_width / img_width)
+                    display_width = img_width * scale
+                    display_height = img_height * scale
+                    
+                    # 限制最大高度
+                    max_height = 15 * cm
+                    if display_height > max_height:
+                        height_scale = max_height / display_height
+                        display_width *= height_scale
+                        display_height *= height_scale
+                    
+                    # 创建图片 Flowable
+                    img = Image(BytesIO(image_data), width=display_width, height=display_height)
+                    story.append(img)
+                    story.append(Spacer(1, 0.3 * cm))
+                except Exception as e:
+                    print(f"[Image] Failed to embed image: {e}")
+
+    # 如果没有内容，添加一个空白段落
+    if len(story) <= 2:
+        story.append(Paragraph("(空文档)", styles['DocBody']))
+
+    # 构建 PDF
+    doc.build(story)
+
+    return output.tell()
+
+
+@app.post("/convert/docx-to-pdf")
+async def convert_docx_to_pdf(file: UploadFile = File(...)) -> fastapi.responses.StreamingResponse:
+    """将 DOCX 文件转换为 PDF"""
+    filename = file.filename or "document.docx"
+
+    # 检查文件扩展名
+    if not filename.lower().endswith(('.docx', '.doc')):
+        raise HTTPException(status_code=400, detail="只支持 .doc 和 .docx 文件")
+
+    try:
+        # 读取文件内容
+        content = await file.read()
+
+        # 使用 mammoth 转换为 HTML，并嵌入图片为 base64
+        with BytesIO(content) as docx_buffer:
+            result = mammoth.convert_to_html(
+                docx_buffer,
+                convert_image=make_image_converter()
+            )
+            html_content = result.value
+            messages = result.messages
+
+        # 记录转换警告（如果有）
+        for msg in messages:
+            print(f"[DOCX Convert] {msg}")
+
+        # 生成 PDF 文件名
+        pdf_filename = filename.rsplit('.', 1)[0] + '.pdf'
+
+        # 转换 HTML 为 PDF
+        pdf_buffer = BytesIO()
+        pdf_size = html_to_pdf(
+            html_content, 
+            pdf_buffer, 
+            title=pdf_filename.rsplit('.', 1)[0]
+        )
+        pdf_buffer.seek(0)
+
+        # URL 编码文件名以支持中文
+        from urllib.parse import quote
+
+        encoded_pdf_filename = quote(pdf_filename, safe='')
+        encoded_original_filename = quote(filename, safe='')
+
+        # 返回 PDF 流
+        return fastapi.responses.StreamingResponse(
+            pdf_buffer,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_pdf_filename}",
+                "X-Original-Filename": encoded_original_filename,
+                "X-Converted-Filename": encoded_pdf_filename,
+                "X-Pdf-Size": str(pdf_size),
+            }
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"转换失败: {str(e)}")

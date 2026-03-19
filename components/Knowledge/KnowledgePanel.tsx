@@ -20,6 +20,8 @@ import {
   DropdownMenu,
   DropdownItem,
   DropdownSection,
+  Progress,
+  Checkbox,
 } from '@heroui/react'
 import {
   getKnowledgeItems,
@@ -32,11 +34,68 @@ import {
   getSettings,
   getSelectedSmallModel,
   getSelectedLargeModel,
+  getEmbeddingModelConfig,
 } from '@/lib/storage'
 import { storeFile } from '@/lib/localFiles'
-import { deleteKnowledgeItemCache } from '@/lib/pdfCache'
-import { deleteKnowledgeVectors } from '@/lib/rag'
+import { deleteKnowledgeItemCache, getPDFDocumentByKnowledgeId, getPDFPagesByDocumentId, savePDFDocument, savePDFPages, updatePDFDocument } from '@/lib/pdfCache'
+import { deleteKnowledgeVectors, indexKnowledgeForRAG } from '@/lib/rag'
+import { normalizeSuryaParseResult } from '@/lib/suryaParser'
 import type { KnowledgeItem, ZoteroConfig } from '@/lib/types'
+
+type BatchParseStatus = 'queued' | 'processing' | 'completed' | 'failed'
+
+type BatchParseTask = {
+  status: BatchParseStatus
+  stage?: string
+  error?: string
+  updatedAt: string
+}
+
+type SuryaSubmitResponse = {
+  success?: boolean
+  job_id?: string
+  status?: 'queued' | 'processing' | 'completed' | 'failed'
+  stage?: string
+  error?: string
+  detail?: string
+}
+
+type SuryaStatusResponse = {
+  success?: boolean
+  job_id?: string
+  status?: 'queued' | 'processing' | 'completed' | 'failed'
+  stage?: string
+  error?: string
+}
+
+type SuryaResultResponse = {
+  success?: boolean
+  status?: 'queued' | 'processing' | 'completed' | 'failed'
+  stage?: string
+  parsed?: Parameters<typeof normalizeSuryaParseResult>[1]
+  metadata?: {
+    success?: boolean
+    metadata?: {
+      title?: string
+      authors?: string[]
+      abstract?: string
+      year?: string
+      journal?: string
+      keywords?: string[]
+      references?: string[]
+    }
+  }
+  error?: string
+  detail?: string
+}
+
+const SURYA_BATCH_POLL_INTERVAL_MS = 1500
+const SURYA_BATCH_TIMEOUT_MS = 15 * 60 * 1000
+
+function dedupeStrings(values?: string[]) {
+  if (!values || values.length === 0) return []
+  return Array.from(new Set(values.map(v => v.trim()).filter(Boolean)))
+}
 
 function getSourceLabel(item: KnowledgeItem) {
   if (item.sourceType === 'zotero') {
@@ -68,6 +127,18 @@ export function KnowledgePanel() {
   const { isOpen: isDeleteConfirmOpen, onOpen: onDeleteConfirmOpen, onClose: onDeleteConfirmClose } = useDisclosure()
   const [deleting, setDeleting] = useState(false)
   const [itemToDelete, setItemToDelete] = useState<KnowledgeItem | null>(null)
+  const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [batchParsing, setBatchParsing] = useState(false)
+  const [batchDeleting, setBatchDeleting] = useState(false)
+  const [batchParseTasks, setBatchParseTasks] = useState<Record<string, BatchParseTask>>({})
+  const [batchQueueProgress, setBatchQueueProgress] = useState({
+    total: 0,
+    completed: 0,
+    success: 0,
+    failed: 0,
+    currentTitle: '',
+  })
 
   const getProxiedPdfUrl = useCallback((item: KnowledgeItem, options?: { download?: boolean }) => {
     const remoteUrl = item.attachmentUrl || (item.sourceType === 'url' ? item.url : undefined)
@@ -125,6 +196,432 @@ export function KnowledgePanel() {
       addToast({ title: '下载失败', color: 'danger' })
     }
   }, [getProxiedPdfUrl])
+
+  const updateBatchTask = useCallback((id: string, task: Omit<BatchParseTask, 'updatedAt'>) => {
+    setBatchParseTasks(prev => ({
+      ...prev,
+      [id]: {
+        ...task,
+        updatedAt: new Date().toISOString(),
+      },
+    }))
+  }, [])
+
+  const resolvePdfSource = useCallback(async (item: KnowledgeItem) => {
+    const guessFileName = () => {
+      const raw = item.attachmentFileName || item.fileName || item.title || 'document'
+      const normalized = raw.trim() || 'document'
+      return normalized.toLowerCase().endsWith('.pdf') ? normalized : `${normalized}.pdf`
+    }
+
+    if (item.sourceType === 'upload' && item.sourceId) {
+      const { getStoredFile } = await import('@/lib/localFiles')
+      const fileRecord = await getStoredFile(item.sourceId)
+      if (!fileRecord?.blob) return null
+      return { blob: fileRecord.blob, fileName: fileRecord.name || guessFileName() }
+    }
+
+    const proxyUrl = getProxiedPdfUrl(item)
+    if (!proxyUrl) return null
+
+    const res = await fetch(proxyUrl, { cache: 'no-store' })
+    if (!res.ok) {
+      const payload = await res.json().catch(() => null)
+      throw new Error(payload?.error || '获取 PDF 失败')
+    }
+
+    return { blob: await res.blob(), fileName: guessFileName() }
+  }, [getProxiedPdfUrl])
+
+  const parseWithSuryaJob = useCallback(async (params: {
+    documentId: string
+    fileBlob: Blob
+    fileName: string
+    includeMetadata: boolean
+    modelConfig?: ReturnType<typeof getSelectedSmallModel>
+    onStatus: (status: BatchParseStatus, stage?: string, error?: string) => void
+  }) => {
+    const form = new FormData()
+    const file = params.fileBlob instanceof File
+      ? params.fileBlob
+      : new File([params.fileBlob], params.fileName, { type: 'application/pdf' })
+
+    form.set('file', file)
+    form.set('outputName', params.documentId)
+    form.set('keepOutputs', 'false')
+
+    const submitRes = await fetch('/api/pdf/surya', {
+      method: 'POST',
+      body: form,
+    })
+    const submitPayload = await submitRes.json().catch(() => null) as SuryaSubmitResponse | null
+    if (!submitRes.ok || !submitPayload?.job_id) {
+      throw new Error(submitPayload?.error || submitPayload?.detail || '提交解析任务失败')
+    }
+
+    params.onStatus('processing', submitPayload.stage)
+    const jobId = submitPayload.job_id
+    const start = Date.now()
+
+    while (true) {
+      const statusRes = await fetch(`/api/pdf/surya?jobId=${encodeURIComponent(jobId)}`, {
+        cache: 'no-store',
+      })
+      const statusPayload = await statusRes.json().catch(() => null) as SuryaStatusResponse | null
+      if (!statusRes.ok || !statusPayload?.status) {
+        throw new Error(statusPayload?.error || '解析状态轮询失败')
+      }
+
+      params.onStatus(
+        statusPayload.status,
+        statusPayload.stage,
+        statusPayload.status === 'failed' ? statusPayload.error : undefined,
+      )
+
+      if (statusPayload.status === 'completed') {
+        break
+      }
+      if (statusPayload.status === 'failed') {
+        throw new Error(statusPayload.error || '解析失败')
+      }
+      if (Date.now() - start > SURYA_BATCH_TIMEOUT_MS) {
+        throw new Error('解析超时')
+      }
+
+      await new Promise(resolve => setTimeout(resolve, SURYA_BATCH_POLL_INTERVAL_MS))
+    }
+
+    const resultRes = await fetch('/api/pdf/surya', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jobId,
+        includeMetadata: params.includeMetadata,
+        modelConfig: params.modelConfig,
+        fileName: params.fileName,
+      }),
+    })
+    const resultPayload = await resultRes.json().catch(() => null) as SuryaResultResponse | null
+    if (!resultRes.ok) {
+      throw new Error(resultPayload?.error || resultPayload?.detail || '获取解析结果失败')
+    }
+    if (resultPayload?.status === 'failed') {
+      throw new Error(resultPayload.error || '解析失败')
+    }
+    if (!resultPayload?.parsed) {
+      throw new Error('未获取到解析结果')
+    }
+
+    return normalizeSuryaParseResult(
+      params.documentId,
+      resultPayload.parsed,
+      resultPayload.metadata?.metadata,
+    )
+  }, [])
+
+  const parseKnowledgeItem = useCallback(async (item: KnowledgeItem) => {
+    const existingDoc = await getPDFDocumentByKnowledgeId(item.id)
+    const existingPages = await getPDFPagesByDocumentId(item.id)
+    const hasCompletedCache = existingDoc?.parser === 'surya' && existingDoc?.parseStatus === 'completed' && existingPages.length > 0
+    if (hasCompletedCache) {
+      updateBatchTask(item.id, {
+        status: 'completed',
+        stage: '已缓存',
+      })
+      return
+    }
+
+    const resolved = await resolvePdfSource(item)
+    if (!resolved?.blob) {
+      throw new Error('无法获取 PDF 文件')
+    }
+
+    const settings = getSettings()
+    const metadataModelConfig = getSelectedSmallModel(settings)
+    const includeMetadata = Boolean(metadataModelConfig?.apiKey && metadataModelConfig?.modelName)
+    const fallbackMetadata = {
+      title: item.title,
+      authors: item.authors || [],
+      abstract: item.abstract || '',
+      year: item.year || '',
+      journal: item.journal || '',
+      keywords: [],
+      references: [],
+    }
+
+    const now = new Date().toISOString()
+    if (existingDoc) {
+      await updatePDFDocument(item.id, {
+        parser: 'surya',
+        parseStatus: 'processing',
+        parseError: '',
+      })
+    } else {
+      await savePDFDocument({
+        id: item.id,
+        knowledgeItemId: item.id,
+        fileName: resolved.fileName,
+        pageCount: 0,
+        metadata: fallbackMetadata,
+        parser: 'surya',
+        parseStatus: 'processing',
+        parsedAt: now,
+        updatedAt: now,
+      })
+    }
+
+    const parseResult = await parseWithSuryaJob({
+      documentId: item.id,
+      fileBlob: resolved.blob,
+      fileName: resolved.fileName,
+      includeMetadata,
+      modelConfig: metadataModelConfig,
+      onStatus: (status, stage, error) => {
+        updateBatchTask(item.id, {
+          status,
+          stage,
+          error,
+        })
+      },
+    })
+
+    const mergedMetadata = {
+      title: parseResult.metadata.title || item.title,
+      authors: parseResult.metadata.authors?.length ? parseResult.metadata.authors : (item.authors || []),
+      abstract: parseResult.metadata.abstract || item.abstract || '',
+      year: parseResult.metadata.year || item.year || '',
+      journal: parseResult.metadata.journal || item.journal || '',
+      keywords: dedupeStrings(parseResult.metadata.keywords),
+      references: dedupeStrings(parseResult.metadata.references),
+    }
+
+    const parsedAt = new Date().toISOString()
+    await savePDFDocument({
+      id: item.id,
+      knowledgeItemId: item.id,
+      fileName: resolved.fileName,
+      pageCount: parseResult.pages.length,
+      metadata: mergedMetadata,
+      parser: 'surya',
+      parseStatus: 'completed',
+      parseError: '',
+      fullText: parseResult.fullText,
+      structureCounts: parseResult.structureCounts,
+      parsedAt,
+      updatedAt: parsedAt,
+    })
+
+    await savePDFPages(parseResult.pages)
+    updateKnowledgeItem(item.id, {
+      hasImmersiveCache: true,
+      immersiveCacheAt: parsedAt,
+      extractedMetadata: mergedMetadata,
+      ragStatus: 'indexing',
+      ragError: '',
+    })
+
+    try {
+      const embeddingConfig = getEmbeddingModelConfig(settings)
+      const allBlocks = parseResult.pages.flatMap(page => page.blocks)
+      const ragResult = await indexKnowledgeForRAG({
+        documentId: item.id,
+        blocks: allBlocks,
+        embeddingConfig,
+      })
+
+      if (ragResult.success) {
+        updateKnowledgeItem(item.id, {
+          ragStatus: 'indexed',
+          ragIndexedAt: new Date().toISOString(),
+          ragChunks: ragResult.count,
+          ragStoredLocally: ragResult.storedLocally,
+          ragError: '',
+          ragDocumentUpdatedAt: parsedAt,
+        })
+      } else {
+        updateKnowledgeItem(item.id, {
+          ragStatus: 'failed',
+          ragError: ragResult.error || 'RAG 建库失败',
+        })
+      }
+    } catch (error) {
+      updateKnowledgeItem(item.id, {
+        ragStatus: 'failed',
+        ragError: error instanceof Error ? error.message : 'RAG 建库失败',
+      })
+    }
+  }, [parseWithSuryaJob, resolvePdfSource, updateBatchTask])
+
+  const handleBatchParse = useCallback(async () => {
+    const selectedItems = items.filter(item => selectedIds.includes(item.id))
+    if (selectedItems.length === 0) {
+      addToast({ title: '请先选择文献', color: 'warning' })
+      return
+    }
+
+    if (batchParsing || batchDeleting) return
+
+    setBatchParsing(true)
+    setBatchQueueProgress({
+      total: selectedItems.length,
+      completed: 0,
+      success: 0,
+      failed: 0,
+      currentTitle: '',
+    })
+
+    const taskInit: Record<string, BatchParseTask> = {}
+    selectedItems.forEach(item => {
+      taskInit[item.id] = {
+        status: 'queued',
+        stage: '排队中',
+        updatedAt: new Date().toISOString(),
+      }
+    })
+    setBatchParseTasks(taskInit)
+
+    let completed = 0
+    let success = 0
+    let failed = 0
+
+    for (const item of selectedItems) {
+      setBatchQueueProgress(prev => ({ ...prev, currentTitle: item.title }))
+      updateBatchTask(item.id, {
+        status: 'processing',
+        stage: '准备中',
+      })
+
+      try {
+        await parseKnowledgeItem(item)
+        success += 1
+        updateBatchTask(item.id, {
+          status: 'completed',
+          stage: '解析完成',
+        })
+      } catch (error) {
+        failed += 1
+        updateBatchTask(item.id, {
+          status: 'failed',
+          stage: '失败',
+          error: error instanceof Error ? error.message : '未知错误',
+        })
+
+        await updatePDFDocument(item.id, {
+          parser: 'surya',
+          parseStatus: 'failed',
+          parseError: error instanceof Error ? error.message : '解析失败',
+        }).catch(async () => {
+          const now = new Date().toISOString()
+          await savePDFDocument({
+            id: item.id,
+            knowledgeItemId: item.id,
+            fileName: item.fileName || `${item.title || 'document'}.pdf`,
+            pageCount: 0,
+            metadata: {
+              title: item.title,
+              authors: item.authors || [],
+              abstract: item.abstract || '',
+              year: item.year || '',
+              journal: item.journal || '',
+              keywords: [],
+              references: [],
+            },
+            parser: 'surya',
+            parseStatus: 'failed',
+            parseError: error instanceof Error ? error.message : '解析失败',
+            parsedAt: now,
+            updatedAt: now,
+          })
+        })
+      } finally {
+        completed += 1
+        setBatchQueueProgress(prev => ({
+          ...prev,
+          completed,
+          success,
+          failed,
+        }))
+        setItems(getKnowledgeItems())
+      }
+    }
+
+    setBatchParsing(false)
+    addToast({
+      title: `批量解析完成（成功 ${success}，失败 ${failed}）`,
+      color: failed > 0 ? 'warning' : 'success',
+    })
+  }, [batchDeleting, batchParsing, items, parseKnowledgeItem, selectedIds, updateBatchTask])
+
+  const handleBatchDelete = useCallback(async () => {
+    const selectedItems = items.filter(item => selectedIds.includes(item.id))
+    if (selectedItems.length === 0) {
+      addToast({ title: '请先选择文献', color: 'warning' })
+      return
+    }
+    if (batchDeleting || batchParsing) return
+
+    setBatchDeleting(true)
+    let success = 0
+    let failed = 0
+
+    for (const item of selectedItems) {
+      try {
+        await deleteKnowledgeItemCache(item.id)
+        await deleteKnowledgeVectors(item.id)
+        deleteKnowledgeItem(item.id)
+        setBatchParseTasks(prev => {
+          const next = { ...prev }
+          delete next[item.id]
+          return next
+        })
+        success += 1
+      } catch {
+        failed += 1
+      }
+    }
+
+    const latestItems = getKnowledgeItems()
+    setItems(latestItems)
+    setSelectedIds(prev => prev.filter(id => latestItems.some(item => item.id === id)))
+
+    if (selectedItem && selectedItems.some(item => item.id === selectedItem.id)) {
+      setSelectedItem(null)
+      onDetailClose()
+    }
+
+    setBatchDeleting(false)
+    addToast({
+      title: `批量删除完成（成功 ${success}，失败 ${failed}）`,
+      color: failed > 0 ? 'warning' : 'success',
+    })
+  }, [batchDeleting, batchParsing, items, onDetailClose, selectedIds, selectedItem])
+
+  const toggleSelectOne = useCallback((id: string, checked: boolean) => {
+    setSelectedIds(prev => {
+      if (checked) {
+        if (prev.includes(id)) return prev
+        return [...prev, id]
+      }
+      return prev.filter(itemId => itemId !== id)
+    })
+  }, [])
+
+  const toggleSelectAll = useCallback(() => {
+    const selectableItems = items.filter(item =>
+      item.sourceType === 'upload' || item.hasAttachment || Boolean(item.attachmentUrl) || (item.sourceType === 'url' && Boolean(item.url))
+    )
+    const selectableIds = selectableItems.map(item => item.id)
+    // 如果已选数量等于可选中数量，则取消全选
+    if (selectedIds.length === selectableIds.length && selectableIds.every(id => selectedIds.includes(id))) {
+      setSelectedIds([])
+      return
+    }
+    setSelectedIds(selectableIds)
+  }, [items, selectedIds])
+
+  useEffect(() => {
+    setSelectedIds(prev => prev.filter(id => items.some(item => item.id === id)))
+  }, [items])
 
   // 加载知识库数据
   useEffect(() => {
@@ -479,6 +976,24 @@ export function KnowledgePanel() {
               <ImportIcon /> 导入
             </Button>
           </Tooltip>
+          <Tooltip content={multiSelectMode ? '退出多选模式' : '进入多选模式'}>
+            <Button
+              size="sm"
+              variant={multiSelectMode ? 'solid' : 'flat'}
+              color={multiSelectMode ? 'secondary' : 'default'}
+              onPress={() => {
+                if (batchParsing || batchDeleting) return
+                setMultiSelectMode(prev => {
+                  const next = !prev
+                  if (!next) setSelectedIds([])
+                  return next
+                })
+              }}
+              isDisabled={batchParsing || batchDeleting}
+            >
+              <CheckSquareIcon /> 多选
+            </Button>
+          </Tooltip>
           <Tooltip content="查看知识图谱">
             <Button
               size="sm"
@@ -508,6 +1023,89 @@ export function KnowledgePanel() {
             </Button>
           )}
         </div>
+
+        <div
+          style={{
+            marginTop: 8,
+            maxHeight: multiSelectMode ? 56 : 0,
+            opacity: multiSelectMode ? 1 : 0,
+            transform: multiSelectMode ? 'translateY(0)' : 'translateY(-8px)',
+            overflow: 'hidden',
+            transition: 'max-height 0.22s ease, opacity 0.2s ease, transform 0.22s ease',
+            pointerEvents: multiSelectMode ? 'auto' : 'none',
+          }}
+        >
+          <div
+            style={{
+              border: '1px solid var(--border-color)',
+              background: 'var(--bg-secondary)',
+              borderRadius: 8,
+              padding: '8px 10px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+            }}
+          >
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              已选 {selectedIds.length} / {items.length}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Button
+                size="sm"
+                variant="flat"
+                onPress={toggleSelectAll}
+                isDisabled={items.length === 0 || batchParsing || batchDeleting}
+              >
+                {selectedIds.length === items.length ? '取消全选' : '全选'}
+              </Button>
+              <Button
+                size="sm"
+                color="danger"
+                variant="flat"
+                onPress={handleBatchDelete}
+                isLoading={batchDeleting}
+                isDisabled={selectedIds.length === 0 || batchParsing}
+              >
+                <TrashIconSmall /> 删除
+              </Button>
+              <Button
+                size="sm"
+                color="success"
+                variant="flat"
+                onPress={handleBatchParse}
+                isLoading={batchParsing}
+                isDisabled={selectedIds.length === 0 || batchDeleting}
+              >
+                <BookOpenIcon /> 批量解析
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        {(batchParsing || batchQueueProgress.completed > 0) && batchQueueProgress.total > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 11, color: 'var(--text-muted)' }}>
+              <span>
+                批量解析进度 {batchQueueProgress.completed}/{batchQueueProgress.total}
+              </span>
+              <span>
+                成功 {batchQueueProgress.success} · 失败 {batchQueueProgress.failed}
+              </span>
+            </div>
+            <Progress
+              size="sm"
+              value={batchQueueProgress.total > 0 ? (batchQueueProgress.completed / batchQueueProgress.total) * 100 : 0}
+              color={batchQueueProgress.failed > 0 ? 'warning' : 'success'}
+              aria-label="批量解析进度"
+            />
+            {batchQueueProgress.currentTitle && (
+              <p style={{ marginTop: 6, marginBottom: 0, fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                当前：{batchQueueProgress.currentTitle}
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       {/* 文献列表 */}
@@ -525,16 +1123,28 @@ export function KnowledgePanel() {
           </div>
         )}
 
-        {items.map(item => (
+        {items.map(item => {
+          const hasPdf = item.sourceType === 'upload' || item.hasAttachment || Boolean(item.attachmentUrl) || (item.sourceType === 'url' && Boolean(item.url))
+          return (
           <div
             key={item.id}
-            onClick={() => handleItemClick(item)}
+            onClick={() => {
+              if (multiSelectMode) {
+                if (hasPdf) {
+                  toggleSelectOne(item.id, !selectedIds.includes(item.id))
+                }
+                return
+              }
+              handleItemClick(item)
+            }}
             style={{
               padding: '10px 12px',
               borderBottom: '1px solid var(--border-color)',
-              cursor: 'pointer',
+              cursor: multiSelectMode && !hasPdf ? 'not-allowed' : 'pointer',
               transition: 'background 0.15s',
               position: 'relative',
+              background: multiSelectMode && selectedIds.includes(item.id) ? 'var(--bg-tertiary)' : undefined,
+              opacity: multiSelectMode && !hasPdf ? 0.5 : 1,
             }}
             onMouseEnter={(e) => {
               (e.currentTarget as HTMLElement).style.background = 'var(--bg-tertiary)'
@@ -548,6 +1158,20 @@ export function KnowledgePanel() {
             }}
           >
             <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+              {multiSelectMode && (
+                <div
+                  style={{ marginTop: 1 }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Checkbox
+                    size="sm"
+                    isSelected={selectedIds.includes(item.id)}
+                    isDisabled={!hasPdf}
+                    onValueChange={(checked) => toggleSelectOne(item.id, checked)}
+                    aria-label={`选择文献 ${item.title}`}
+                  />
+                </div>
+              )}
               <div style={{ flexShrink: 0, marginTop: 2 }}>
                 <FileIcon type={item.sourceType} hasAttachment={item.hasAttachment} />
               </div>
@@ -622,6 +1246,36 @@ export function KnowledgePanel() {
                       RAG {item.ragChunks ? `· ${item.ragChunks}` : ''}
                     </span>
                   )}
+                  {batchParseTasks[item.id] && (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: '1px 6px',
+                        borderRadius: 3,
+                        background:
+                          batchParseTasks[item.id].status === 'completed'
+                            ? 'rgba(16,185,129,0.12)'
+                            : batchParseTasks[item.id].status === 'failed'
+                              ? 'rgba(239,68,68,0.12)'
+                              : 'rgba(245,158,11,0.12)',
+                        color:
+                          batchParseTasks[item.id].status === 'completed'
+                            ? '#10b981'
+                            : batchParseTasks[item.id].status === 'failed'
+                              ? '#ef4444'
+                              : '#f59e0b',
+                      }}
+                      title={batchParseTasks[item.id].error || batchParseTasks[item.id].stage}
+                    >
+                      {batchParseTasks[item.id].status === 'processing'
+                        ? `解析中${batchParseTasks[item.id].stage ? ` · ${batchParseTasks[item.id].stage}` : ''}`
+                        : batchParseTasks[item.id].status === 'queued'
+                          ? '排队中'
+                          : batchParseTasks[item.id].status === 'failed'
+                            ? '解析失败'
+                            : '解析完成'}
+                    </span>
+                  )}
                 </div>
               </div>
               
@@ -647,6 +1301,7 @@ export function KnowledgePanel() {
                       flexShrink: 0,
                     }}
                     title="更多操作"
+                    disabled={multiSelectMode}
                   >
                     <MoreIcon />
                   </button>
@@ -716,7 +1371,8 @@ export function KnowledgePanel() {
               <TrashIconSmall />
             </button> */}
           </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* 旋转动画样式 */}
@@ -1349,6 +2005,15 @@ function DownloadIcon() {
       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
       <polyline points="7,10 12,15 17,10" />
       <line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  )
+}
+
+function CheckSquareIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+      <polyline points="9,12 11.5,14.5 15.5,9.5" />
     </svg>
   )
 }

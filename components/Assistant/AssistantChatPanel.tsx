@@ -1442,6 +1442,8 @@ export function AssistantChatPanel() {
     const models: { id: string; name: string; config: ModelConfig }[] = []
     for (const provider of settings.providers) {
       for (const model of provider.models) {
+        // 过滤掉禁用的模型 (enabled 默认为 true)
+        if (model.enabled === false) continue
         models.push({
           id: model.id,
           name: `${provider.name} - ${model.name}`,
@@ -2657,7 +2659,7 @@ export function AssistantChatPanel() {
                 value={inputValue}
                 onChange={handleInputChange}
                 onKeyDown={handleKeyDown}
-                placeholder={selectedAgent ? '继续输入消息，按 / 切换智能体或引用来源…' : '输入消息，按 / 使用智能体、知识库、资产库…'}
+                placeholder={selectedAgent ? '继续输入消息，按 / 切换智能体或用@引用来源…' : '输入消息，按 / 使用智能体、知识库、资产库…'}
                 disabled={isLoading}
                 style={{
                   width: '100%',
@@ -2752,7 +2754,7 @@ export function AssistantChatPanel() {
                   }}
                   title="停止生成"
                 >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#ef4444' }}>
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#ef4444' }}>
                     <rect x="6" y="6" width="12" height="12" rx="2" />
                   </svg>
                   {/* 旋转边框层 */}

@@ -213,11 +213,23 @@ export async function searchMyKnowledgeBase(
   const fulltextHits = (await Promise.all(topKeywordItems.map(item => searchFullText(item, query, embeddingConfig, rerankConfig))))
     .flat()
 
-  const merged = [...overviewHits, ...fulltextHits]
-    .sort((left, right) => right.score - left.score)
-    .slice(0, 8)
+  // 去重逻辑：同一篇文章只保留得分最高的一条结果
+  const seenKnowledgeIds = new Set<string>()
+  const deduped: CandidateHit[] = []
 
-  return merged.map((hit, index) => ({
+  const sorted = [...overviewHits, ...fulltextHits].sort((left, right) => right.score - left.score)
+
+  for (const hit of sorted) {
+    // 如果这篇文章还没有结果，添加它
+    if (!seenKnowledgeIds.has(hit.knowledgeItemId)) {
+      seenKnowledgeIds.add(hit.knowledgeItemId)
+      deduped.push(hit)
+    }
+    // 已经有这篇文章的结果了，跳过（保留得分更高的）
+    if (deduped.length >= 8) break
+  }
+
+  return deduped.map((hit, index) => ({
     ...hit,
     id: `K${index + 1}`,
   }))

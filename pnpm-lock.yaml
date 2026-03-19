@@ -11,6 +11,33 @@ importers:
       '@ai-sdk/openai':
         specifier: ^3.0.41
         version: 3.0.41(zod@4.3.6)
+      '@antv/x6':
+        specifier: ^2.19.2
+        version: 2.19.2
+      '@antv/x6-plugin-clipboard':
+        specifier: ^2.1.6
+        version: 2.1.6(@antv/x6@2.19.2)
+      '@antv/x6-plugin-export':
+        specifier: ^2.1.6
+        version: 2.1.6(@antv/x6@2.19.2)
+      '@antv/x6-plugin-history':
+        specifier: ^2.2.4
+        version: 2.2.4(@antv/x6@2.19.2)
+      '@antv/x6-plugin-keyboard':
+        specifier: ^2.2.3
+        version: 2.2.3(@antv/x6@2.19.2)
+      '@antv/x6-plugin-selection':
+        specifier: ^2.2.2
+        version: 2.2.2(@antv/x6@2.19.2)
+      '@antv/x6-plugin-snapline':
+        specifier: ^2.1.7
+        version: 2.1.7(@antv/x6@2.19.2)
+      '@antv/x6-plugin-stencil':
+        specifier: ^2.1.5
+        version: 2.1.5(@antv/x6@2.19.2)
+      '@antv/x6-react-shape':
+        specifier: ^2.2.3
+        version: 2.2.3(@antv/x6@2.19.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
       '@blocknote/core':
         specifier: ^0.47.1
         version: 0.47.1(@types/hast@3.0.4)
@@ -133,6 +160,62 @@ packages:
   '@alloc/quick-lru@5.2.0':
     resolution: {integrity: sha512-UrcABB+4bUrFABwbluTIBErXwvbsU/V7TZWfmbgJfbkwiBuziS9gxdODUyuiecfdGQ85jglMW6juS3+z5TsKLw==}
     engines: {node: '>=10'}
+
+  '@antv/x6-common@2.0.17':
+    resolution: {integrity: sha512-37g7vmRkNdYzZPdwjaMSZEGv/MMH0S4r70/Jwoab1mioycmuIBN73iyziX8m56BvJSDucZ3J/6DU07otWqzS6A==}
+
+  '@antv/x6-geometry@2.0.5':
+    resolution: {integrity: sha512-MId6riEQkxphBpVeTcL4ZNXL4lScyvDEPLyIafvWMcWNTGK0jgkK7N20XSzqt8ltJb0mGUso5s56mrk8ysHu2A==}
+
+  '@antv/x6-plugin-clipboard@2.1.6':
+    resolution: {integrity: sha512-roZPLnZx6PK8MBvee0QMo90fz/TXeF0WNe4EGin2NBq5M1I5XTWrYvA6N2XVIiWAAI67gjQeEE8TpkL7f8QdqA==}
+    peerDependencies:
+      '@antv/x6': ^2.x
+
+  '@antv/x6-plugin-dnd@2.1.1':
+    resolution: {integrity: sha512-v0szzik1RkadPDn4Qi5mOSaB2AeI78D40/YuCYbPVzplG+HydGsHwO3MLTgJPQ+R5n0eM0W5F850p1VfTOHR7g==}
+    peerDependencies:
+      '@antv/x6': ^2.x
+
+  '@antv/x6-plugin-export@2.1.6':
+    resolution: {integrity: sha512-m0ukMmZhrFE5n7uCR43DVQBdiUfpjGN+vm1mc+6RTZdHK8pa6Mxr0RZztaxPy34YA4tli+bGY3ePslsNPfh6PQ==}
+    peerDependencies:
+      '@antv/x6': ^2.x
+
+  '@antv/x6-plugin-history@2.2.4':
+    resolution: {integrity: sha512-9gHHvEW4Fla+1hxUV49zNgJyIMoV9CjVM52MrFgAJcvyRn1Kvxz4MfxiKlG+DEZUs+/zvfjl9pS6gJOd8laRkg==}
+    peerDependencies:
+      '@antv/x6': ^2.x
+
+  '@antv/x6-plugin-keyboard@2.2.3':
+    resolution: {integrity: sha512-pnCIC+mDyKKfkcDyLePfGxKVIqXBcldTgannITkHC1kc0IafRS1GMvzpvuDGrM5haRYd6Nwz8kjkJyHkJE4GPA==}
+    peerDependencies:
+      '@antv/x6': ^2.x
+
+  '@antv/x6-plugin-selection@2.2.2':
+    resolution: {integrity: sha512-s2gtR9Onlhr7HOHqyqg0d+4sG76JCcQEbvrZZ64XmSChlvieIPlC3YtH4dg1KMNhYIuBmBmpSum6S0eVTEiPQw==}
+    peerDependencies:
+      '@antv/x6': ^2.x
+
+  '@antv/x6-plugin-snapline@2.1.7':
+    resolution: {integrity: sha512-AsysoCb9vES0U2USNhEpYuO/W8I0aYfkhlbee5Kt4NYiMfQfZKQyqW/YjDVaS2pm38C1NKu1LdPVk/BBr4CasA==}
+    peerDependencies:
+      '@antv/x6': ^2.x
+
+  '@antv/x6-plugin-stencil@2.1.5':
+    resolution: {integrity: sha512-q7wx7XRMFkUKPv3WsHkvZda6O1GW+6q6H/+c1lcrwlQoEKOFv1Djc4Hu2J4SGhV2z98P2JLfVJiT5m7YoOoCHw==}
+    peerDependencies:
+      '@antv/x6': ^2.x
+
+  '@antv/x6-react-shape@2.2.3':
+    resolution: {integrity: sha512-42PGxk3XLnx9bsHQiRPauai5UQCrsh0MbWI3MyHRpjQaC30FK1rqyjH/EJ8qH0p6/cAndszZzCaiPqBbs3FqLQ==}
+    peerDependencies:
+      '@antv/x6': ^2.x
+      react: '>=18.0.0'
+      react-dom: '>= 18.0.0'
+
+  '@antv/x6@2.19.2':
+    resolution: {integrity: sha512-lr9sUAlrR7eSVANru8kUNZUqCRl7eOCgb36M61FMDonUYREwkHpRN+0zq+1egSSOdz3HHSDBjs7UMtGH1ZEg2w==}
 
   '@babel/runtime@7.28.6':
     resolution: {integrity: sha512-05WQkdpL9COIMz4LjTxGpPNCdlpyimKppYNoJ5Di5EUObifl8t4tuLuUBBZEpoLYOmfvIWrsp9fCl0HoPRVTdA==}
@@ -2282,6 +2365,9 @@ packages:
   linkifyjs@4.3.2:
     resolution: {integrity: sha512-NT1CJtq3hHIreOianA8aSXn6Cw0JzYOuDQbOrSPe7gqFnCpKP++MQe3ODgO3oh2GJFORkAAdqredOa60z63GbA==}
 
+  lodash-es@4.17.23:
+    resolution: {integrity: sha512-kVI48u3PZr38HdYz98UmfPnXl2DXrpdctLrFLCd3kOx1xUkOmpFPx7gCWWM5MPkL/fD8zb+Ph0QzjGFs4+hHWg==}
+
   lodash.isequal@4.5.0:
     resolution: {integrity: sha512-pDo3lu8Jhfjqls6GkMgpahsF9kCyayhgykjyLMNFTKWrpVdAQtYyB4muAMWozBB4ig/dtWAmsMxLEI8wuz+DYQ==}
     deprecated: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
@@ -2442,6 +2528,9 @@ packages:
 
   motion-utils@12.29.2:
     resolution: {integrity: sha512-G3kc34H2cX2gI63RqU+cZq+zWRRPSsNIOjpdl9TN4AQwC4sgwYPl/Q/Obf/d53nOm569T0fYK+tcoSV50BWx8A==}
+
+  mousetrap@1.6.5:
+    resolution: {integrity: sha512-QNo4kEepaIBwiT8CDhP98umTetp+JNfQYBWvC1pc6/OAibuXtRcxZ58Qz8skvEHYvURne/7R8T5VoOI7rDsEUA==}
 
   ms@2.1.3:
     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
@@ -2903,6 +2992,10 @@ packages:
   util-deprecate@1.0.2:
     resolution: {integrity: sha512-EPD5q1uXyFxJpCrLnCc1nHnq3gOa6DZBocAIiI2TaSCA7VCJ1UJDMagCzIkXNsUYfD1daK//LTEQ8xiIbrHtcw==}
 
+  utility-types@3.11.0:
+    resolution: {integrity: sha512-6Z7Ma2aVEWisaL6TvBCy7P8rm2LQoPv6dJ7ecIaIixHcwfbJ0x7mWdbcwlIM5IGQxPZSFYeqRCqlOOeKoJYMkw==}
+    engines: {node: '>= 4'}
+
   uuid@8.3.2:
     resolution: {integrity: sha512-+NYs2QeMWy+GWFOEm9xnn6HCDp0l7QBD7ml8zLUmJ+93Q5NF0NocErnwkTkXVFNiX3/fpC6afS8Dhb/gz7R7eg==}
     hasBin: true
@@ -3000,6 +3093,59 @@ snapshots:
       - zod
 
   '@alloc/quick-lru@5.2.0': {}
+
+  '@antv/x6-common@2.0.17':
+    dependencies:
+      lodash-es: 4.17.23
+      utility-types: 3.11.0
+
+  '@antv/x6-geometry@2.0.5': {}
+
+  '@antv/x6-plugin-clipboard@2.1.6(@antv/x6@2.19.2)':
+    dependencies:
+      '@antv/x6': 2.19.2
+
+  '@antv/x6-plugin-dnd@2.1.1(@antv/x6@2.19.2)':
+    dependencies:
+      '@antv/x6': 2.19.2
+
+  '@antv/x6-plugin-export@2.1.6(@antv/x6@2.19.2)':
+    dependencies:
+      '@antv/x6': 2.19.2
+
+  '@antv/x6-plugin-history@2.2.4(@antv/x6@2.19.2)':
+    dependencies:
+      '@antv/x6': 2.19.2
+
+  '@antv/x6-plugin-keyboard@2.2.3(@antv/x6@2.19.2)':
+    dependencies:
+      '@antv/x6': 2.19.2
+      mousetrap: 1.6.5
+
+  '@antv/x6-plugin-selection@2.2.2(@antv/x6@2.19.2)':
+    dependencies:
+      '@antv/x6': 2.19.2
+
+  '@antv/x6-plugin-snapline@2.1.7(@antv/x6@2.19.2)':
+    dependencies:
+      '@antv/x6': 2.19.2
+
+  '@antv/x6-plugin-stencil@2.1.5(@antv/x6@2.19.2)':
+    dependencies:
+      '@antv/x6': 2.19.2
+      '@antv/x6-plugin-dnd': 2.1.1(@antv/x6@2.19.2)
+
+  '@antv/x6-react-shape@2.2.3(@antv/x6@2.19.2)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)':
+    dependencies:
+      '@antv/x6': 2.19.2
+      react: 19.2.4
+      react-dom: 19.2.4(react@19.2.4)
+
+  '@antv/x6@2.19.2':
+    dependencies:
+      '@antv/x6-common': 2.0.17
+      '@antv/x6-geometry': 2.0.5
+      utility-types: 3.11.0
 
   '@babel/runtime@7.28.6': {}
 
@@ -6006,6 +6152,8 @@ snapshots:
 
   linkifyjs@4.3.2: {}
 
+  lodash-es@4.17.23: {}
+
   lodash.isequal@4.5.0: {}
 
   lodash.merge@4.6.2: {}
@@ -6382,6 +6530,8 @@ snapshots:
       motion-utils: 12.29.2
 
   motion-utils@12.29.2: {}
+
+  mousetrap@1.6.5: {}
 
   ms@2.1.3: {}
 
@@ -6908,6 +7058,8 @@ snapshots:
       react: 19.2.4
 
   util-deprecate@1.0.2: {}
+
+  utility-types@3.11.0: {}
 
   uuid@8.3.2: {}
 

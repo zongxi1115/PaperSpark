@@ -290,6 +290,10 @@ SURYA_OCR_SERVICE_URL=http://127.0.0.1:8765
 - 若无 GPU，会自动以 CPU 方式运行，但大文件处理耗时会明显增加。
 - 后续将考虑找到surya-ocr的更轻量级替代方案，以降低对 GPU 的依赖。
 
+## Have Problems or Want to Contribute?
+
+我们现在正处于建设初期，项目文档、环境构建步骤尚不健全，可能在体验过程中会或多或少遇到一些问题，如果你在部署或者在使用该应用时遇到了一些困难，或者你想要为我们的项目提供一些可实施的建议，欢迎提交Issue或者Pr，我们会尽快审阅答复，或者你可以加入我们的QQ群小窝里沟通：**1082678889**，我们会帮助你搭建环境提供一些帮助，同时后续我们会参考各方大佬的意见，尝试为应用开放marketplace，共同进行项目生态的建设！
+
 
 
 
@@ -408,6 +412,8 @@ pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.jso
 - [ ] 教程文档撰写
 - [ ] 有机会或许可以尝试弄一个marketplace?但是离这个生态好像有点远哈哈哈
 
+
+
 ## 致谢
 
 - [Next.js](https://nextjs.org/)
@@ -418,6 +424,7 @@ pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.jso
 - [Tailwind CSS](https://tailwindcss.com/)
 - [Zotero](https://www.zotero.org/)
 - [surya-ocr](https://github.com/surya-ocr/surya)
+- [linux.do 非常感谢社区的大力支持！](https://linux.do/)
 
 ## License
 

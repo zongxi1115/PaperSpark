@@ -176,6 +176,44 @@ function sanitizeInlineContent(content: unknown): unknown[] {
   })
 }
 
+function sanitizeTableContent(content: unknown): unknown {
+  if (!content || typeof content !== 'object') return content
+
+  const tableContent = content as {
+    type?: unknown
+    columnWidths?: unknown
+    rows?: unknown[]
+  }
+
+  if (tableContent.type !== 'tableContent' || !Array.isArray(tableContent.rows)) {
+    return content
+  }
+
+  return {
+    ...tableContent,
+    columnWidths: Array.isArray(tableContent.columnWidths) ? tableContent.columnWidths : [],
+    rows: tableContent.rows
+      .filter((row) => row && typeof row === 'object')
+      .map((row) => {
+        const tableRow = row as { cells?: unknown[] }
+        return {
+          ...tableRow,
+          cells: Array.isArray(tableRow.cells)
+            ? tableRow.cells
+                .filter((cell) => cell && typeof cell === 'object')
+                .map((cell) => {
+                  const tableCell = cell as Record<string, unknown>
+                  return {
+                    ...tableCell,
+                    content: sanitizeInlineContent(tableCell.content),
+                  }
+                })
+            : [],
+        }
+      }),
+  }
+}
+
 function sanitizeBlockTree(content: unknown): Block[] {
   if (!Array.isArray(content)) return []
 
@@ -189,7 +227,9 @@ function sanitizeBlockTree(content: unknown): Block[] {
     const sanitized: Record<string, unknown> = { ...block }
 
     if ('content' in sanitized) {
-      sanitized.content = sanitizeInlineContent(sanitized.content)
+      sanitized.content = Array.isArray(sanitized.content)
+        ? sanitizeInlineContent(sanitized.content)
+        : sanitizeTableContent(sanitized.content)
     }
 
     if (Array.isArray(sanitized.children)) {
@@ -208,6 +248,57 @@ function sanitizeBlockTree(content: unknown): Block[] {
 
 function getSafeCurrentDocumentBlocks(editor: ReturnType<typeof useCreateBlockNote>): Block[] {
   return (editor.document as Array<Block | null | undefined>).filter((b): b is Block => Boolean(b))
+}
+
+function getBlockDebugLabel(block: Block, index: number): string {
+  const text = getBlockPlainText(block).trim()
+  const preview = text ? `: ${text.slice(0, 30)}` : ''
+  return `#${index + 1} <${block.type}>${preview}`
+}
+
+function applyCompatibleBlockContent(
+  editor: ReturnType<typeof useCreateBlockNote>,
+  content: Block[],
+  warningTitle: string,
+): { appliedContent: Block[]; skippedCount: number } {
+  if (content.length === 0) {
+    return { appliedContent: [], skippedCount: 0 }
+  }
+
+  try {
+    editor.replaceBlocks(getSafeCurrentDocumentBlocks(editor), content)
+    return { appliedContent: content, skippedCount: 0 }
+  } catch (error) {
+    console.error('Block content batch load failed, attempting compatible fallback.', error)
+  }
+
+  const appliedContent: Block[] = []
+  let skippedCount = 0
+
+  content.forEach((block, index) => {
+    try {
+      if (appliedContent.length === 0) {
+        editor.replaceBlocks(getSafeCurrentDocumentBlocks(editor), [block])
+      } else {
+        const currentBlocks = getSafeCurrentDocumentBlocks(editor)
+        const anchorBlock = currentBlocks[currentBlocks.length - 1]
+        if (!anchorBlock) {
+          throw new Error('missing anchor block during fallback load')
+        }
+        editor.insertBlocks([block], anchorBlock, 'after')
+      }
+      appliedContent.push(block)
+    } catch (error) {
+      skippedCount += 1
+      console.warn(`Skipped incompatible block ${getBlockDebugLabel(block, index)}`, error, block)
+    }
+  })
+
+  if (skippedCount > 0) {
+    addToast({ title: `${warningTitle}，已跳过 ${skippedCount} 个不兼容块`, color: 'warning' })
+  }
+
+  return { appliedContent, skippedCount }
 }
 
 /**
@@ -582,16 +673,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       setLastDocId(docId)
       const safeLoadedContent = sanitizeBlockTree(loaded.content)
       if (safeLoadedContent.length > 0) {
-        try {
-          editor.replaceBlocks(getSafeCurrentDocumentBlocks(editor), safeLoadedContent)
-        } catch {
-          addToast({ title: '文档包含兼容性内容，已自动跳过异常块', color: 'warning' })
-        }
-        setBlocks(safeLoadedContent)
+        const { appliedContent } = applyCompatibleBlockContent(editor, safeLoadedContent, '文档包含兼容性内容')
+        setBlocks(appliedContent)
         
         // 提取已有的引用（从行内内容中）
         const extractedCitations = new Map<string, CitationData>()
-        const content = safeLoadedContent
+        const content = appliedContent
         
         // 遍历所有块的内容，查找引用
         content.forEach(block => {
@@ -749,14 +836,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     
     // 恢复版本内容
     const safeVersionContent = sanitizeBlockTree(version.content)
+    let restoredContent = safeVersionContent
     if (safeVersionContent.length > 0) {
-      try {
-        editor.replaceBlocks(getSafeCurrentDocumentBlocks(editor), safeVersionContent)
-      } catch {
-        addToast({ title: '历史版本包含兼容性内容，已自动跳过异常块', color: 'warning' })
-      }
+      const result = applyCompatibleBlockContent(editor, safeVersionContent, '历史版本包含兼容性内容')
+      restoredContent = result.appliedContent
     }
-    setBlocks(safeVersionContent)
+    setBlocks(restoredContent)
     
     // 恢复文章元数据
     if (version.articleTitle !== undefined) setArticleTitle(version.articleTitle)
@@ -768,7 +853,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     // 保存恢复后的文档
     const updated: AppDocument = {
       ...doc,
-      content: safeVersionContent,
+      content: restoredContent,
       articleTitle: version.articleTitle,
       articleAuthors: version.articleAuthors,
       articleAbstract: version.articleAbstract,

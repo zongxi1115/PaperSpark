@@ -303,81 +303,77 @@ function applyCompatibleBlockContent(
 
 /**
  * 获取光标位置周围的上下文文本
+ * 使用 BlockNote 内置 API 获取光标位置，避免 DOM 遍历
  * 返回 { context: 带有 | 标记光标位置的文本, cursorGlobalPos: 全局光标位置 }
  */
 function getContextAroundCursor(editor: ReturnType<typeof useCreateBlockNote>, windowSize: number = CONTEXT_WINDOW): { context: string; cursorGlobalPos: number } | null {
-  const selection = window.getSelection()
-  if (!selection || selection.rangeCount === 0) return null
+  // 用 BlockNote API 获取当前光标所在块
+  let cursorBlock: Block
+  let cursorLocalOffset = 0
+  try {
+    const pos = editor.getTextCursorPosition()
+    cursorBlock = pos.block
+    // 估算光标在块内文本中的偏移量：用 DOM 辅助
+    const selection = window.getSelection()
+    if (selection && selection.rangeCount > 0) {
+      const range = selection.getRangeAt(0)
+      const blockEl = document.querySelector(`[data-id="${cursorBlock.id}"]`)
+      if (blockEl) {
+        const r = document.createRange()
+        r.selectNodeContents(blockEl)
+        r.setEnd(range.startContainer, range.startOffset)
+        cursorLocalOffset = r.toString().length
+      }
+    }
+  } catch {
+    return null
+  }
 
-  const range = selection.getRangeAt(0)
-  
-  // 获取编辑器内所有文本块的纯文本
-  const allBlocks = editor.document as Block[]
-  const textBlocks = allBlocks.filter(b => b.type === 'paragraph' || b.type === 'heading')
-  
-  if (textBlocks.length === 0) return null
-  
-  // 构建完整文本和位置映射
+  // 遍历文档中所有块，为有文本内容的块构建位置映射
+  const allBlocks = (editor.document as Block[]).filter((b): b is Block => Boolean(b))
+  if (allBlocks.length === 0) return null
+
   let fullText = ''
-  const blockTextMap: { block: Block; start: number; end: number; text: string }[] = []
-  
-  for (const block of textBlocks) {
+  const blockMap: { block: Block; start: number; end: number; text: string }[] = []
+  let cursorBlockIdx = -1
+
+  for (let i = 0; i < allBlocks.length; i++) {
+    const block = allBlocks[i]
     const text = getBlockPlainText(block)
     const start = fullText.length
     fullText += text + '\n'
-    blockTextMap.push({ block, start, end: fullText.length, text })
-  }
-  
-  // 尝试找到光标在哪个 block 中
-  let cursorGlobalPos = -1
-  const editorElement = document.querySelector('.bn-editor')
-  
-  if (editorElement && range.startContainer) {
-    // 向上查找最近的 block 元素
-    let node: Node | null = range.startContainer
-    while (node && node !== editorElement) {
-      if (node instanceof Element && node.hasAttribute('data-node-type')) {
-        const blockId = node.getAttribute('data-id')
-        if (blockId) {
-          const blockIdx = textBlocks.findIndex(b => b.id === blockId)
-          if (blockIdx >= 0) {
-            const blockInfo = blockTextMap[blockIdx]
-            // 计算光标在 block 内的位置
-            const rangeInBlock = document.createRange()
-            rangeInBlock.selectNodeContents(node)
-            rangeInBlock.setEnd(range.startContainer, range.startOffset)
-            const textBeforeCursor = rangeInBlock.toString()
-            // 简化处理：估算位置
-            const textInBlock = blockInfo.text
-            let localPos = Math.min(textBeforeCursor.length, textInBlock.length)
-            cursorGlobalPos = blockInfo.start + localPos
-            break
-          }
-        }
-      }
-      node = node.parentNode
+    blockMap.push({ block, start, end: fullText.length, text })
+    if (block.id === cursorBlock.id) {
+      cursorBlockIdx = i
     }
   }
-  
-  // 如果找不到，放在最后一个块的末尾
-  if (cursorGlobalPos < 0 && blockTextMap.length > 0) {
-    const lastBlock = blockTextMap[blockTextMap.length - 1]
-    cursorGlobalPos = lastBlock.end - 1 // 减去最后的换行符
+
+  if (cursorBlockIdx < 0) return null
+
+  const cursorInfo = blockMap[cursorBlockIdx]
+  const cursorGlobalPos = cursorInfo.start + Math.min(cursorLocalOffset, cursorInfo.text.length)
+  const isAtBlockEnd = cursorLocalOffset >= cursorInfo.text.trimEnd().length
+
+  // 左边 1/3, 右边 2/3
+  const leftWindow = Math.floor(windowSize / 3)
+  const rightWindow = windowSize - leftWindow
+
+  let contextStart = Math.max(0, cursorGlobalPos - leftWindow)
+  let contextEnd = Math.min(fullText.length, cursorGlobalPos + rightWindow)
+
+  // 光标在块末尾且右边几乎没文本 → 把后续块内容也纳入
+  if (isAtBlockEnd) {
+    const rightText = fullText.slice(cursorGlobalPos, contextEnd).replace(/^\n+/, '').trim()
+    if (rightText.length < 20 && cursorBlockIdx < allBlocks.length - 1) {
+      const nextInfo = blockMap[cursorBlockIdx + 1]
+      contextEnd = Math.min(fullText.length, nextInfo.start + nextInfo.text.length + 1)
+    }
   }
-  
-  if (cursorGlobalPos < 0) return null
-  
-  // 提取窗口大小的上下文
-  const halfWindow = Math.floor(windowSize / 2)
-  const start = Math.max(0, cursorGlobalPos - halfWindow)
-  const end = Math.min(fullText.length, cursorGlobalPos + halfWindow)
-  
-  const contextText = fullText.slice(start, end)
-  const cursorOffset = cursorGlobalPos - start
-  
-  // 插入 | 标记
+
+  const contextText = fullText.slice(contextStart, contextEnd)
+  const cursorOffset = cursorGlobalPos - contextStart
   const contextWithCursor = contextText.slice(0, cursorOffset) + '|' + contextText.slice(cursorOffset)
-  
+
   return { context: contextWithCursor, cursorGlobalPos }
 }
 
@@ -415,6 +411,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   
   const correctTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const completeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const completeAbortRef = useRef<AbortController | null>(null)
+  const editorFocusedRef = useRef(true)
   const lastCorrectedRef = useRef<string>('')
   const settingsRef = useRef<AppSettings>(settings)
   const ghostTextRef = useRef<string | null>(null) // 用于 Tab 键处理
@@ -609,8 +607,10 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       }
     }
     
-    // 编辑器失去焦点时隐藏提示
+    // 编辑器失去焦点时隐藏提示并取消补全请求
     const handleBlur = () => {
+      editorFocusedRef.current = false
+      cancelAutoComplete()
       if (ghostTextRef.current) {
         setGhostVisible(false)
         setTimeout(() => {
@@ -618,6 +618,11 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           setGhostPosition(null)
         }, 150)
       }
+    }
+
+    // 编辑器获得焦点时恢复状态
+    const handleFocusIn = () => {
+      editorFocusedRef.current = true
     }
 
     // 检测光标位置变化
@@ -650,11 +655,13 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     // 监听编辑器容器失去焦点
     const editorElement = document.querySelector('.bn-editor')
     editorElement?.addEventListener('blur', handleBlur, true)
+    editorElement?.addEventListener('focusin', handleFocusIn)
     
     return () => {
       document.removeEventListener('keydown', handleKeyDown, { capture: true })
       document.removeEventListener('selectionchange', handleSelectionChange)
       editorElement?.removeEventListener('blur', handleBlur, true)
+      editorElement?.removeEventListener('focusin', handleFocusIn)
     }
   }, [])
 
@@ -1059,24 +1066,48 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     }
   }, [editor])
 
+  // 取消待执行的补全请求
+  const cancelAutoComplete = useCallback(() => {
+    if (completeTimeoutRef.current) {
+      clearTimeout(completeTimeoutRef.current)
+      completeTimeoutRef.current = null
+    }
+    if (completeAbortRef.current) {
+      completeAbortRef.current.abort()
+      completeAbortRef.current = null
+    }
+  }, [])
+
   // 请求补全
   const requestAutoComplete = useCallback(async () => {
     const smallModelConfig = getSelectedSmallModel(settings)
     if (!smallModelConfig.apiKey) return
 
+    // 如果编辑器已失去焦点，直接跳过
+    if (!editorFocusedRef.current) return
+
     const result = getContextAroundCursor(editor)
     if (!result) return
+
+    // 取消上一个未完成的请求
+    if (completeAbortRef.current) {
+      completeAbortRef.current.abort()
+    }
+    const abortController = new AbortController()
+    completeAbortRef.current = abortController
 
     try {
       const res = await fetch('/api/ai/complete', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ context: result.context, modelConfig: smallModelConfig }),
+        signal: abortController.signal,
       })
       
-      if (res.ok) {
+      if (res.ok && !abortController.signal.aborted) {
         const { completion } = await res.json() as { completion?: string }
-        if (completion && completion.trim()) {
+        // 请求回来后再次检查焦点状态
+        if (completion && completion.trim() && editorFocusedRef.current) {
           // 获取光标位置用于定位 ghost text
           const selection = window.getSelection()
           if (selection && selection.rangeCount > 0) {
@@ -1093,6 +1124,9 @@ export function EditorPageContent({ docId }: EditorPageProps) {
         }
       }
     } catch { /* silent */ }
+    if (completeAbortRef.current === abortController) {
+      completeAbortRef.current = null
+    }
   }, [editor, settings])
 
   const handleChange = useCallback(() => {
@@ -1166,11 +1200,11 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     }
 
     // Auto-complete: debounce 5s
-    if (settings.autoComplete && smallModelConfig.apiKey) {
-      if (completeTimeoutRef.current) clearTimeout(completeTimeoutRef.current)
+    if (settings.autoComplete && smallModelConfig.apiKey && editorFocusedRef.current) {
+      cancelAutoComplete()
       completeTimeoutRef.current = setTimeout(requestAutoComplete, AUTO_COMPLETE_DELAY)
     }
-  }, [doc, editor, settings, requestAutoComplete])
+  }, [doc, editor, settings, requestAutoComplete, cancelAutoComplete])
 
   const handleExport = useCallback(async () => {
     if (!doc) return

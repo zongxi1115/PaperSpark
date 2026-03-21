@@ -52,7 +52,7 @@ const sidebarItems: SidebarItem[] = [
 
 export function RightSidebar() {
   const [activeTab, setActiveTab] = useState<SidebarTab | null>(null)
-  const [panelWidth, setPanelWidth] = useState(320)
+  const [panelWidth, setPanelWidth] = useState(500)
   const [isResizing, setIsResizing] = useState(false)
   const [isHoveringHandle, setIsHoveringHandle] = useState(false)
 

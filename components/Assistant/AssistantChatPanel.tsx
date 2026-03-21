@@ -143,6 +143,15 @@ export function AssistantChatPanel() {
   // 图片预览状态
   const [previewImage, setPreviewImage] = useState<string | null>(null)
 
+  const getCodeHash = useCallback((str: string) => {
+    let hash = 0
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i)
+      hash |= 0
+    }
+    return Math.abs(hash).toString(36)
+  }, [])
+
   const { isOpen: isNoteModalOpen, onOpen: onNoteModalOpen, onClose: onNoteModalClose } = useDisclosure()
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -741,13 +750,18 @@ export function AssistantChatPanel() {
     
     // 如果是 base64，上传到服务器
     if (imageSource.startsWith('data:image')) {
+      const mimeType = imageSource.match(/^data:(image\/[-+.\w]+)[;,]/)?.[1] || 'image/png'
+      const ext = mimeType.includes('svg')
+        ? 'svg'
+        : (mimeType.split('/')[1] || 'png').replace('jpeg', 'jpg').split('+')[0]
+      const blob = await fetch(imageSource).then(res => res.blob())
+      const file = new File([blob], `assistant-image.${ext}`, { type: mimeType })
+      const formData = new FormData()
+      formData.append('file', file)
+
       const response = await fetch('/api/upload/image', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          base64: imageSource,
-          mimeType: imageSource.match(/data:(image\/\w+);/)?.[1] || 'image/png',
-        }),
+        body: formData,
       })
       
       if (!response.ok) {
@@ -837,6 +851,212 @@ export function AssistantChatPanel() {
       addToast({ title: '添加失败', color: 'danger' })
     }
   }, [uploadImageToServer])
+
+  const MermaidCodeBlock = ({ codeContent, blockKey }: { codeContent: string; blockKey: string }) => {
+    const [activeTab, setActiveTab] = useState<'code' | 'preview'>('preview')
+    const [previewUrl, setPreviewUrl] = useState('')
+    const [isRendering, setIsRendering] = useState(false)
+    const [renderError, setRenderError] = useState('')
+
+    useEffect(() => {
+      let disposed = false
+
+      const renderMermaid = async () => {
+        if (!codeContent.trim()) {
+          setPreviewUrl('')
+          setRenderError('')
+          return
+        }
+
+        setIsRendering(true)
+        setRenderError('')
+
+        try {
+          const mermaidModule = await import('mermaid')
+          const mermaid = mermaidModule.default
+
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: 'loose',
+            theme: 'default',
+          })
+
+          const renderId = `assistant-mermaid-${blockKey.replace(/[^a-zA-Z0-9_-]/g, '-')}`
+          const { svg } = await mermaid.render(renderId, codeContent)
+          const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+
+          if (!disposed) {
+            setPreviewUrl(dataUrl)
+            setRenderError('')
+          }
+        } catch (error) {
+          if (!disposed) {
+            setPreviewUrl('')
+            setRenderError(error instanceof Error ? error.message : 'Mermaid 渲染失败')
+          }
+        } finally {
+          if (!disposed) {
+            setIsRendering(false)
+          }
+        }
+      }
+
+      void renderMermaid()
+
+      return () => {
+        disposed = true
+      }
+    }, [codeContent, blockKey])
+
+    return (
+      <div style={{ position: 'relative', margin: '8px 0' }}>
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          background: 'var(--bg-secondary)',
+          borderBottom: '1px solid var(--border-color)',
+          padding: '4px 12px',
+          borderRadius: '6px 6px 0 0',
+          fontSize: 11,
+          color: 'var(--text-muted)',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span>mermaid</span>
+            <div style={{ display: 'flex', gap: 4 }}>
+              <button
+                onClick={() => setActiveTab('code')}
+                style={{
+                  background: activeTab === 'code' ? 'var(--bg-primary)' : 'transparent',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 4,
+                  padding: '2px 8px',
+                  fontSize: 10,
+                  color: activeTab === 'code' ? 'var(--text-primary)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                代码
+              </button>
+              <button
+                onClick={() => setActiveTab('preview')}
+                style={{
+                  background: activeTab === 'preview' ? 'var(--bg-primary)' : 'transparent',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 4,
+                  padding: '2px 8px',
+                  fontSize: 10,
+                  color: activeTab === 'preview' ? 'var(--text-primary)' : 'var(--text-muted)',
+                  cursor: 'pointer',
+                }}
+              >
+                预览
+              </button>
+            </div>
+          </div>
+          <button
+            onClick={() => handleCopy(codeContent)}
+            style={{
+              background: 'transparent',
+              border: '1px solid var(--border-color)',
+              borderRadius: 4,
+              padding: '2px 8px',
+              fontSize: 10,
+              color: 'var(--text-muted)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            复制
+          </button>
+        </div>
+
+        {activeTab === 'code' ? (
+          <pre style={{
+            background: 'var(--bg-secondary)',
+            padding: 12,
+            margin: 0,
+            borderRadius: '0 0 6px 6px',
+            overflow: 'auto',
+            fontSize: 12,
+            lineHeight: 1.5,
+          }}>
+            <code>{codeContent}</code>
+          </pre>
+        ) : (
+          <div style={{
+            background: 'var(--bg-secondary)',
+            padding: 12,
+            margin: 0,
+            borderRadius: '0 0 6px 6px',
+            display: 'grid',
+            gap: 10,
+          }}>
+            {isRendering ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                <Spinner size="sm" />
+                <span>正在渲染 Mermaid…</span>
+              </div>
+            ) : renderError ? (
+              <div style={{ fontSize: 12, color: '#ef4444', whiteSpace: 'pre-wrap' }}>{renderError}</div>
+            ) : previewUrl ? (
+              <>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>点击缩略图可放大预览</div>
+                <img
+                  src={previewUrl}
+                  alt="Mermaid 预览"
+                  onClick={() => setPreviewImage(previewUrl)}
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: 260,
+                    borderRadius: 6,
+                    border: '1px solid var(--border-color)',
+                    background: 'white',
+                    cursor: 'pointer',
+                    objectFit: 'contain',
+                  }}
+                />
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    onClick={() => insertImageToEditor(previewUrl)}
+                    style={{
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 4,
+                      padding: '4px 10px',
+                      fontSize: 10,
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    添加到编辑器
+                  </button>
+                  <button
+                    onClick={() => addImageToAssets(previewUrl, 'Mermaid 图表')}
+                    style={{
+                      background: 'var(--bg-primary)',
+                      border: '1px solid var(--border-color)',
+                      borderRadius: 4,
+                      padding: '4px 10px',
+                      fontSize: 10,
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    添加到资产库
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>暂无可预览内容</div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   // 复制内容
   const handleCopy = async (content: string) => {
@@ -1888,17 +2108,14 @@ export function AssistantChatPanel() {
                             if (!isBlock) {
                               return <code className={className} {...props}>{children}</code>
                             }
+
+                            if (lang === 'mermaid') {
+                              const blockKey = `${message.id}:mermaid:${getCodeHash(codeContent)}`
+                              return <MermaidCodeBlock codeContent={codeContent} blockKey={blockKey} />
+                            }
                             
                             // 代码块 - 添加复制按钮和运行按钮
                             // 使用代码内容的 hash 作为 key 的一部分，确保每个代码块有唯一的状态
-                            const getCodeHash = (str: string) => {
-                              let hash = 0
-                              for (let i = 0; i < str.length; i++) {
-                                hash = ((hash << 5) - hash) + str.charCodeAt(i)
-                                hash |= 0
-                              }
-                              return Math.abs(hash).toString(36)
-                            }
                             const blockKey = `${message.id}:codeblock:${getCodeHash(codeContent)}`
                             const blockState = codeBlockStates[blockKey]
                             const isPython = lang === 'python' || lang === 'py'

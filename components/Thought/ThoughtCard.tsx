@@ -1,5 +1,5 @@
 'use client'
-import { Button, Card, CardBody, Tooltip } from '@heroui/react'
+import { Button, Tooltip } from '@heroui/react'
 import type { Thought } from '@/lib/types'
 import { formatDate } from '@/lib/storage'
 
@@ -34,18 +34,19 @@ export function ThoughtCard({ thought, onClick, onDelete }: ThoughtCardProps) {
   }
 
   return (
-    <Card
-      isPressable
-      onPress={onClick}
+    <div
+      onClick={onClick}
       className="thought-card"
       style={{
         background: 'var(--bg-secondary)',
         border: '1px solid var(--border-color)',
+        borderRadius: 12,
         transition: 'all 0.2s ease',
         cursor: 'pointer',
+        overflow: 'hidden',
       }}
     >
-      <CardBody style={{ padding: 16 }}>
+      <div style={{ padding: 16 }}>
         {/* 标题 */}
         <div style={{ 
           display: 'flex', 
@@ -120,8 +121,8 @@ export function ThoughtCard({ thought, onClick, onDelete }: ThoughtCardProps) {
             </span>
           )}
         </div>
-      </CardBody>
-    </Card>
+      </div>
+    </div>
   )
 }
 

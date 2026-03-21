@@ -63,6 +63,7 @@ export function ThoughtPanel() {
     }
     saveThought(updated)
     setThoughts(getThoughts())
+    setEditingThought(updated)
   }, [editingTitle, editingSummary])
 
   // 关闭编辑器时保存

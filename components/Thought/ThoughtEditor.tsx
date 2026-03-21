@@ -56,6 +56,7 @@ export function ThoughtEditor({
   const [loading, setLoading] = useState<ThoughtAIAction | null>(null)
   const [modelConfig, setModelConfig] = useState<ModelConfig | null>(null)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pendingContentRef = useRef<Block[] | null>(null)
 
   // 获取编辑器主题
   const settings = useMemo(() => getSettings(), [])
@@ -103,10 +104,12 @@ export function ThoughtEditor({
   const handleChange = useCallback(() => {
     const current = editor.document as Block[]
     setBlocks(current)
+    pendingContentRef.current = current
 
     // 防抖保存
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = setTimeout(() => {
+      pendingContentRef.current = null
       const updated: Thought = {
         ...thought,
         title,
@@ -117,6 +120,26 @@ export function ThoughtEditor({
       onSave(updated)
     }, 500)
   }, [editor, thought, title, summary, onSave])
+
+  // 卸载时刷新待保存内容
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+      }
+      if (pendingContentRef.current) {
+        const updated: Thought = {
+          ...thought,
+          title,
+          summary,
+          content: pendingContentRef.current,
+          updatedAt: new Date().toISOString(),
+        }
+        saveThought(updated)
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // 生成 AI 概述
   const handleGenerateSummary = useCallback(async () => {

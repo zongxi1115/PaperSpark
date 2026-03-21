@@ -142,6 +142,10 @@ function withPinyinAliases(item: SlashMenuItem): SlashMenuItem {
   return { ...item, aliases: mergedAliases }
 }
 
+function withMenuGroup(item: SlashMenuItem, group: string): SlashMenuItem {
+  return { ...item, group }
+}
+
 function extractTitle(content: Block[], articleTitle?: string): string {
   // 优先使用文章标题
   if (articleTitle?.trim()) {
@@ -1483,6 +1487,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                   const canvasItem: SlashMenuItem = {
                     title: '画板',
                     group: '其他',
+                    icon: <CanvasIcon />,
                     aliases: ['canvas', 'diagram', '图', 'huaban', 'hb'],
                     onItemClick: () => {
                       const cursorBlock = editor.getTextCursorPosition().block
@@ -1491,12 +1496,16 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                   }
 
                   const normalizedItems = itemsWithoutQuickInsert.map(withPinyinAliases)
-                  const insertItems: SlashMenuItem[] = [withPinyinAliases(formulaItem), withPinyinAliases(canvasItem)]
+                  const quickInsertGroup = '快捷插入'
+                  const insertItems: SlashMenuItem[] = [
+                    withMenuGroup(withPinyinAliases(formulaItem), quickInsertGroup),
+                    withMenuGroup(withPinyinAliases(canvasItem), quickInsertGroup),
+                  ]
                   if (imageItem) {
-                    insertItems.push(withPinyinAliases(imageItem))
+                    insertItems.push(withMenuGroup(withPinyinAliases(imageItem), quickInsertGroup))
                   }
                   if (tableItem) {
-                    insertItems.push(withPinyinAliases(tableItem))
+                    insertItems.push(withMenuGroup(withPinyinAliases(tableItem), quickInsertGroup))
                   }
 
                   const heading3Index = normalizedItems.findIndex(isHeading3Item)
@@ -1763,6 +1772,17 @@ function FormulaIcon() {
       <path d="M14 4h6v6h-6z" />
       <path d="M4 14h6v6H4z" />
       <circle cx="17" cy="17" r="3" />
+    </svg>
+  )
+}
+
+function CanvasIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <rect x="3" y="3" width="18" height="14" rx="2" />
+      <path d="m7 13 3-3 3 2 4-4" />
+      <path d="M8 21h8" />
+      <path d="M12 17v4" />
     </svg>
   )
 }

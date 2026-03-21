@@ -1,8 +1,9 @@
 'use client'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import type { Block } from '@blocknote/core'
 import Link from 'next/link'
-import { Button, Divider, Tooltip } from '@heroui/react'
+import { Button, Tooltip } from '@heroui/react'
+import { motion, AnimatePresence } from 'framer-motion'
 
 interface TocEntry {
   id: string
@@ -12,7 +13,6 @@ interface TocEntry {
 
 function extractToc(blocks: Block[]): TocEntry[] {
   const entries: TocEntry[] = []
-  
   for (const block of blocks) {
     if (block.type === 'heading') {
       const b = block as { type: 'heading'; id: string; props: { level: number }; content: { type: string; text: string }[] }
@@ -20,7 +20,6 @@ function extractToc(blocks: Block[]): TocEntry[] {
         ?.filter(c => c.type === 'text')
         .map(c => c.text)
         .join('') ?? ''
-      
       if (text.trim()) {
         const level = b.props.level ?? 1
         entries.push({ id: b.id, text: text.trim(), level })
@@ -37,131 +36,102 @@ interface TocSidebarProps {
 
 export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
+  const [activeSection, setActiveSection] = useState<string | null>(null)
   const toc = extractToc(blocks)
 
   const scrollToBlock = (blockId: string) => {
-    // BlockNote renders blocks with data-id attribute
     const el = document.querySelector(`[data-id="${blockId}"]`)
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      setActiveSection(blockId)
     }
   }
 
-  const collapsedWidth = 48
-  const expandedWidth = 240
+  // Intersection Observer for active section tracking
+  useEffect(() => {
+    if (toc.length === 0) return
+
+    const headingElements = toc
+      .map(entry => document.querySelector(`[data-id="${entry.id}"]`))
+      .filter(Boolean) as Element[]
+
+    if (headingElements.length === 0) return
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            const blockId = entry.target.getAttribute('data-id')
+            if (blockId) setActiveSection(blockId)
+          }
+        }
+      },
+      { rootMargin: '-20% 0px -70% 0px', threshold: 0 }
+    )
+
+    headingElements.forEach(el => observer.observe(el))
+    return () => observer.disconnect()
+  }, [toc])
 
   return (
-    <aside
-      style={{
-        width: isCollapsed ? collapsedWidth : expandedWidth,
-        flexShrink: 0,
-        background: 'var(--bg-secondary)',
-        borderRight: '1px solid var(--border-color)',
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        transition: 'width 0.2s ease',
-      }}
-    >
-      {/* Header with collapse toggle */}
-      <div style={{ 
-        padding: isCollapsed ? '12px 8px' : '12px 12px 8px', 
-        borderBottom: '1px solid var(--border-color)',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: isCollapsed ? 'center' : 'flex-start',
-      }}>
-        {isCollapsed ? (
-          <Tooltip content="展开侧边栏" placement="right">
-            <Button
-              isIconOnly
-              size="sm"
-              variant="light"
-              onPress={() => setIsCollapsed(false)}
-            >
-              <ExpandIcon />
-            </Button>
-          </Tooltip>
-        ) : (
-          <>
+    <AnimatePresence initial={false}>
+      {!isCollapsed && (
+        <motion.aside
+          initial={{ width: 0, opacity: 0 }}
+          animate={{ width: 220, opacity: 1 }}
+          exit={{ width: 0, opacity: 0 }}
+          transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+          className="h-full bg-[#F7F5F0] border-r border-stone-200/60 flex flex-col z-10 shrink-0 overflow-hidden"
+        >
+          {/* Header */}
+          <div className="p-4 flex items-center gap-2 w-[220px]">
             <Tooltip content="返回文档列表" placement="right">
               <Link href="/documents">
-                <Button size="sm" variant="light" color="default" startContent={<BackIcon />}
-                  style={{ justifyContent: 'flex-start' }}
-                >
-                  文档列表
+                <Button isIconOnly size="sm" variant="light" radius="lg">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="15,18 9,12 15,6" />
+                  </svg>
                 </Button>
               </Link>
             </Tooltip>
-            <div style={{ flex: 1 }} />
-            <Tooltip content="收起侧边栏" placement="left">
-              <Button
-                isIconOnly
-                size="sm"
-                variant="light"
-                onPress={() => setIsCollapsed(true)}
-              >
-                <CollapseIcon />
-              </Button>
-            </Tooltip>
-          </>
-        )}
-      </div>
+            <span className="font-medium text-sm text-stone-700 truncate flex-1" title={docTitle}>
+              {docTitle || '无标题文档'}
+            </span>
+          </div>
 
-      {!isCollapsed && (
-        <>
           {/* TOC */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
-            <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', padding: '0 16px 8px' }}>
-              目录
-            </p>
-
+          <div className="flex-1 overflow-y-auto px-4 pb-4 w-[220px]">
+            <div className="text-[11px] font-bold text-stone-400 uppercase tracking-widest mb-4 px-2">目录</div>
+            
             {toc.length === 0 ? (
-              <p style={{ fontSize: 12, color: 'var(--text-muted)', padding: '8px 16px', fontStyle: 'italic' }}>
-                使用标题(# ## ###)生成目录
+              <p className="text-xs text-stone-400 px-2 italic">
+                使用标题 (# ## ###) 生成目录
               </p>
             ) : (
-              <nav style={{ padding: '0 8px' }}>
+              <nav className="space-y-0.5 relative">
                 {toc.map((entry) => {
-                  const indent = (entry.level - 1) * 16
-                  
+                  const indent = (entry.level - 1) * 12
                   return (
                     <button
                       key={entry.id}
                       onClick={() => scrollToBlock(entry.id)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        width: '100%',
-                        textAlign: 'left',
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        padding: '8px 10px',
-                        marginBottom: 4,
-                        marginLeft: indent,
-                        fontSize: 13,
-                        fontWeight: entry.level === 1 ? 600 : 400,
-                        color: entry.level === 1 ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        lineHeight: 1.5,
-                        borderRadius: 8,
-                        transition: 'all 0.15s ease',
-                        wordBreak: 'break-word',
-                        position: 'relative',
-                      }}
-                      onMouseEnter={e => { 
-                        e.currentTarget.style.background = 'var(--bg-tertiary)'
-                      }}
-                      onMouseLeave={e => { 
-                        e.currentTarget.style.background = 'none'
-                      }}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors relative z-10 ${
+                        activeSection === entry.id
+                          ? 'text-indigo-700 font-medium'
+                          : entry.level === 1
+                            ? 'text-stone-700 font-medium hover:text-stone-900 hover:bg-stone-200/50'
+                            : 'text-stone-500 hover:text-stone-800 hover:bg-stone-200/50'
+                      }`}
+                      style={{ marginLeft: indent }}
                     >
-                      <span style={{ 
-                        flex: 1, 
-                        overflow: 'hidden', 
-                        textOverflow: 'ellipsis', 
-                        whiteSpace: 'nowrap',
-                      }}>
+                      {activeSection === entry.id && (
+                        <motion.div
+                          layoutId="active-nav"
+                          className="absolute inset-0 bg-white rounded-lg shadow-sm border border-stone-200/50 -z-10"
+                          transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
+                        />
+                      )}
+                      <span className="block truncate">
                         {entry.text}
                       </span>
                     </button>
@@ -170,36 +140,44 @@ export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
               </nav>
             )}
           </div>
-        </>
+
+          {/* Collapse button */}
+          <div className="p-3 border-t border-stone-200/60 w-[220px]">
+            <button
+              onClick={() => setIsCollapsed(true)}
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs text-stone-400 hover:text-stone-600 hover:bg-stone-200/50 rounded-lg transition-colors"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="11,17 6,12 11,7" />
+                <polyline points="18,17 13,12 18,7" />
+              </svg>
+              收起侧边栏
+            </button>
+          </div>
+        </motion.aside>
       )}
-    </aside>
-  )
-}
 
-
-
-function CollapseIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <polyline points="11,17 6,12 11,7" />
-      <polyline points="18,17 13,12 18,7" />
-    </svg>
-  )
-}
-
-function ExpandIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <polyline points="13,17 18,12 13,7" />
-      <polyline points="6,17 11,12 6,7" />
-    </svg>
-  )
-}
-
-function BackIcon() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <polyline points="15,18 9,12 15,6" />
-    </svg>
+      {/* Collapsed state - show expand button */}
+      {isCollapsed && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="h-full bg-[#F7F5F0] border-r border-stone-200/60 flex flex-col items-center py-4 z-10 shrink-0"
+          style={{ width: 48 }}
+        >
+          <Tooltip content="展开侧边栏" placement="right">
+            <button
+              onClick={() => setIsCollapsed(false)}
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-stone-500 hover:text-stone-700 hover:bg-stone-200/60 transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <polyline points="9,18 15,12 9,6" />
+              </svg>
+            </button>
+          </Tooltip>
+        </motion.div>
+      )}
+    </AnimatePresence>
   )
 }

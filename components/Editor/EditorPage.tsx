@@ -812,6 +812,21 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     addToast({ title: '版本快照已保存', color: 'success' })
   }, [doc, editor, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])
 
+  // Ctrl+S 监听：保存版本快照
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault()
+        if (!doc) return
+        const now = new Date()
+        const title = `手动保存 ${now.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })} ${now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
+        handleSaveVersion(title)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [doc, handleSaveVersion])
+
   // 版本控制：恢复历史版本
   const handleRestoreVersion = useCallback((version: DocumentVersion) => {
     if (!doc) return

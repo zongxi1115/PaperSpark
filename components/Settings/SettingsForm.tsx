@@ -1303,6 +1303,39 @@ export function SettingsForm() {
           </CardBody>
         </Card>
 
+        <Card shadow="sm">
+          <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+            <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>沉浸式 Canvas 提示词</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              配置 AI 生成 Canvas 网页时使用的默认提示词
+            </p>
+          </CardHeader>
+          <Divider />
+          <CardBody style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <textarea
+              value={settings.immersiveCanvasPrompt || ''}
+              onChange={(event) => setSettings(s => ({ ...s, immersiveCanvasPrompt: event.target.value }))}
+              rows={5}
+              placeholder="请输入 Canvas 网页生成提示词"
+              style={{
+                width: '100%',
+                borderRadius: 10,
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-primary)',
+                color: 'var(--text-primary)',
+                padding: '10px 12px',
+                resize: 'vertical',
+                outline: 'none',
+                fontSize: 13,
+                lineHeight: 1.5,
+              }}
+            />
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: 0 }}>
+              该提示词会在沉浸式阅读的 Canvas 标签页中作为默认生成指令。
+            </p>
+          </CardBody>
+        </Card>
+
         <WorkspaceSnapshotCard />
 
         {/* Action buttons */}

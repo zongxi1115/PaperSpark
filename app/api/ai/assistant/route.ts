@@ -34,16 +34,20 @@ function buildKnowledgeContext(citations: AssistantCitation[]) {
       citation.pageNum ? `页码：第${citation.pageNum}页` : '',
       `类型：${citation.sourceKind === 'overview' ? '知识库概要' : citation.sourceKind === 'asset' ? '资产库全文' : '知识库精读全文'}`,
       `相关片段：${citation.excerpt}`,
-    ].filter(Boolean).join('\n')
+    ].filter(Boolean).join('\
+')
 
-    return `[${citation.id}] ${citation.title}\n${meta}`
-  }).join('\n\n')
+    return `[${citation.id}] ${citation.title}\
+${meta}`
+  }).join('\
+\
+')
 }
 
 export async function POST(req: Request) {
-  const { 
-    messages, 
-    modelConfig, 
+  const {
+    messages,
+    modelConfig,
     systemPrompt,
     useKnowledge,
     knowledgeCandidates,
@@ -76,7 +80,8 @@ export async function POST(req: Request) {
   const stream = new ReadableStream({
     async start(controller) {
       const write = (part: object) => {
-        controller.enqueue(encoder.encode(`${JSON.stringify(part)}\n`))
+        controller.enqueue(encoder.encode(`${JSON.stringify(part)}\
+`))
       }
 
       try {
@@ -116,23 +121,39 @@ export async function POST(req: Request) {
 
                   return {
                     query,
-                    citations: reranked.length > 0 ? reranked : knowledgeCandidates.slice(0, 6),
+                    count: reranked.length,
+                    results: reranked.map(candidate => ({
+                      id: candidate.id,
+                      title: candidate.title,
+                      excerpt: candidate.excerpt,
+                      score: candidate.score,
+                      sourceKind: candidate.sourceKind,
+                    })),
                   }
                 },
               }),
             },
           })
 
-          const toolResults = toolRun.steps.flatMap(step => step.toolResults)
-          const firstResult = toolResults[0]?.output as { citations?: AssistantCitation[] } | undefined
-          finalCitations = Array.isArray(firstResult?.citations)
-            ? firstResult.citations
-            : knowledgeCandidates.slice(0, 6)
+          const toolResult = toolRun.toolResults?.[0]
+          if (toolResult && 'result' in toolResult) {
+            const result = toolResult.result as { results?: AssistantCitation[] }
+            if (Array.isArray(result?.results)) {
+              const ids = new Set(result.results.map((r: AssistantCitation) => r.id))
+              finalCitations = knowledgeCandidates.filter(c => ids.has(c.id))
+            }
+          }
+
+          if (finalCitations.length === 0) {
+            finalCitations = [...knowledgeCandidates].sort((a, b) => b.score - a.score).slice(0, 6)
+          }
 
           write({
             ...toolEventBase,
-            status: 'success',
-            message: `知识库检索完成，命中 ${finalCitations.length} 条证据`,
+            status: finalCitations.length > 0 ? 'success' : 'error',
+            message: finalCitations.length > 0
+              ? `已精选 ${finalCitations.length} 条知识库证据`
+              : '未找到相关知识库证据',
           } satisfies ToolStatusEvent)
 
           write({
@@ -144,120 +165,9 @@ export async function POST(req: Request) {
         let fullSystemPrompt = systemPrompt || '你是一个智能学术助手，帮助用户解答学术问题、写作和思考。'
 
         if (finalCitations.length > 0) {
-          fullSystemPrompt += `\n\n你现在可以使用用户知识库中检索出的证据。回答时必须遵守：\n1. 只引用给定证据，不得虚构来源。\n2. 使用到哪条证据，就在对应句末使用 [K1] 这类编号引用。\n3. 回答末尾必须单独给出“参考资料”小节，每条一行，格式为 [K1] 标题｜来源类型｜年份/页码。\n4. 如果证据不足，明确说明证据不足。\n\n可用证据如下：\n${buildKnowledgeContext(finalCitations)}`
-        }
-
-        if (assetContext && assetContext.trim()) {
-          fullSystemPrompt += `\n\n你还可以参考用户资产库中的材料。若资产库内容与问题直接相关，请优先结合这些材料回答；如果资产库不足，再说明不足。资产库材料如下：\n${assetContext}`
-        }
-
-        // 如果有文档结构，告知 AI 可以编辑文档
-        if (documentStructure && documentStructure.length > 0) {
-          const blockList = documentStructure.map((b, i) => {
-            const typeLabel = b.type === 'heading' ? `H${b.level || 1}` : b.type
-            const textPreview = b.text.slice(0, 50) + (b.text.length > 50 ? '…' : '')
-            return `${i + 1}. [${b.id}] ${typeLabel}: ${textPreview}`
-          }).join('\n')
-
-          fullSystemPrompt += `\n\n当前文档结构（共 ${documentStructure.length} 个块）：
-${blockList}
-
-你可以使用简化格式编辑文档：
-
-输出工具指令时必须遵守：
-- 起始行必须从 \`::insert\`、\`::update\` 或 \`::delete\` 开始，并且独占一行
-- \`::\` 结束标记也必须独占一行
-- 不要把解释性文字写进工具块中
-- 如果要继续自然语言说明，请放在工具块之外
-
-**插入内容**（在文档末尾追加）：
-::insert after
-要插入的内容
-::
-
-**插入内容**（在特定块后）：
-::insert after 块ID
-要插入的内容
-::
-
-**删除块**：
-::delete 块ID
-
-**更新块**：
-::update 块ID
-新的内容
-::
-
-支持完整 Markdown 语法：
-- # 标题 → heading（支持 # 到 ######）
-- **粗体**、*斜体*、\`行内代码\` → 富文本样式
-- $a+b$ → 行内公式
-- 独占一段的 $$a+b$$ → 居中的公式段落
-- - 列表项 → bulletListItem
-- 1. 编号 → numberedListItem
-- GFM 表格 → table
-- \`\`\`语言 代码 \`\`\` → codeBlock
-- [链接](url) → 链接
-- > 引用 → 引用块
-- 普通文本 → paragraph
-
-示例：在文档末尾插入一个二级标题和段落：
-::insert after
-## 新章节
-
-这是新段落内容。
-::`
-        } else if (systemPrompt && systemPrompt.includes('当前编辑器文档内容')) {
-          // 兼容旧格式
-          fullSystemPrompt += `\n\n你可以通过输出特殊代码块来编辑用户的文档。当用户要求你在文档中添加、修改内容时，输出如下格式的代码块（语言标识为 edit_document），内容为 JSON：
-\`\`\`edit_document
-{
-  "operations": [
-    {
-      "type": "insert",
-      "position": "after",
-      "blocks": [
-        { "type": "paragraph", "content": [{ "type": "text", "text": "要插入的内容", "styles": {} }] }
-      ]
-    }
-  ]
-}
-\`\`\`
-支持的 block type：paragraph、heading（props.level: 1-3）、bulletListItem、numberedListItem、codeBlock（props.language）。
-position 为 "after" 表示在文档末尾追加，"before" 表示在开头插入。
-如果要在特定块后插入，可以在 referenceId 字段填写目标块的 id（从文档内容中获取）。
-每次只输出一个 edit_document 代码块，不要输出多个。`
-        }
-
-        const result = streamText({
-          model: provider.chat(modelConfig.modelName),
-          system: fullSystemPrompt,
-          messages: messages.map(message => ({
-            role: message.role,
-            content: message.content,
-          })),
-        })
-
-        for await (const delta of result.textStream) {
-          write({ type: 'text-delta', delta })
-        }
-
-        write({ type: 'done' })
-        controller.close()
-      } catch (error) {
-        write({
-          type: 'error',
-          error: error instanceof Error ? error.message : '助手响应失败',
-        })
-        controller.close()
-      }
-    },
-  })
-
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/plain; charset=utf-8',
-      'Cache-Control': 'no-cache, no-transform',
-    },
-  })
-}
+          fullSystemPrompt += `\
+\
+你现在可以使用用户知识库中检索出的证据。回答时必须遵守：\
+1. 只引用给定证据，不得虚构来源。\
+2. 使用到哪条证据，就在对应句末使用 [K1] 这类编号引用。\
+3. 回答末尾必须单独给出

@@ -113,6 +113,8 @@ export type AppSettings = {
   embeddingModel?: EmbeddingModelConfig
   // 重排序模型配置（RAG 用）
   rerankModel?: RerankModelConfig
+  // 沉浸式 Canvas 生成提示词
+  immersiveCanvasPrompt?: string
 } & { [key in typeof selectFeatures[number]]: boolean
 }
 
@@ -178,6 +180,33 @@ function getDefaultSettings(): AppSettings {
     },
     // 重排序模型默认配置（可选）
     rerankModel: undefined,
+    immersiveCanvasPrompt: `角色设定
+你现在是一位顶尖的创意编程大师 (Creative Coder) 和数据可视化专家。
+请将我的论文内核“翻译”成一个高度动态、充满视觉交互的网页（单文件 HTML，内联 CSS/JS）。不要给我传统的文本阅读界面！我要的是生动的视觉隐喻和探索感！ 输出语言为中文。
+
+论文核心概念
+[这里用一两句话说明论文最核心的机制或结论，例如：输入变量A如何影响结果B，或者某个系统的运转逻辑]
+
+⚡ 核心可视化与交互要求（必须实现）
+请使用纯原生 HTML5 Canvas、复杂的 SVG 动画或 CSS3D，实现以下高阶交互：
+
+滚动叙事 (Scrollytelling)： 页面主体是一个全屏的可视化画布。随着用户向下滚动鼠标，画布上的图形、数据模型或节点网络会发生丝滑的形态演变，一步步推演论文的逻辑脉络。
+
+核心概念“活体化” (Interactive Metaphors)： 将论文的抽象机制具象化。例如，使用可拖拽的动态节点（Force-directed graph）、随鼠标互动的粒子系统、或者动态生长的图表。用户鼠标移入或拖拽时，图形必须给出弹性的物理反馈。
+
+沙盘式参数模拟 (Playground Simulation)： 页面中必须包含一个“控制台”面板（包含滑块 Input Range、开关 Toggle 等）。用户可以自己调节参数，主画布上的可视化模型必须实时响应这些变化，直观展示论文的结论或变量关系。
+
+沉浸式视觉引导： 每次状态切换或数据更新时，必须有丝滑的缓动动画（Easing transitions），严禁画面的生硬闪烁。辅以极简的浮层提示（Tooltip）来解释当前视觉现象代表的论文观点。
+
+代码要求
+
+必须包含真实的绘图逻辑（如 Canvas requestAnimationFrame 循环 或 SVG stroke-dasharray 动画）。
+
+界面极简、现代、充满科技感或艺术感（黑底或纯白底色，配合高亮强调色）。
+
+代码需完整可运行，不要省略核心的可视化渲染逻辑。
+
+直接输出完整的 HTML 代码。`,
     // 标题字体大小默认设置
     headingFontSizes: {
       h1: 28,

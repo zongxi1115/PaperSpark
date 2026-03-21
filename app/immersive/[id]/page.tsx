@@ -23,6 +23,7 @@ import {
 import PDFViewer from '@/components/PDF/PDFViewer'
 import AIGuidePanel from '@/components/Guide/AIGuidePanel'
 import ImmersiveChatPanel from '@/components/Assistant/ImmersiveChatPanel'
+import ImmersiveCanvasPanel from '@/components/Assistant/ImmersiveCanvasPanel'
 import type { KnowledgeItem, TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload, GuideFocusTarget } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
 import { parsePDFWithSurya } from '@/lib/suryaParser'
@@ -146,7 +147,7 @@ export default function ImmersiveReaderPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [scale, setScale] = useState(1.2)
-  const [sidebarTab, setSidebarTab] = useState<'info' | 'translate' | 'notes' | 'guide' | 'qa'>('guide')
+  const [sidebarTab, setSidebarTab] = useState<'info' | 'translate' | 'notes' | 'guide' | 'qa' | 'canvas'>('guide')
   const [sidebarWidth, setSidebarWidth] = useState(288) // 288px = 72 * 4
 
   // PDF 数据
@@ -883,6 +884,19 @@ export default function ImmersiveReaderPage() {
           </Button>
         </Tooltip>
 
+        <Tooltip content="AI Canvas" placement="right">
+          <Button
+            isIconOnly
+            size="sm"
+            variant={sidebarTab === 'canvas' ? 'solid' : 'light'}
+            color={sidebarTab === 'canvas' ? 'primary' : 'default'}
+            className={sidebarTab === 'canvas' ? '' : 'text-gray-400 hover:text-white'}
+            onPress={() => setSidebarTab('canvas')}
+          >
+            <Icon icon="mdi:draw" className="text-xl" />
+          </Button>
+        </Tooltip>
+
         <div className="flex-1" />
 
         {/* 翻译状态 */}
@@ -1341,6 +1355,15 @@ export default function ImmersiveReaderPage() {
               setFocusedGuideTarget(target)
               setFocusOverlayMode('sentence')
             }}
+          />
+        )}
+
+        {sidebarTab === 'canvas' && (
+          <ImmersiveCanvasPanel
+            knowledgeItemId={knowledgeId}
+            title={metadata?.title || documentTitle}
+            fullText={fullText}
+            blocks={blocks}
           />
         )}
       </div>

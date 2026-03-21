@@ -11,17 +11,31 @@ import {
   createCanvasGraphSession,
   exportGraphDataUrl,
   getCanvasBlockDefaults,
+  getCanvasEdgeColor,
   getCanvasEdgeLabel,
   getCanvasNodeLabel,
   getCanvasPresetGroups,
   getViewportRect,
+  hideAllNodePorts,
+  insertCanvasImageNode,
   insertCanvasPresetNode,
+  readEdgeStyle,
+  applyEdgeStyle,
+  readNodeStyle,
+  applyNodeStyle,
   setCanvasEdgeLabel,
   setCanvasGraphTheme,
   setCanvasNodeLabel,
+  showAllNodePorts,
   type CanvasBlockProps,
   type CanvasGraphSession,
   type CanvasOriginRect,
+  type EdgeStyleState,
+  type EdgeLineStyle,
+  type EdgeArrowDir,
+  type EdgeStrokeType,
+  type NodeStyleState,
+  type NodeBorderStyle,
 } from '@/lib/canvasX6'
 
 interface CanvasEditorProps {
@@ -92,6 +106,7 @@ export function CanvasEditor({
   const graphHostRef = useRef<HTMLDivElement | null>(null)
   const rootRef = useRef<HTMLDivElement | null>(null)
   const nodeEditorRef = useRef<HTMLDivElement | null>(null)
+  const imageInputRef = useRef<HTMLInputElement | null>(null)
   const resizeRef = useRef<{
     nodeId: string
     startClientX: number
@@ -122,6 +137,15 @@ export function CanvasEditor({
   const [edgeEditing, setEdgeEditing] = useState(false)
   const [edgeToolbarRect, setEdgeToolbarRect] = useState<FloatingRect | null>(null)
   const [edgeLabelDraft, setEdgeLabelDraft] = useState('')
+  const [edgeStyle, setEdgeStyle] = useState<EdgeStyleState>({
+    strokeType: 'solid',
+    arrowDir: 'forward',
+    lineStyle: 'curve',
+    strokeWidth: 2,
+    color: '#64748b',
+  })
+  const [nodeStyle, setNodeStyle] = useState<NodeStyleState | null>(null)
+  const [nodeToolbarVisible, setNodeToolbarVisible] = useState(false)
 
   const presetGroups = useMemo(() => getCanvasPresetGroups(), [])
   const viewportRect = useMemo(() => getViewportRect(), [mounted])
@@ -237,6 +261,16 @@ export function CanvasEditor({
         ? selectedCells.find((cell: any) => cell?.isNode?.()) ?? null
         : null
       setSelectedNodeId(selectedNode?.id ?? null)
+
+      if (selectedNode?.isNode?.()) {
+        const style = readNodeStyle(selectedNode)
+        setNodeStyle(style)
+        setNodeToolbarVisible(true)
+      } else {
+        setNodeStyle(null)
+        setNodeToolbarVisible(false)
+      }
+
       if (!selectedNode) {
         setEditingNodeId(null)
       }
@@ -244,6 +278,7 @@ export function CanvasEditor({
         setSelectedEdgeId(null)
         setEdgeEditing(false)
         setEdgeToolbarRect(null)
+        setNodeToolbarVisible(false)
       }
       refreshFloatingUi()
     }
@@ -263,23 +298,40 @@ export function CanvasEditor({
     const handleEdgeClick = ({ edge, e }: any) => {
       e?.stopPropagation?.()
       const edgeId = String(edge?.id ?? '')
+
+      // Reset previous selected edge style
+      if (selectedEdgeId && selectedEdgeId !== edgeId) {
+        const prevEdge = session.graph.getCellById?.(selectedEdgeId)
+        if (prevEdge?.isEdge?.()) {
+          prevEdge.setAttrByPath('line/stroke', edgeStyle.color)
+          prevEdge.setAttrByPath('line/strokeWidth', edgeStyle.strokeWidth)
+        }
+      }
+
       setEditingNodeId(null)
       setSelectedNodeId(null)
       setSelectedNodeRect(null)
       setSelectedEdgeId(edgeId)
-      setEdgeEditing(false)
       setEdgeLabelDraft(getCanvasEdgeLabel(edge))
-      setEdgeToolbarRect(null)
-      refreshFloatingUi()
-    }
 
-    const handleEdgeContextMenu = ({ edge, e }: any) => {
-      e?.preventDefault?.()
-      e?.stopPropagation?.()
-      const edgeId = String(edge?.id ?? '')
-      setSelectedEdgeId(edgeId)
+      if (edge?.isEdge?.()) {
+        // Read current edge style
+        const style = readEdgeStyle(edge, isDark)
+        setEdgeStyle(style)
+
+        // Apply selected visual
+        edge.setAttrByPath('line/stroke', style.color !== getCanvasEdgeColor(isDark) ? style.color : '#3b82f6')
+        edge.setAttrByPath('line/strokeWidth', Math.max(style.strokeWidth, 3))
+      }
+
+      // Show toolbar immediately
       setEdgeEditing(true)
-      setEdgeLabelDraft(getCanvasEdgeLabel(edge))
+
+      // Show all node ports as potential targets
+      if (session) {
+        showAllNodePorts(session.graph)
+      }
+
       requestAnimationFrame(() => refreshFloatingUi())
     }
 
@@ -290,11 +342,29 @@ export function CanvasEditor({
           setCanvasNodeLabel(node, nodeLabelDraft.trim(), isDark)
         }
       }
+
+      // Reset edge styling when deselecting
+      if (selectedEdgeId) {
+        const edge = session.graph.getCellById?.(selectedEdgeId)
+        if (edge?.isEdge?.()) {
+          const style = readEdgeStyle(edge, isDark)
+          edge.setAttrByPath('line/stroke', style.color)
+          edge.setAttrByPath('line/strokeWidth', style.strokeWidth)
+        }
+      }
+
+      // Hide all ports
+      if (session) {
+        hideAllNodePorts(session.graph)
+      }
+
       setSelectedEdgeId(null)
       setEdgeEditing(false)
       setEditingNodeId(null)
       setEdgeToolbarRect(null)
       setSelectionToolbarRect(null)
+      setNodeToolbarVisible(false)
+      setNodeStyle(null)
     }
 
     const handleNodeDblClick = ({ node, e }: any) => {
@@ -304,6 +374,7 @@ export function CanvasEditor({
       setSelectedNodeId(String(node?.id ?? ''))
       setEditingNodeId(String(node?.id ?? ''))
       setNodeLabelDraft(getCanvasNodeLabel(node))
+      setNodeToolbarVisible(false)
       requestAnimationFrame(() => refreshFloatingUi())
     }
 
@@ -312,6 +383,27 @@ export function CanvasEditor({
       setEdgeEditing(false)
       setEdgeToolbarRect(null)
       setEdgeLabelDraft('')
+      if (session) {
+        hideAllNodePorts(session.graph)
+      }
+    }
+
+    const handleEdgeMouseEnter = ({ edge }: any) => {
+      if (!edge?.isEdge?.()) return
+      edge.setAttrByPath('line/strokeWidth', 3)
+      edge.setAttrByPath('line/cursor', 'grab')
+    }
+
+    const handleEdgeMouseLeave = ({ edge }: any) => {
+      if (!edge?.isEdge?.()) return
+      const isSelected = edge.id === selectedEdgeId
+      edge.setAttrByPath('line/strokeWidth', isSelected ? 3 : 2)
+      edge.setAttrByPath('line/cursor', 'default')
+    }
+
+    const handleEdgeConnected = ({ edge }: any) => {
+      if (!edge?.isEdge?.()) return
+      edge.setAttrByPath('line/strokeDasharray', '')
     }
 
     graph.on('scale', handleScale)
@@ -321,7 +413,9 @@ export function CanvasEditor({
     graph.on('edge:change:labels', refreshFloatingUi)
     graph.on('edge:change:vertices', refreshFloatingUi)
     graph.on('edge:click', handleEdgeClick)
-    graph.on('edge:contextmenu', handleEdgeContextMenu)
+    graph.on('edge:mouseenter', handleEdgeMouseEnter)
+    graph.on('edge:mouseleave', handleEdgeMouseLeave)
+    graph.on('edge:connected', handleEdgeConnected)
     graph.on('node:dblclick', handleNodeDblClick)
     graph.on('blank:click', handleBlankClick)
     graph.on('edge:removed', handleEdgeRemoved)
@@ -340,7 +434,9 @@ export function CanvasEditor({
       graph.off('edge:change:labels', refreshFloatingUi)
       graph.off('edge:change:vertices', refreshFloatingUi)
       graph.off('edge:click', handleEdgeClick)
-      graph.off('edge:contextmenu', handleEdgeContextMenu)
+      graph.off('edge:mouseenter', handleEdgeMouseEnter)
+      graph.off('edge:mouseleave', handleEdgeMouseLeave)
+      graph.off('edge:connected', handleEdgeConnected)
       graph.off('node:dblclick', handleNodeDblClick)
       graph.off('blank:click', handleBlankClick)
       graph.off('edge:removed', handleEdgeRemoved)
@@ -446,6 +542,40 @@ export function CanvasEditor({
     setDropActive(false)
     if (!session) return
 
+    // Check for image file drop
+    const files = event.dataTransfer.files
+    if (files.length > 0) {
+      const file = files[0]
+      if (file.type.startsWith('image/')) {
+        const reader = new FileReader()
+        reader.onload = async () => {
+          const dataUri = String(reader.result ?? '')
+          if (!dataUri) return
+
+          const point = session.graph.clientToLocal({
+            x: event.clientX,
+            y: event.clientY,
+          })
+
+          const node = await insertCanvasImageNode({
+            graph: session.graph,
+            dataUri,
+            point,
+            isDark,
+          })
+
+          if (node) {
+            session.selection.reset?.([node])
+            setSelectedNodeId(String(node.id))
+            requestAnimationFrame(() => refreshFloatingUi())
+          }
+        }
+        reader.readAsDataURL(file)
+        return
+      }
+    }
+
+    // Handle preset drag-and-drop
     const presetId = event.dataTransfer.getData(CANVAS_DRAG_MIME)
     if (!presetId) return
 
@@ -488,6 +618,53 @@ export function CanvasEditor({
     }
   }
 
+  const handleImageUpload = useCallback(() => {
+    imageInputRef.current?.click()
+  }, [])
+
+  const handleImageFile = useCallback(async (file: File) => {
+    if (!session || !graphHostRef.current) return
+    if (!file.type.startsWith('image/')) {
+      addToast({ title: '请选择图片文件', color: 'warning' })
+      return
+    }
+
+    const reader = new FileReader()
+    reader.onload = async () => {
+      const dataUri = String(reader.result ?? '')
+      if (!dataUri) return
+
+      const rect = graphHostRef.current!.getBoundingClientRect()
+      const point = session.graph.clientToLocal({
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      })
+
+      const node = await insertCanvasImageNode({
+        graph: session.graph,
+        dataUri,
+        point,
+        isDark,
+      })
+
+      if (node) {
+        session.selection.reset?.([node])
+        setSelectedNodeId(String(node.id))
+        requestAnimationFrame(() => refreshFloatingUi())
+      }
+    }
+    reader.readAsDataURL(file)
+  }, [isDark, refreshFloatingUi, session])
+
+  const handleImageInputChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      void handleImageFile(file)
+    }
+    // Reset input so the same file can be selected again
+    event.target.value = ''
+  }, [handleImageFile])
+
   const handleSaveNodeLabel = useCallback(() => {
     if (!session || !editingNodeId) return
     const node = session.graph.getCellById?.(editingNodeId)
@@ -495,6 +672,12 @@ export function CanvasEditor({
 
     setCanvasNodeLabel(node, nodeLabelDraft.trim(), isDark)
     setEditingNodeId(null)
+
+    // Re-read style and show toolbar
+    const style = readNodeStyle(node)
+    setNodeStyle(style)
+    setNodeToolbarVisible(true)
+
     refreshFloatingUi()
   }, [editingNodeId, isDark, nodeLabelDraft, refreshFloatingUi, session])
 
@@ -541,7 +724,36 @@ export function CanvasEditor({
     setEdgeEditing(false)
     setEdgeToolbarRect(null)
     setEdgeLabelDraft('')
+    if (session) hideAllNodePorts(session.graph)
   }, [selectedEdgeId, session])
+
+  const handleEdgeStyleChange = useCallback((patch: Partial<EdgeStyleState>) => {
+    if (!session || !selectedEdgeId) return
+    const edge = session.graph.getCellById?.(selectedEdgeId)
+    if (!edge?.isEdge?.()) return
+
+    const nextStyle: EdgeStyleState = { ...edgeStyle, ...patch }
+    setEdgeStyle(nextStyle)
+    applyEdgeStyle(edge, nextStyle, isDark)
+
+    // Keep selection highlight color
+    const displayColor = nextStyle.color === getCanvasEdgeColor(isDark) ? '#3b82f6' : nextStyle.color
+    edge.setAttrByPath('line/stroke', displayColor)
+    edge.setAttrByPath('line/strokeWidth', Math.max(nextStyle.strokeWidth, 3))
+
+    refreshFloatingUi()
+  }, [edgeStyle, isDark, refreshFloatingUi, selectedEdgeId, session])
+
+  const handleNodeStyleChange = useCallback((patch: Partial<NodeStyleState>) => {
+    if (!session || !selectedNodeId || !nodeStyle) return
+    const node = session.graph.getCellById?.(selectedNodeId)
+    if (!node?.isNode?.()) return
+
+    const nextStyle: NodeStyleState = { ...nodeStyle, ...patch }
+    setNodeStyle(nextStyle)
+    applyNodeStyle(node, nextStyle, isDark)
+    refreshFloatingUi()
+  }, [nodeStyle, isDark, refreshFloatingUi, selectedNodeId, session])
 
   const handleClose = async () => {
     if (!session || saving) {
@@ -626,6 +838,13 @@ export function CanvasEditor({
       }}
       style={{ position: 'fixed', inset: 0, zIndex: 9999 }}
     >
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        onChange={handleImageInputChange}
+        style={{ display: 'none' }}
+      />
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: closing ? 0 : 1 }}
@@ -732,6 +951,7 @@ export function CanvasEditor({
                 setZoomLevel(Number(session?.graph.zoom?.() ?? zoomLevel))
               }}
             />
+            <ToolbarButton icon="mdi:image-plus-outline" label="上传图片" onPress={handleImageUpload} />
             <ToolbarButton icon="mdi:image-outline" label="导出 PNG" onPress={() => void handleExportPng()} />
           </div>
 
@@ -776,7 +996,7 @@ export function CanvasEditor({
         </div>
       </motion.div>
 
-      {edgeToolbarRect && selectedEdgeId && !closing ? (
+      {edgeToolbarRect && selectedEdgeId && edgeEditing && !closing ? (
         <Card
           shadow="lg"
           style={{
@@ -785,36 +1005,276 @@ export function CanvasEditor({
             top: Math.max(68, edgeToolbarRect.top - 18),
             transform: 'translate(-50%, -100%)',
             zIndex: 10020,
-            minWidth: 260,
             background: isDark ? 'rgba(15, 23, 42, 0.96)' : 'rgba(255, 255, 255, 0.98)',
             border: `1px solid ${isDark ? 'rgba(148, 163, 184, 0.12)' : 'rgba(148, 163, 184, 0.18)'}`,
           }}
           onPointerDown={(event) => event.stopPropagation()}
         >
           <CardBody style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 700 }}>箭头工具</span>
-              <Button isIconOnly size="sm" color="danger" variant="light" onPress={handleDeleteEdge} aria-label="删除箭头">
-                <Icon icon="mdi:delete-outline" width={18} />
-              </Button>
+            {/* Row 1: stroke type + arrow direction */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 2 }}>
+                {([
+                  { type: 'solid' as EdgeStrokeType, icon: 'mdi:minus', label: '实线' },
+                  { type: 'dashed' as EdgeStrokeType, icon: 'mdi:dots-horizontal', label: '虚线' },
+                  { type: 'dotted' as EdgeStrokeType, icon: 'mdi:dots-horizontal', label: '点线' },
+                ]).map((opt) => (
+                  <Tooltip key={opt.type} content={opt.label} placement="top">
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant={edgeStyle.strokeType === opt.type ? 'solid' : 'flat'}
+                      color={edgeStyle.strokeType === opt.type ? 'primary' : 'default'}
+                      onPress={() => handleEdgeStyleChange({ strokeType: opt.type })}
+                      aria-label={opt.label}
+                    >
+                      <Icon icon={opt.icon} width={16} />
+                    </Button>
+                  </Tooltip>
+                ))}
+              </div>
+
+              <div style={{ width: 1, height: 20, background: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.24)' }} />
+
+              <div style={{ display: 'flex', gap: 2 }}>
+                {([
+                  { dir: 'forward' as EdgeArrowDir, icon: 'mdi:arrow-right', label: '单向箭头' },
+                  { dir: 'bidirectional' as EdgeArrowDir, icon: 'mdi:swap-horizontal', label: '双向箭头' },
+                  { dir: 'none' as EdgeArrowDir, icon: 'mdi:minus', label: '无箭头' },
+                ]).map((opt) => (
+                  <Tooltip key={opt.dir} content={opt.label} placement="top">
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant={edgeStyle.arrowDir === opt.dir ? 'solid' : 'flat'}
+                      color={edgeStyle.arrowDir === opt.dir ? 'primary' : 'default'}
+                      onPress={() => handleEdgeStyleChange({ arrowDir: opt.dir })}
+                      aria-label={opt.label}
+                    >
+                      <Icon icon={opt.icon} width={16} />
+                    </Button>
+                  </Tooltip>
+                ))}
+              </div>
+
+              <div style={{ width: 1, height: 20, background: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.24)' }} />
+
+              <Tooltip content="删除连线" placement="top">
+                <Button isIconOnly size="sm" color="danger" variant="light" onPress={handleDeleteEdge} aria-label="删除连线">
+                  <Icon icon="mdi:delete-outline" width={16} />
+                </Button>
+              </Tooltip>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+
+            {/* Row 2: line style + stroke width */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 2 }}>
+                {([
+                  { ls: 'straight' as EdgeLineStyle, icon: 'mdi:ray-start-end', label: '直线' },
+                  { ls: 'curve' as EdgeLineStyle, icon: 'mdi:sine-wave', label: '曲线' },
+                  { ls: 'polyline' as EdgeLineStyle, icon: 'mdi:vector-polyline', label: '折线' },
+                  { ls: 'elbow' as EdgeLineStyle, icon: 'mdi:arrow-top-right-bottom-left', label: '折角线' },
+                ]).map((opt) => (
+                  <Tooltip key={opt.ls} content={opt.label} placement="top">
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant={edgeStyle.lineStyle === opt.ls ? 'solid' : 'flat'}
+                      color={edgeStyle.lineStyle === opt.ls ? 'primary' : 'default'}
+                      onPress={() => handleEdgeStyleChange({ lineStyle: opt.ls })}
+                      aria-label={opt.label}
+                    >
+                      <Icon icon={opt.icon} width={16} />
+                    </Button>
+                  </Tooltip>
+                ))}
+              </div>
+
+              <div style={{ width: 1, height: 20, background: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.24)' }} />
+
+              <div style={{ display: 'flex', gap: 2 }}>
+                {[1, 2, 3, 4].map((w) => (
+                  <Tooltip key={w} content={`${w}px 粗细`} placement="top">
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant={edgeStyle.strokeWidth === w ? 'solid' : 'flat'}
+                      color={edgeStyle.strokeWidth === w ? 'primary' : 'default'}
+                      onPress={() => handleEdgeStyleChange({ strokeWidth: w })}
+                      aria-label={`${w}px`}
+                    >
+                      <div style={{ width: Math.min(w * 5, 18), height: Math.min(w * 2, 6), borderRadius: 3, background: 'currentColor' }} />
+                    </Button>
+                  </Tooltip>
+                ))}
+              </div>
+
+              <div style={{ width: 1, height: 20, background: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.24)' }} />
+
+              <div style={{ display: 'flex', gap: 2 }}>
+                {['#64748b', '#3b82f6', '#ef4444', '#22c55e', '#f59e0b', '#8b5cf6'].map((c) => (
+                  <Tooltip key={c} content={c} placement="top">
+                    <button
+                      type="button"
+                      onClick={() => handleEdgeStyleChange({ color: c })}
+                      aria-label={c}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 6,
+                        background: c,
+                        border: edgeStyle.color === c
+                          ? `2px solid ${isDark ? '#e2e8f0' : '#1e293b'}`
+                          : `1px solid ${isDark ? 'rgba(148,163,184,0.2)' : 'rgba(148,163,184,0.3)'}`,
+                        cursor: 'pointer',
+                        padding: 0,
+                      }}
+                    />
+                  </Tooltip>
+                ))}
+              </div>
+            </div>
+
+            {/* Row 3: label input */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Input
                 size="sm"
                 variant="bordered"
-                placeholder="输入箭头说明文字"
+                placeholder="输入连线说明文字"
                 value={edgeLabelDraft}
                 onValueChange={setEdgeLabelDraft}
                 onKeyDown={(event) => {
                   event.stopPropagation()
-                  if (event.key === 'Enter') {
-                    handleSaveEdgeLabel()
-                  }
+                  if (event.key === 'Enter') handleSaveEdgeLabel()
                 }}
+                style={{ flex: 1 }}
               />
-              <Button size="sm" color="primary" onPress={handleSaveEdgeLabel}>
+              <Button size="sm" color="primary" variant="flat" onPress={handleSaveEdgeLabel}>
                 应用
               </Button>
+            </div>
+          </CardBody>
+        </Card>
+      ) : null}
+
+      {selectedNodeRect && selectedNodeId && nodeToolbarVisible && nodeStyle && !editingNodeId && !selectedEdgeId && selectionCount <= 1 && !closing ? (
+        <Card
+          shadow="lg"
+          style={{
+            position: 'fixed',
+            left: selectedNodeRect.left + selectedNodeRect.width / 2,
+            top: Math.max(68, selectedNodeRect.top - 14),
+            transform: 'translate(-50%, -100%)',
+            zIndex: 10020,
+            background: isDark ? 'rgba(15, 23, 42, 0.96)' : 'rgba(255, 255, 255, 0.98)',
+            border: `1px solid ${isDark ? 'rgba(148, 163, 184, 0.12)' : 'rgba(148, 163, 184, 0.18)'}`,
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <CardBody style={{ padding: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {/* Row 1: color + border width + border style + delete */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 2 }}>
+                {['#4f46e5', '#7c3aed', '#0891b2', '#059669', '#f59e0b', '#ef4444', '#ec4899', '#64748b'].map((c) => (
+                  <Tooltip key={c} content={c} placement="top">
+                    <button
+                      type="button"
+                      onClick={() => handleNodeStyleChange({ color: c })}
+                      aria-label={c}
+                      style={{
+                        width: 20,
+                        height: 20,
+                        borderRadius: 6,
+                        background: c,
+                        border: nodeStyle.color === c
+                          ? `2px solid ${isDark ? '#e2e8f0' : '#1e293b'}`
+                          : `1px solid ${isDark ? 'rgba(148,163,184,0.2)' : 'rgba(148,163,184,0.3)'}`,
+                        cursor: 'pointer',
+                        padding: 0,
+                      }}
+                    />
+                  </Tooltip>
+                ))}
+              </div>
+
+              <div style={{ width: 1, height: 20, background: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.24)' }} />
+
+              <Tooltip content="删除形状" placement="top">
+                <Button isIconOnly size="sm" color="danger" variant="light" onPress={() => handleDeleteSelection()} aria-label="删除形状">
+                  <Icon icon="mdi:delete-outline" width={16} />
+                </Button>
+              </Tooltip>
+            </div>
+
+            {/* Row 2: border width + border style */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ display: 'flex', gap: 2 }}>
+                {[1, 2, 3, 4].map((w) => (
+                  <Tooltip key={w} content={`${w}px 边框`} placement="top">
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant={nodeStyle.borderWidth === w ? 'solid' : 'flat'}
+                      color={nodeStyle.borderWidth === w ? 'primary' : 'default'}
+                      onPress={() => handleNodeStyleChange({ borderWidth: w })}
+                      aria-label={`${w}px`}
+                    >
+                      <div style={{ width: Math.min(w * 5, 18), height: Math.min(w * 2, 6), borderRadius: 3, background: 'currentColor' }} />
+                    </Button>
+                  </Tooltip>
+                ))}
+              </div>
+
+              <div style={{ width: 1, height: 20, background: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.24)' }} />
+
+              <div style={{ display: 'flex', gap: 2 }}>
+                {([
+                  { bs: 'solid' as NodeBorderStyle, icon: 'mdi:minus', label: '实线边框' },
+                  { bs: 'dashed' as NodeBorderStyle, icon: 'mdi:dots-horizontal', label: '虚线边框' },
+                  { bs: 'dotted' as NodeBorderStyle, icon: 'mdi:dots-horizontal', label: '点线边框' },
+                ]).map((opt) => (
+                  <Tooltip key={opt.bs} content={opt.label} placement="top">
+                    <Button
+                      isIconOnly
+                      size="sm"
+                      variant={nodeStyle.borderStyle === opt.bs ? 'solid' : 'flat'}
+                      color={nodeStyle.borderStyle === opt.bs ? 'primary' : 'default'}
+                      onPress={() => handleNodeStyleChange({ borderStyle: opt.bs })}
+                      aria-label={opt.label}
+                    >
+                      <Icon icon={opt.icon} width={16} />
+                    </Button>
+                  </Tooltip>
+                ))}
+              </div>
+
+              {(['rectangle', 'rounded', 'comparison', 'multiDocument', 'image', 'text'].includes(nodeStyle.variant)) ? (
+                <>
+                  <div style={{ width: 1, height: 20, background: isDark ? 'rgba(148,163,184,0.18)' : 'rgba(148,163,184,0.24)' }} />
+                  <div style={{ display: 'flex', gap: 2 }}>
+                    {([0, 8, 18, 28]).map((r) => (
+                      <Tooltip key={r} content={`圆角 ${r}px`} placement="top">
+                        <Button
+                          isIconOnly
+                          size="sm"
+                          variant={nodeStyle.borderRadius === r ? 'solid' : 'flat'}
+                          color={nodeStyle.borderRadius === r ? 'primary' : 'default'}
+                          onPress={() => handleNodeStyleChange({ borderRadius: r })}
+                          aria-label={`圆角${r}`}
+                        >
+                          <div style={{
+                            width: 14,
+                            height: 14,
+                            border: '2px solid currentColor',
+                            borderRadius: r === 0 ? 1 : r <= 8 ? 4 : r <= 18 ? 7 : 10,
+                            background: 'transparent',
+                          }} />
+                        </Button>
+                      </Tooltip>
+                    ))}
+                  </div>
+                </>
+              ) : null}
             </div>
           </CardBody>
         </Card>

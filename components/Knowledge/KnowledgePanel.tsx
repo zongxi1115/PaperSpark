@@ -1158,7 +1158,7 @@ export function KnowledgePanel() {
           </div>
         </div>
 
-        {batchQueueProgress.total > 0 && (
+        {batchQueueProgress.total > 0 && batchQueueProgress.completed < batchQueueProgress.total && (
           <div style={{ marginTop: 10 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 11, color: 'var(--text-muted)' }}>
               <span>
@@ -1321,7 +1321,7 @@ export function KnowledgePanel() {
                       RAG {item.ragChunks ? `· ${item.ragChunks}` : ''}
                     </span>
                   )}
-                  {batchParseTasks[item.id] && (
+                  {(batchParseTasks[item.id]?.status === 'queued' || batchParseTasks[item.id]?.status === 'processing') && (
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                       <span
                         style={{

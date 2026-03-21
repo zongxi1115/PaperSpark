@@ -56,7 +56,11 @@ function PaletteItemCard({
           flexShrink: 0,
         }}
       >
-        <Icon icon={item.icon} width={20} />
+        {item.customIconSvg ? (
+          <svg width={20} height={20} viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: item.customIconSvg }} />
+        ) : (
+          <Icon icon={item.icon} width={20} />
+        )}
       </div>
       <div style={{ minWidth: 0, flex: 1, fontSize: 12, fontWeight: 700, color: isDark ? '#e2e8f0' : '#0f172a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
           {item.label}
@@ -98,7 +102,11 @@ function PaletteIconButton({
           opacity: 0.92,
         }}
       >
-        <Icon icon={item.icon} width={20} />
+        {item.customIconSvg ? (
+          <svg width={20} height={20} viewBox="0 0 24 24" dangerouslySetInnerHTML={{ __html: item.customIconSvg }} />
+        ) : (
+          <Icon icon={item.icon} width={20} />
+        )}
       </button>
     </Tooltip>
   )

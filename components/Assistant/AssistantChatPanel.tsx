@@ -63,9 +63,10 @@ import { getVectorDocumentsByDocumentId } from '@/lib/pdfCache'
 import { getFullTextByKnowledgeId } from '@/lib/pdfCache'
 import { searchMyKnowledgeBase as runKnowledgeSearch } from '@/lib/assistantKnowledge'
 import { indexKnowledgeForRAG } from '@/lib/rag'
+import { getJSON, setJSON } from '@/lib/storage/StorageUtils'
 import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote, AssistantToolEvent, AssistantCitation, AssetItem, ArticleAuthor } from '@/lib/types'
 
-const ASSISTANT_CHECKPOINTS_KEY = 'paper_reader_assistant_doc_checkpoints'
+const ASSISTANT_CHECKPOINTS_KEY = 'assistant_doc_checkpoints'
 
 interface AssistantDocCheckpoint {
   id: string
@@ -88,19 +89,12 @@ function deepClone<T>(value: T): T {
 
 function getAssistantCheckpoints(): AssistantDocCheckpoint[] {
   if (typeof window === 'undefined') return []
-  try {
-    const raw = localStorage.getItem(ASSISTANT_CHECKPOINTS_KEY)
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    return Array.isArray(parsed) ? parsed as AssistantDocCheckpoint[] : []
-  } catch {
-    return []
-  }
+  return getJSON<AssistantDocCheckpoint[]>(ASSISTANT_CHECKPOINTS_KEY, [])
 }
 
 function saveAssistantCheckpoints(checkpoints: AssistantDocCheckpoint[]): void {
   if (typeof window === 'undefined') return
-  localStorage.setItem(ASSISTANT_CHECKPOINTS_KEY, JSON.stringify(checkpoints))
+  setJSON(ASSISTANT_CHECKPOINTS_KEY, checkpoints)
 }
 
 function getAssistantCheckpointById(id: string): AssistantDocCheckpoint | null {

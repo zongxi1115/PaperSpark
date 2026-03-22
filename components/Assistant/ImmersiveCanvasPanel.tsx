@@ -5,6 +5,7 @@ import { Button, Modal, ModalBody, ModalContent, ModalHeader, addToast, useDiscl
 import { Icon } from '@iconify/react'
 import { defaultSettings } from '@/lib/types'
 import { getSelectedLargeModel, getSettings } from '@/lib/storage'
+import { getString, setString } from '@/lib/storage/StorageUtils'
 import type { TextBlock } from '@/lib/types'
 
 type ImmersiveCanvasPanelProps = {
@@ -49,10 +50,8 @@ export default function ImmersiveCanvasPanel({ knowledgeItemId, title, fullText,
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const htmlKey = `paper_reader_canvas_html_${knowledgeItemId}`
-    const codeKey = `paper_reader_canvas_code_${knowledgeItemId}`
-    const savedHtml = localStorage.getItem(htmlKey) || ''
-    const savedCode = localStorage.getItem(codeKey) || ''
+    const savedHtml = getString(`canvas_html_${knowledgeItemId}`, '')
+    const savedCode = getString(`canvas_code_${knowledgeItemId}`, '')
     if (savedHtml) setCanvasHtml(savedHtml)
     if (savedCode) setStreamingCode(savedCode)
   }, [knowledgeItemId])
@@ -139,8 +138,8 @@ export default function ImmersiveCanvasPanel({ knowledgeItemId, title, fullText,
 
       setCanvasHtml(html)
       if (typeof window !== 'undefined') {
-        localStorage.setItem(`paper_reader_canvas_html_${knowledgeItemId}`, html)
-        localStorage.setItem(`paper_reader_canvas_code_${knowledgeItemId}`, fullCode)
+        setString(`canvas_html_${knowledgeItemId}`, html)
+        setString(`canvas_code_${knowledgeItemId}`, fullCode)
       }
       setShowCodePanel(false)
       onPreviewOpen()

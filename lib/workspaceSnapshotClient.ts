@@ -17,6 +17,7 @@ import {
   getZoteroConfig,
   getAgents,
 } from './storage'
+import { getString } from './storage/StorageUtils'
 import type { GuideCache, PDFAnnotation, PDFDocumentCache, PDFPageCache, TranslationCache } from './types'
 import {
   buildKnowledgeOverviewText,
@@ -137,7 +138,7 @@ export async function buildWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
   const data = {
     settings: sanitizeSettings(getSettings()),
     zotero: sanitizeZoteroConfig(getZoteroConfig()),
-    theme: window.localStorage.getItem('paper_reader_theme'),
+    theme: getString('theme', 'system'),
     lastDocId: getLastDocId(),
     documents: documentSnapshots,
     documentVersions: versionSnapshots,

@@ -6,6 +6,7 @@ import type {
   KnowledgeNodeType,
   KnowledgeRelationType
 } from './types'
+import { getJSON, setJSON } from './storage/StorageUtils'
 
 const STORAGE_KEY = 'knowledge_graph'
 
@@ -18,8 +19,7 @@ export function getKnowledgeGraph(): KnowledgeGraph | null {
   if (typeof window === 'undefined') return null
 
   try {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    return stored ? JSON.parse(stored) : null
+    return getJSON<KnowledgeGraph | null>(STORAGE_KEY, null)
   } catch (error) {
     console.error('Failed to load knowledge graph:', error)
     return null
@@ -31,7 +31,7 @@ export function saveKnowledgeGraph(graph: KnowledgeGraph): void {
   if (typeof window === 'undefined') return
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(graph))
+    setJSON(STORAGE_KEY, graph)
   } catch (error) {
     console.error('Failed to save knowledge graph:', error)
   }

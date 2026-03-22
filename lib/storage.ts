@@ -1,9 +1,11 @@
 import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote, AssetType, AssetItem } from './types'
 import { defaultSettings } from './types'
+import { getStorage } from './storage/StorageFactory'
+import { getJSON, setJSON, getString, setString, removeItem as removeStorageItem } from './storage/StorageUtils'
 
-const DOCUMENTS_KEY = 'paper_reader_documents'
-const SETTINGS_KEY = 'paper_reader_settings'
-const LAST_DOC_KEY = 'paper_reader_last_doc'
+const DOCUMENTS_KEY = 'documents'
+const SETTINGS_KEY = 'settings'
+const LAST_DOC_KEY = 'last_doc'
 
 function isBrowser() {
   return typeof window !== 'undefined'
@@ -16,18 +18,12 @@ function emitStorageEvent(eventName: string) {
 
 export function getDocuments(): AppDocument[] {
   if (!isBrowser()) return []
-  try {
-    const raw = localStorage.getItem(DOCUMENTS_KEY)
-    if (!raw) return []
-    return JSON.parse(raw) as AppDocument[]
-  } catch {
-    return []
-  }
+  return getJSON<AppDocument[]>(DOCUMENTS_KEY, [])
 }
 
 export function saveDocuments(docs: AppDocument[]): void {
   if (!isBrowser()) return
-  localStorage.setItem(DOCUMENTS_KEY, JSON.stringify(docs))
+  setJSON(DOCUMENTS_KEY, docs)
 }
 
 export function getDocument(id: string): AppDocument | null {
@@ -59,9 +55,7 @@ export function deleteDocument(id: string): void {
 export function getSettings(): AppSettings {
   if (!isBrowser()) return defaultSettings
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY)
-    if (!raw) return defaultSettings
-    const saved = JSON.parse(raw) as Partial<AppSettings>
+    const saved = getJSON<Partial<AppSettings>>(SETTINGS_KEY, {})
     // 迁移旧配置到新格式
     const merged = { ...defaultSettings, ...saved }
     // 如果没有 providers 但有旧的 smallModel/largeModel，进行迁移
@@ -76,7 +70,7 @@ export function getSettings(): AppSettings {
 
 export function saveSettings(settings: AppSettings): void {
   if (!isBrowser()) return
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+  setJSON(SETTINGS_KEY, settings)
 }
 
 // 根据模型 ID 获取模型配置
@@ -137,12 +131,12 @@ export function getRerankModelConfig(settings: AppSettings): import('./types').R
 
 export function getLastDocId(): string | null {
   if (!isBrowser()) return null
-  return localStorage.getItem(LAST_DOC_KEY)
+  return getString(LAST_DOC_KEY, '')
 }
 
 export function setLastDocId(id: string): void {
   if (!isBrowser()) return
-  localStorage.setItem(LAST_DOC_KEY, id)
+  setString(LAST_DOC_KEY, id)
 }
 
 export const generateId = () => Math.random().toString(36).substring(2, 9)
@@ -157,23 +151,17 @@ export const formatDate = (dateStr: string) => {
 }
 
 // 知识库存储
-const KNOWLEDGE_KEY = 'paper_reader_knowledge'
-const ZOTERO_CONFIG_KEY = 'paper_reader_zotero_config'
+const KNOWLEDGE_KEY = 'knowledge'
+const ZOTERO_CONFIG_KEY = 'zotero_config'
 
 export function getKnowledgeItems(): KnowledgeItem[] {
   if (!isBrowser()) return []
-  try {
-    const raw = localStorage.getItem(KNOWLEDGE_KEY)
-    if (!raw) return []
-    return JSON.parse(raw) as KnowledgeItem[]
-  } catch {
-    return []
-  }
+  return getJSON<KnowledgeItem[]>(KNOWLEDGE_KEY, [])
 }
 
 export function saveKnowledgeItems(items: KnowledgeItem[]): void {
   if (!isBrowser()) return
-  localStorage.setItem(KNOWLEDGE_KEY, JSON.stringify(items))
+  setJSON(KNOWLEDGE_KEY, items)
   emitStorageEvent('knowledge-items-updated')
 }
 
@@ -207,42 +195,30 @@ export function getKnowledgeItem(id: string): KnowledgeItem | null {
 
 export function getZoteroConfig(): ZoteroConfig | null {
   if (!isBrowser()) return null
-  try {
-    const raw = localStorage.getItem(ZOTERO_CONFIG_KEY)
-    if (!raw) return null
-    return JSON.parse(raw) as ZoteroConfig
-  } catch {
-    return null
-  }
+  return getJSON<ZoteroConfig | null>(ZOTERO_CONFIG_KEY, null)
 }
 
 export function saveZoteroConfig(config: ZoteroConfig): void {
   if (!isBrowser()) return
-  localStorage.setItem(ZOTERO_CONFIG_KEY, JSON.stringify(config))
+  setJSON(ZOTERO_CONFIG_KEY, config)
 }
 
 export function clearZoteroConfig(): void {
   if (!isBrowser()) return
-  localStorage.removeItem(ZOTERO_CONFIG_KEY)
+  removeStorageItem(ZOTERO_CONFIG_KEY)
 }
 
 // 随记想法存储
-const THOUGHTS_KEY = 'paper_reader_thoughts'
+const THOUGHTS_KEY = 'thoughts'
 
 export function getThoughts(): Thought[] {
   if (!isBrowser()) return []
-  try {
-    const raw = localStorage.getItem(THOUGHTS_KEY)
-    if (!raw) return []
-    return JSON.parse(raw) as Thought[]
-  } catch {
-    return []
-  }
+  return getJSON<Thought[]>(THOUGHTS_KEY, [])
 }
 
 export function saveThoughts(thoughts: Thought[]): void {
   if (!isBrowser()) return
-  localStorage.setItem(THOUGHTS_KEY, JSON.stringify(thoughts))
+  setJSON(THOUGHTS_KEY, thoughts)
 }
 
 export function getThought(id: string): Thought | null {
@@ -272,7 +248,7 @@ export function deleteThought(id: string): void {
 }
 
 // 智能体存储
-const AGENTS_KEY = 'paper_reader_agents'
+const AGENTS_KEY = 'agents'
 
 // 预设智能体（服务端预设，但留空给用户填写）
 export const PRESET_AGENTS: Agent[] = [
@@ -305,13 +281,13 @@ export const PRESET_AGENTS: Agent[] = [
 export function getAgents(): Agent[] {
   if (!isBrowser()) return []
   try {
-    const raw = localStorage.getItem(AGENTS_KEY)
-    if (!raw) {
+    const agents = getJSON<Agent[] | null>(AGENTS_KEY, null)
+    if (!agents) {
       // 首次加载时初始化预设智能体
       saveAgents(PRESET_AGENTS)
       return PRESET_AGENTS
     }
-    return JSON.parse(raw) as Agent[]
+    return agents
   } catch {
     return PRESET_AGENTS
   }
@@ -319,7 +295,7 @@ export function getAgents(): Agent[] {
 
 export function saveAgents(agents: Agent[]): void {
   if (!isBrowser()) return
-  localStorage.setItem(AGENTS_KEY, JSON.stringify(agents))
+  setJSON(AGENTS_KEY, agents)
 }
 
 export function getAgent(id: string): Agent | null {
@@ -346,22 +322,16 @@ export function deleteAgent(id: string): void {
 }
 
 // 助手对话历史存储
-const CONVERSATIONS_KEY = 'paper_reader_assistant_conversations'
+const CONVERSATIONS_KEY = 'assistant_conversations'
 
 export function getConversations(): AssistantConversation[] {
   if (!isBrowser()) return []
-  try {
-    const raw = localStorage.getItem(CONVERSATIONS_KEY)
-    if (!raw) return []
-    return JSON.parse(raw) as AssistantConversation[]
-  } catch {
-    return []
-  }
+  return getJSON<AssistantConversation[]>(CONVERSATIONS_KEY, [])
 }
 
 export function saveConversations(conversations: AssistantConversation[]): void {
   if (!isBrowser()) return
-  localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(conversations))
+  setJSON(CONVERSATIONS_KEY, conversations)
 }
 
 export function getConversation(id: string): AssistantConversation | null {
@@ -394,22 +364,16 @@ export function updateConversationTitle(id: string, title: string): void {
 }
 
 // 助手临时便签存储
-const NOTES_KEY = 'paper_reader_assistant_notes'
+const NOTES_KEY = 'assistant_notes'
 
 export function getAssistantNotes(): AssistantNote[] {
   if (!isBrowser()) return []
-  try {
-    const raw = localStorage.getItem(NOTES_KEY)
-    if (!raw) return []
-    return JSON.parse(raw) as AssistantNote[]
-  } catch {
-    return []
-  }
+  return getJSON<AssistantNote[]>(NOTES_KEY, [])
 }
 
 export function saveAssistantNotes(notes: AssistantNote[]): void {
   if (!isBrowser()) return
-  localStorage.setItem(NOTES_KEY, JSON.stringify(notes))
+  setJSON(NOTES_KEY, notes)
 }
 
 export function addAssistantNote(note: Omit<AssistantNote, 'id' | 'createdAt' | 'updatedAt'>): AssistantNote {
@@ -441,8 +405,8 @@ export function deleteAssistantNote(id: string): void {
 
 // ============ 资产库存储 ============
 
-const ASSET_TYPES_KEY = 'paper_reader_asset_types'
-const ASSETS_KEY = 'paper_reader_assets'
+const ASSET_TYPES_KEY = 'asset_types'
+const ASSETS_KEY = 'assets'
 
 // 预设资产类型
 export const DEFAULT_ASSET_TYPES: AssetType[] = [
@@ -472,12 +436,12 @@ export const DEFAULT_ASSET_TYPES: AssetType[] = [
 export function getAssetTypes(): AssetType[] {
   if (!isBrowser()) return DEFAULT_ASSET_TYPES
   try {
-    const raw = localStorage.getItem(ASSET_TYPES_KEY)
-    if (!raw) {
+    const types = getJSON<AssetType[] | null>(ASSET_TYPES_KEY, null)
+    if (!types) {
       saveAssetTypes(DEFAULT_ASSET_TYPES)
       return DEFAULT_ASSET_TYPES
     }
-    return JSON.parse(raw) as AssetType[]
+    return types
   } catch {
     return DEFAULT_ASSET_TYPES
   }
@@ -485,7 +449,7 @@ export function getAssetTypes(): AssetType[] {
 
 export function saveAssetTypes(types: AssetType[]): void {
   if (!isBrowser()) return
-  localStorage.setItem(ASSET_TYPES_KEY, JSON.stringify(types))
+  setJSON(ASSET_TYPES_KEY, types)
 }
 
 export function getAssetType(id: string): AssetType | null {
@@ -514,18 +478,12 @@ export function deleteAssetType(id: string): void {
 // 资产项管理
 export function getAssets(): AssetItem[] {
   if (!isBrowser()) return []
-  try {
-    const raw = localStorage.getItem(ASSETS_KEY)
-    if (!raw) return []
-    return JSON.parse(raw) as AssetItem[]
-  } catch {
-    return []
-  }
+  return getJSON<AssetItem[]>(ASSETS_KEY, [])
 }
 
 export function saveAssets(assets: AssetItem[]): void {
   if (!isBrowser()) return
-  localStorage.setItem(ASSETS_KEY, JSON.stringify(assets))
+  setJSON(ASSETS_KEY, assets)
 }
 
 export function getAsset(id: string): AssetItem | null {
@@ -553,15 +511,13 @@ export function getAssetsByType(typeId: string): AssetItem[] {
 
 // ============ 文档版本历史存储 ============
 
-const VERSIONS_KEY = 'paper_reader_document_versions'
+const VERSIONS_KEY = 'document_versions'
 const MAX_VERSIONS_PER_DOC = 20 // 每个文档最多保存的版本数
 
 export function getDocumentVersions(documentId: string): import('./types').DocumentVersion[] {
   if (!isBrowser()) return []
   try {
-    const raw = localStorage.getItem(VERSIONS_KEY)
-    if (!raw) return []
-    const allVersions = JSON.parse(raw) as import('./types').DocumentVersion[]
+    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
     return allVersions
       .filter(v => v.documentId === documentId)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
@@ -572,20 +528,13 @@ export function getDocumentVersions(documentId: string): import('./types').Docum
 
 export function getAllVersions(): import('./types').DocumentVersion[] {
   if (!isBrowser()) return []
-  try {
-    const raw = localStorage.getItem(VERSIONS_KEY)
-    if (!raw) return []
-    return JSON.parse(raw) as import('./types').DocumentVersion[]
-  } catch {
-    return []
-  }
+  return getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
 }
 
 export function saveDocumentVersion(version: import('./types').DocumentVersion): void {
   if (!isBrowser()) return
   try {
-    const raw = localStorage.getItem(VERSIONS_KEY)
-    const allVersions: import('./types').DocumentVersion[] = raw ? JSON.parse(raw) : []
+    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
     
     // 添加新版本
     allVersions.push(version)
@@ -600,9 +549,9 @@ export function saveDocumentVersion(version: import('./types').DocumentVersion):
       const toRemove = docVersions.slice(MAX_VERSIONS_PER_DOC)
       const toRemoveIds = new Set(toRemove.map(v => v.id))
       const filtered = allVersions.filter(v => !toRemoveIds.has(v.id))
-      localStorage.setItem(VERSIONS_KEY, JSON.stringify(filtered))
+      setJSON(VERSIONS_KEY, filtered)
     } else {
-      localStorage.setItem(VERSIONS_KEY, JSON.stringify(allVersions))
+      setJSON(VERSIONS_KEY, allVersions)
     }
     
     emitStorageEvent('document-versions-updated')
@@ -614,11 +563,9 @@ export function saveDocumentVersion(version: import('./types').DocumentVersion):
 export function deleteDocumentVersion(versionId: string): void {
   if (!isBrowser()) return
   try {
-    const raw = localStorage.getItem(VERSIONS_KEY)
-    if (!raw) return
-    const allVersions = JSON.parse(raw) as import('./types').DocumentVersion[]
+    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
     const filtered = allVersions.filter(v => v.id !== versionId)
-    localStorage.setItem(VERSIONS_KEY, JSON.stringify(filtered))
+    setJSON(VERSIONS_KEY, filtered)
     emitStorageEvent('document-versions-updated')
   } catch (e) {
     console.error('Failed to delete document version:', e)
@@ -628,11 +575,9 @@ export function deleteDocumentVersion(versionId: string): void {
 export function deleteAllDocumentVersions(documentId: string): void {
   if (!isBrowser()) return
   try {
-    const raw = localStorage.getItem(VERSIONS_KEY)
-    if (!raw) return
-    const allVersions = JSON.parse(raw) as import('./types').DocumentVersion[]
+    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
     const filtered = allVersions.filter(v => v.documentId !== documentId)
-    localStorage.setItem(VERSIONS_KEY, JSON.stringify(filtered))
+    setJSON(VERSIONS_KEY, filtered)
     emitStorageEvent('document-versions-updated')
   } catch (e) {
     console.error('Failed to delete all document versions:', e)
@@ -642,9 +587,7 @@ export function deleteAllDocumentVersions(documentId: string): void {
 export function getDocumentVersion(versionId: string): import('./types').DocumentVersion | null {
   if (!isBrowser()) return null
   try {
-    const raw = localStorage.getItem(VERSIONS_KEY)
-    if (!raw) return null
-    const allVersions = JSON.parse(raw) as import('./types').DocumentVersion[]
+    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
     return allVersions.find(v => v.id === versionId) ?? null
   } catch {
     return null

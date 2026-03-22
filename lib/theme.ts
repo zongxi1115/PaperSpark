@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
+import { getString, setString } from './storage/StorageUtils'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
-const THEME_STORAGE_KEY = 'paper_reader_theme'
+const THEME_STORAGE_KEY = 'theme'
 
 // 获取系统主题偏好
 function getSystemTheme(): 'light' | 'dark' {
@@ -15,7 +16,7 @@ function getSystemTheme(): 'light' | 'dark' {
 // 获取存储的主题设置
 function getStoredTheme(): ThemeMode {
   if (typeof window === 'undefined') return 'system'
-  const stored = localStorage.getItem(THEME_STORAGE_KEY)
+  const stored = getString(THEME_STORAGE_KEY, 'system')
   if (stored === 'light' || stored === 'dark' || stored === 'system') {
     return stored
   }
@@ -25,7 +26,7 @@ function getStoredTheme(): ThemeMode {
 // 存储主题设置
 function storeTheme(theme: ThemeMode) {
   if (typeof window === 'undefined') return
-  localStorage.setItem(THEME_STORAGE_KEY, theme)
+  setString(THEME_STORAGE_KEY, theme)
 }
 
 // 应用主题到 DOM
@@ -95,7 +96,7 @@ export function getThemeScript() {
   return `
     (function() {
       try {
-        var theme = localStorage.getItem('${THEME_STORAGE_KEY}') || 'system';
+        var theme = localStorage.getItem('paper_reader_${THEME_STORAGE_KEY}') || 'system';
         var resolved = theme === 'system' 
           ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
           : theme;

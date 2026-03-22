@@ -1,40 +1,29 @@
 import type { KnowledgeItem, AutoGraphAnalysis } from './types'
 import { getSettings, getSelectedSmallModel, updateKnowledgeItem } from './storage'
 import { buildKnowledgeGraphFromAnalysis } from './knowledgeGraph'
+import { getJSON, setJSON } from './storage/StorageUtils'
 
-const AUTO_GRAPH_FINGERPRINT_KEY = 'paper_reader_graph_build_fingerprints'
-const AUTO_GRAPH_ANALYZED_ONCE_KEY = 'paper_reader_graph_analyzed_once'
+const AUTO_GRAPH_FINGERPRINT_KEY = 'graph_build_fingerprints'
+const AUTO_GRAPH_ANALYZED_ONCE_KEY = 'graph_analyzed_once'
 
 function getBuildFingerprints(): Record<string, string> {
   if (typeof window === 'undefined') return {}
-  try {
-    const raw = localStorage.getItem(AUTO_GRAPH_FINGERPRINT_KEY)
-    if (!raw) return {}
-    return JSON.parse(raw) as Record<string, string>
-  } catch {
-    return {}
-  }
+  return getJSON<Record<string, string>>(AUTO_GRAPH_FINGERPRINT_KEY, {})
 }
 
 function saveBuildFingerprints(fingerprints: Record<string, string>): void {
   if (typeof window === 'undefined') return
-  localStorage.setItem(AUTO_GRAPH_FINGERPRINT_KEY, JSON.stringify(fingerprints))
+  setJSON(AUTO_GRAPH_FINGERPRINT_KEY, fingerprints)
 }
 
 function getAnalyzedOnceMap(): Record<string, string> {
   if (typeof window === 'undefined') return {}
-  try {
-    const raw = localStorage.getItem(AUTO_GRAPH_ANALYZED_ONCE_KEY)
-    if (!raw) return {}
-    return JSON.parse(raw) as Record<string, string>
-  } catch {
-    return {}
-  }
+  return getJSON<Record<string, string>>(AUTO_GRAPH_ANALYZED_ONCE_KEY, {})
 }
 
 function saveAnalyzedOnceMap(map: Record<string, string>): void {
   if (typeof window === 'undefined') return
-  localStorage.setItem(AUTO_GRAPH_ANALYZED_ONCE_KEY, JSON.stringify(map))
+  setJSON(AUTO_GRAPH_ANALYZED_ONCE_KEY, map)
 }
 
 function buildContentFingerprint(knowledgeItem: KnowledgeItem, fullText?: string): string {

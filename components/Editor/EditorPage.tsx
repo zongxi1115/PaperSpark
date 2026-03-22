@@ -43,6 +43,7 @@ import { exportToLatex, type LatexExportLanguage } from '@/lib/latexExporter'
 import { insertMarkdownBlocksAtCursor, looksLikeMarkdownContent } from '@/lib/blocknoteMarkdown'
 import { useThemeContext } from '@/components/Providers'
 import { CanvasBlockSpec } from './CanvasBlock'
+import { QuoteToAssistantButton } from './QuoteToAssistantButton'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -1580,6 +1581,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                   <FormattingToolbar>
                     {getFormattingToolbarItems()}
                     <AIToolbarButton />
+                    <QuoteToAssistantButton />
                   </FormattingToolbar>
                 )}
               />

@@ -119,42 +119,102 @@ function normalizeToolText(text: string): string {
   return text.replace(/\r\n?/g, '\n')
 }
 
+/**
+ * 检测一行是否为工具调用头（容忍多余冒号、空格等）
+ * 支持 ::insert, :::insert, :: insert 等变体
+ */
 function parseToolHeader(line: string): ToolHeaderMatch | null {
   const trimmedLine = line.trim()
-  const match = trimmedLine.match(/^::(insert|update|delete)\b(.*)$/)
+  // 容忍 2+ 个冒号开头，可选空格，然后是操作类型
+  const match = trimmedLine.match(/^:{2,}\s*(insert|update|delete)\b(.*)$/)
   if (!match) return null
 
   const type = match[1] as 'insert' | 'delete' | 'update'
   const remainder = match[2].trim()
 
   if (type === 'insert') {
-    const tokens = remainder.split(/\s+/).filter(Boolean)
+    return parseInsertParams(remainder)
+  }
+
+  // delete/update 需要 blockId
+  const blockId = remainder.split(/\s+/).find(Boolean) ?? ''
+  // blockId 可能为空（参数在下一行），返回但标记为空
+  return {
+    type,
+    params: { blockId },
+  }
+}
+
+/**
+ * 解析 insert 操作的参数
+ * 支持多种格式：
+ *   ::insert after block-123
+ *   ::insert block-123          (默认 after)
+ *   ::insert before block-123
+ *   ::insert                    (参数在下一行)
+ */
+function parseInsertParams(remainder: string): ToolHeaderMatch {
+  const tokens = remainder.split(/\s+/).filter(Boolean)
+  let position: 'before' | 'after' = 'after'
+  let referenceId = ''
+
+  if (tokens[0] === 'before' || tokens[0] === 'after') {
+    position = tokens[0]
+    referenceId = tokens[1] ?? ''
+  } else if (tokens[0]) {
+    referenceId = tokens[0]
+  }
+
+  return {
+    type: 'insert',
+    params: { position, referenceId },
+  }
+}
+
+/**
+ * 尝试从一行文本中解析出参数（用于多行工具调用格式）
+ * 支持：
+ *   after block-123
+ *   before block-123
+ *   block-123
+ *   blockId: block-123
+ */
+function parseToolParamsLine(line: string, toolType: 'insert' | 'delete' | 'update'): Record<string, string> | null {
+  const trimmed = line.trim()
+  // 跳过空行和工具调用头
+  if (!trimmed || /^:{2,}\s*(insert|update|delete)\b/.test(trimmed) || trimmed === '::') return null
+
+  if (toolType === 'insert') {
+    const tokens = trimmed.split(/\s+/).filter(Boolean)
     let position: 'before' | 'after' = 'after'
     let referenceId = ''
 
     if (tokens[0] === 'before' || tokens[0] === 'after') {
       position = tokens[0]
       referenceId = tokens[1] ?? ''
-    } else {
-      referenceId = tokens[0] ?? ''
+    } else if (tokens[0]) {
+      // 检查是否为 blockId 格式（非关键词）
+      referenceId = tokens[0]
     }
 
-    return {
-      type,
-      params: {
-        position,
-        referenceId,
-      },
-    }
+    if (!referenceId) return null
+    return { position, referenceId }
   }
 
-  const blockId = remainder.split(/\s+/).find(Boolean) ?? ''
-  if (!blockId) return null
-
-  return {
-    type,
-    params: { blockId },
+  // delete / update
+  // 支持 "block-123" 或 "blockId: block-123" 格式
+  const kvMatch = trimmed.match(/^(?:blockId|block_id|id)\s*[:=]?\s*(.+)$/i)
+  if (kvMatch) {
+    return { blockId: kvMatch[1].trim() }
   }
+
+  // 直接是 blockId
+  const tokens = trimmed.split(/\s+/).filter(Boolean)
+  if (tokens.length >= 1 && !tokens[0].startsWith(':')) {
+    return { blockId: tokens[0] }
+  }
+
+  return null
 }
 
 function finalizeToolCall(active: ActiveToolCall, end: number, isComplete: boolean): ParsedToolCall {
@@ -213,44 +273,137 @@ export class StreamingToolDetector {
 
 /**
  * 解析简化的工具调用格式
- * 
- * 格式示例：
+ *
+ * 支持单行和多行格式：
+ *
+ * 单行格式：
  * ::insert after block-123
  * 要插入的内容
  * ::
- * 
- * ::delete block-123
- * 
- * ::update block-123
+ *
+ * 多行格式（容忍"傻模型"换行输出参数）：
+ * ::insert
+ * after block-123
+ * 要插入的内容
+ * ::
+ *
+ * ::update
+ * block-123
  * 更新后的内容
  * ::
+ *
+ * ::delete block-123
+ *
+ * 也容忍多余冒号：:::insert, ::::delete 等
  */
 export function parseSimpleToolCalls(text: string, options: ParseSimpleToolCallsOptions = {}): ParsedToolCall[] {
   const normalizedText = normalizeToolText(text)
   const results: ParsedToolCall[] = []
   const lines = normalizedText.split('\n')
   let activeTool: ActiveToolCall | null = null
+  let pendingHeader: ToolHeaderMatch | null = null
+  let pendingHeaderOffset = 0
   let offset = 0
 
-  lines.forEach((line, lineIndex) => {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const line = lines[lineIndex]
     const newlineLength = lineIndex < lines.length - 1 ? 1 : 0
     const nextOffset = offset + line.length + newlineLength
 
+    // ── 在活跃工具中 ──
     if (activeTool) {
-      if (line.trim() === '::') {
+      const trimmed = line.trim()
+      if (trimmed === '::' || trimmed.match(/^:{2,}$/)) {
+        // 结束标记
         results.push(finalizeToolCall(activeTool, nextOffset, true))
         activeTool = null
-      } else {
-        activeTool.contentLines.push(line)
+        offset = nextOffset
+        continue
       }
+      activeTool.contentLines.push(line)
       offset = nextOffset
-      return
+      continue
     }
 
+    // ── 等待待确认的 header 参数 ──
+    if (pendingHeader) {
+      const params = parseToolParamsLine(line, pendingHeader.type)
+      if (params) {
+        // 合并参数到 header
+        const mergedHeader: ToolHeaderMatch = {
+          type: pendingHeader.type,
+          params: { ...pendingHeader.params, ...params },
+        }
+
+        if (mergedHeader.type === 'delete') {
+          // delete 不需要内容行，直接完成
+          results.push({
+            type: 'delete',
+            params: mergedHeader.params,
+            content: '',
+            isComplete: true,
+            sourceRange: {
+              start: pendingHeaderOffset,
+              end: nextOffset,
+            },
+          })
+          pendingHeader = null
+          offset = nextOffset
+          continue
+        }
+
+        // insert / update：创建活跃工具，参数行不计入内容
+        activeTool = {
+          type: mergedHeader.type,
+          params: mergedHeader.params,
+          contentLines: [],
+          start: pendingHeaderOffset,
+        }
+        pendingHeader = null
+        offset = nextOffset
+        continue
+      }
+
+      // 下一行不是参数行 → 当作无参数的工具调用处理
+      const fallbackHeader = pendingHeader
+      const fallbackStart = pendingHeaderOffset
+      pendingHeader = null
+
+      if (fallbackHeader.type === 'delete') {
+        // delete 没有 blockId → 无效，跳过
+        offset = nextOffset
+        continue
+      }
+
+      activeTool = {
+        type: fallbackHeader.type,
+        params: fallbackHeader.params,
+        contentLines: [],
+        start: fallbackStart,
+      }
+      // 不 consume 当前行，重新处理
+      lineIndex--
+      continue
+    }
+
+    // ── 尝试解析新工具调用头 ──
     const header = parseToolHeader(line)
     if (!header) {
       offset = nextOffset
-      return
+      continue
+    }
+
+    // 检查参数是否完整
+    const hasParams = header.type === 'insert'
+      ? !!header.params.referenceId
+      : !!header.params.blockId
+
+    if (!hasParams) {
+      // 参数不完整，标记为 pending，下一行可能包含参数
+      pendingHeader = header
+      pendingHeaderOffset = offset
+      offset = nextOffset
+      continue
     }
 
     if (header.type === 'delete') {
@@ -265,7 +418,7 @@ export function parseSimpleToolCalls(text: string, options: ParseSimpleToolCalls
         },
       })
       offset = nextOffset
-      return
+      continue
     }
 
     activeTool = {
@@ -276,8 +429,25 @@ export function parseSimpleToolCalls(text: string, options: ParseSimpleToolCalls
     }
 
     offset = nextOffset
-  })
+  }
 
+  // 处理未关闭的 pending header
+  if (pendingHeader && options.includeIncomplete) {
+    if (pendingHeader.type !== 'delete') {
+      results.push(finalizeToolCall(
+        {
+          type: pendingHeader.type,
+          params: pendingHeader.params,
+          contentLines: [],
+          start: pendingHeaderOffset,
+        },
+        normalizedText.length,
+        false,
+      ))
+    }
+  }
+
+  // 处理未关闭的活跃工具
   if (activeTool && options.includeIncomplete) {
     results.push(finalizeToolCall(activeTool, normalizedText.length, false))
   }
@@ -292,7 +462,12 @@ export function stripSimpleToolSyntax(text: string): string {
     .sort((left, right) => (left.sourceRange!.start - right.sourceRange!.start))
 
   if (toolCalls.length === 0) {
+    // 即使没有完整工具调用，也清理孤立的 :: 标记
     return normalizedText
+      .replace(/^:{2,}\s*(?:insert|update|delete)\b[^\n]*/gm, '')
+      .replace(/^:{2,}\s*$/gm, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
   }
 
   let cursor = 0
@@ -308,6 +483,10 @@ export function stripSimpleToolSyntax(text: string): string {
   result += normalizedText.slice(cursor)
 
   return result
+    // 清理孤立的工具调用头（不完整的）
+    .replace(/^:{2,}\s*(?:insert|update|delete)\b[^\n]*/gm, '')
+    // 清理孤立的 :: 结束标记
+    .replace(/^:{2,}\s*$/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
 }
@@ -534,13 +713,13 @@ async function animateInsertWithMark(
     return insertedId
   }
 
-  const BATCH = 3
+  const BATCH = 8
   for (let i = BATCH; i <= fullText.length; i += BATCH) {
     if (signal.aborted) return insertedId
     const partial = fullText.slice(0, i)
     editor.updateBlock(insertedId!, { ...block, content: buildPartialContent(block, partial) } as any)
     markBlockAsInsertion(editor, insertedId!, suggestionId)
-    await delay(12 * jitter())
+    await delay(6 * jitter())
   }
 
   editor.updateBlock(insertedId, block as any)
@@ -1014,7 +1193,16 @@ export function EditDocumentTool({ request, status, progress, error, onAccept, o
 }
 
 function btnStyle(variant: 'accent' | 'ghost'): React.CSSProperties {
-  const base: React.CSSProperties = { border: 'none', borderRadius: 5, padding: '3px 10px', fontSize: 11, cursor: 'pointer', flexShrink: 0 }
+  const base: React.CSSProperties = {
+    border: 'none',
+    borderRadius: 6,
+    padding: '4px 14px',
+    fontSize: 11,
+    fontWeight: 500,
+    cursor: 'pointer',
+    flexShrink: 0,
+    transition: 'all 0.15s ease',
+  }
   if (variant === 'accent') return { ...base, background: 'var(--accent-color)', color: '#fff' }
   return { ...base, background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-color)' }
 }
@@ -1079,27 +1267,38 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
     update: <UpdateIcon />,
   }[type]
 
+  const accentColor = {
+    insert: '#10b981',
+    delete: '#ef4444',
+    update: '#f59e0b',
+  }[type]
+
   const isSettled = status === 'accepted' || status === 'rejected'
 
   return (
-    <div style={{
-      border: '1px solid var(--border-color)',
-      borderRadius: 8,
-      overflow: 'hidden',
-      fontSize: 12,
-      fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif',
-      opacity: isSettled ? 0.7 : 1,
-      transition: 'opacity 0.25s',
-      pointerEvents: isSettled ? 'none' : 'auto',
-      margin: '4px 0',
-    }}>
+    <motion.div
+      initial={{ opacity: 0, y: 8, scale: 0.97 }}
+      animate={{ opacity: isSettled ? 0.55 : 1, y: 0, scale: 1 }}
+      transition={{ duration: 0.25, ease: [0.25, 0.46, 0.45, 0.94] }}
+      style={{
+        border: `1px solid ${isSettled ? 'var(--border-color)' : accentColor + '30'}`,
+        borderRadius: 10,
+        overflow: 'hidden',
+        fontSize: 12,
+        fontFamily: 'Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif',
+        pointerEvents: isSettled ? 'none' : 'auto',
+        margin: '6px 0',
+        boxShadow: isSettled ? 'none' : `0 1px 3px ${accentColor}10`,
+        transition: 'border-color 0.25s, box-shadow 0.25s',
+      }}
+    >
       <div style={{
         display: 'flex',
         alignItems: 'center',
         gap: 8,
         padding: '8px 12px',
-        background: 'var(--bg-secondary)',
-        borderBottom: (status === 'running' || status === 'reviewing') ? '1px solid var(--border-color)' : 'none',
+        background: `linear-gradient(135deg, var(--bg-secondary), ${accentColor}08)`,
+        borderBottom: (status === 'running' || status === 'reviewing') ? `1px solid ${accentColor}18` : 'none',
       }}>
         {typeIcon}
         <span style={{ flex: 1, fontWeight: 500, color: 'var(--text-primary)' }}>
@@ -1120,7 +1319,15 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
             </span>
           )}
         </span>
-        {status === 'accepted' && <span style={{ color: '#10b981', fontSize: 11 }}>✓ 已接受</span>}
+        {status === 'accepted' && (
+          <motion.span
+            initial={{ scale: 0.8, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            style={{ color: '#10b981', fontSize: 11, fontWeight: 500 }}
+          >
+            ✓ 已接受
+          </motion.span>
+        )}
         {status === 'rejected' && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>已撤销</span>}
         {status === 'error' && <span style={{ color: '#ef4444', fontSize: 11 }}>✗ 失败</span>}
         {status === 'idle' && <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>等待中…</span>}
@@ -1187,13 +1394,8 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
               blockquote: ({ children }) => <blockquote style={{ borderLeft: '2px solid var(--accent-color)', paddingLeft: 8, margin: '4px 0', color: 'var(--text-muted)' }}>{children}</blockquote>,
             }}
           >
-            {content.slice(0, 600)}
+            {content}
           </ReactMarkdown>
-          {content.length > 600 && (
-            <div style={{ color: 'var(--text-muted)', fontSize: 10, marginTop: 4 }}>
-              …内容已截断
-            </div>
-          )}
         </div>
       )}
 
@@ -1214,7 +1416,7 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
               // No old text available, just show new content
               return (
                 <span style={{ color: '#10b981' }}>
-                  {newText.slice(0, 200)}{newText.length > 200 && '…'}
+                  {newText}
                 </span>
               )
             }
@@ -1275,8 +1477,22 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
             style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8, background: 'var(--bg-primary)' }}
           >
             <span style={{ fontSize: 11, color: 'var(--text-muted)', flex: 1 }}>操作已完成，请确认</span>
-            <button onClick={onAccept} style={btnStyle('accent')}>接受</button>
-            <button onClick={onReject} style={btnStyle('ghost')}>撤销</button>
+            <motion.button
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              onClick={onAccept}
+              style={btnStyle('accent')}
+            >
+              接受
+            </motion.button>
+            <motion.button
+              whileHover={{ scale: 1.04 }}
+              whileTap={{ scale: 0.96 }}
+              onClick={onReject}
+              style={btnStyle('ghost')}
+            >
+              撤销
+            </motion.button>
           </motion.div>
         )}
 
@@ -1290,7 +1506,7 @@ export function SimpleTool({ type, params, content, status, progress, error, onA
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
+    </motion.div>
   )
 }
 

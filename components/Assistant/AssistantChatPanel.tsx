@@ -1,6 +1,7 @@
 'use client'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Button, Tooltip, Switch, Chip, Select, SelectItem, Autocomplete, AutocompleteItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure, Spinner } from '@heroui/react'
+import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { readDocument } from './tools/ReadDocumentTool'
@@ -36,7 +37,7 @@ import {
   type EditStatus,
   type ParsedToolCall,
 } from './tools/EditDocumentTool'
-import { getEditor } from '@/lib/editorContext'
+import { getEditor, getSelectedText, getSelectionContext } from '@/lib/editorContext'
 import { 
   getAgents, 
   getSettings, 
@@ -128,6 +129,8 @@ export function AssistantChatPanel() {
   const [modelSearchQuery, setModelSearchQuery] = useState('')
   const [showNotesList, setShowNotesList] = useState(false)
   const [useDocEditing, setUseDocEditing] = useState(false)
+  // 选中文本引用
+  const [selectedQuote, setSelectedQuote] = useState<string | null>(null)
   // edit tool state: key = `${msgId}:${blockIdx}` or `${msgId}:simple:${idx}`
   const [editStates, setEditStates] = useState<Record<string, {
     status: EditStatus;
@@ -167,6 +170,17 @@ export function AssistantChatPanel() {
     setSettings(getSettings())
     setConversations(getConversations())
     setNotes(getAssistantNotes())
+  }, [])
+
+  // 监听编辑器选中文本事件
+  useEffect(() => {
+    const handleQuote = (e: CustomEvent<{ text: string }>) => {
+      if (e.detail?.text) {
+        setSelectedQuote(e.detail.text.trim())
+      }
+    }
+    window.addEventListener('assistant-quote', handleQuote as EventListener)
+    return () => window.removeEventListener('assistant-quote', handleQuote as EventListener)
   }, [])
 
   // 滚动到底部
@@ -1239,6 +1253,12 @@ export function AssistantChatPanel() {
           docContextText = `\n\n当前编辑器文档内容（Markdown格式）：\n\`\`\`\n${freshDoc.markdown.slice(0, 8000)}\n\`\`\``
         }
       }
+
+      // 用户选中的文本引用
+      let quoteContext = ''
+      if (selectedQuote) {
+        quoteContext = `\n\n用户选中的文本内容（请基于此内容回答）：\n> ${selectedQuote.split('\n').join('\n> ')}`
+      }
       const mentionCandidates = mentions.length > 0
         ? await buildMentionKnowledgeCandidates(content, { allowIndexing: useKnowledge })
         : []
@@ -1311,7 +1331,7 @@ export function AssistantChatPanel() {
             content: m.content,
           })),
           modelConfig,
-          systemPrompt: systemPrompt + docContextText,
+          systemPrompt: systemPrompt + docContextText + quoteContext,
           useKnowledge: shouldSendKnowledgeContext,
           knowledgeCandidates,
           assetContext,
@@ -1494,6 +1514,7 @@ export function AssistantChatPanel() {
       setConversations(getConversations())
       setCurrentConversation(finalConv)
       setMentions([])
+      setSelectedQuote(null)
 
       // Final detection pass for any tools that completed at the very end
       if (detector) {
@@ -1519,7 +1540,7 @@ export function AssistantChatPanel() {
       setIsLoading(false)
       abortControllerRef.current = null
     }
-  }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, useDocEditing, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates])
+  }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, useDocEditing, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates, selectedQuote])
 
   const messages = currentConversation?.messages || []
 
@@ -1943,37 +1964,47 @@ export function AssistantChatPanel() {
           }}
         >
           {messages.length === 0 ? (
-            <div style={{ 
-              flex: 1, 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center',
-              color: 'var(--text-muted)',
-              fontSize: 13,
-              textAlign: 'center',
-            }}>
+            <motion.div
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              style={{ 
+                flex: 1, 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center',
+                color: 'var(--text-muted)',
+                fontSize: 13,
+                textAlign: 'center',
+              }}
+            >
               <div>
                 <p style={{ marginBottom: 8 }}>开始与 AI 助手对话</p>
                 <p style={{ fontSize: 11, opacity: 0.7 }}>
                   输入 / 可快速切换智能体、知识库和资产库引用
                 </p>
               </div>
-            </div>
+            </motion.div>
           ) : (
-            messages.map((message, idx) => (
-              <div 
-                key={message.id}
-                ref={(el) => {
-                  if (el) messageRefs.current.set(message.id, el)
-                }}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                  padding: 8,
-                  borderRadius: 6,
-                }}
-              >
+            <AnimatePresence mode="popLayout">
+              {messages.map((message, idx) => (
+                <motion.div 
+                  key={message.id}
+                  ref={(el) => {
+                    if (el) messageRefs.current.set(message.id, el)
+                  }}
+                  layout
+                  initial={{ opacity: 0, y: 16, scale: 0.97 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                    padding: 8,
+                    borderRadius: 6,
+                  }}
+                >
                 {/* 角色标签 */}
                 <div style={{
                   display: 'flex',
@@ -2014,20 +2045,23 @@ export function AssistantChatPanel() {
                 >
                   {message.role === 'assistant' && message.checkpointId && (
                     <div style={{ marginBottom: 6 }}>
-                      <button
+                      <motion.button
+                        whileHover={{ scale: 1.03 }}
+                        whileTap={{ scale: 0.97 }}
                         onClick={() => handleRestoreCheckpoint(message)}
                         style={{
-                          background: 'transparent',
-                          border: 'none',
-                          padding: 0,
+                          background: 'rgba(0, 153, 255, 0.08)',
+                          border: '1px solid rgba(0, 153, 255, 0.2)',
+                          borderRadius: 6,
+                          padding: '3px 10px',
                           fontSize: 11,
                           color: 'var(--accent-color)',
-                          textDecoration: 'underline',
                           cursor: 'pointer',
+                          fontWeight: 500,
                         }}
                       >
                         还原检查点
-                      </button>
+                      </motion.button>
                     </div>
                   )}
                   {message.role === 'assistant' && message.toolEvents && message.toolEvents.length > 0 && (
@@ -2507,27 +2541,34 @@ export function AssistantChatPanel() {
                           <>
                             {/* 多个 reviewing 时显示一键操作按钮 */}
                             {hasMultipleReviewing && (
-                              <div style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: 8,
-                                padding: '8px 12px',
-                                marginBottom: 8,
-                                background: 'rgba(0, 153, 255, 0.08)',
-                                border: '1px solid rgba(0, 153, 255, 0.2)',
-                                borderRadius: 8,
-                              }}>
+                              <motion.div
+                                initial={{ opacity: 0, y: -8 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                transition={{ duration: 0.2 }}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: 8,
+                                  padding: '8px 12px',
+                                  marginBottom: 8,
+                                  background: 'rgba(0, 153, 255, 0.08)',
+                                  border: '1px solid rgba(0, 153, 255, 0.2)',
+                                  borderRadius: 8,
+                                }}
+                              >
                                 <span style={{ fontSize: 12, color: 'var(--text-muted)', flex: 1 }}>
                                   有 {reviewingKeys.length} 处编辑待确认
                                 </span>
-                                <button
+                                <motion.button
+                                  whileHover={{ scale: 1.04 }}
+                                  whileTap={{ scale: 0.96 }}
                                   onClick={handleAcceptAll}
                                   style={{
                                     background: 'var(--accent-color)',
                                     color: 'white',
                                     border: 'none',
-                                    borderRadius: 4,
-                                    padding: '4px 10px',
+                                    borderRadius: 6,
+                                    padding: '5px 12px',
                                     fontSize: 11,
                                     fontWeight: 500,
                                     cursor: 'pointer',
@@ -2540,15 +2581,17 @@ export function AssistantChatPanel() {
                                     <polyline points="20 6 9 17 4 12" />
                                   </svg>
                                   全部接受
-                                </button>
-                                <button
+                                </motion.button>
+                                <motion.button
+                                  whileHover={{ scale: 1.04 }}
+                                  whileTap={{ scale: 0.96 }}
                                   onClick={handleRejectAll}
                                   style={{
                                     background: 'transparent',
                                     color: 'var(--text-muted)',
                                     border: '1px solid var(--border-color)',
-                                    borderRadius: 4,
-                                    padding: '4px 10px',
+                                    borderRadius: 6,
+                                    padding: '5px 12px',
                                     fontSize: 11,
                                     cursor: 'pointer',
                                     display: 'flex',
@@ -2561,8 +2604,8 @@ export function AssistantChatPanel() {
                                     <line x1="6" y1="6" x2="18" y2="18" />
                                   </svg>
                                   全部拒绝
-                                </button>
-                              </div>
+                                </motion.button>
+                              </motion.div>
                             )}
                             {toolCallStates.map(({ call, key, state }) => {
                               const handleAccept = () => {
@@ -2654,12 +2697,14 @@ export function AssistantChatPanel() {
                   gap: 6,
                   marginTop: 2,
                 }}>
-                  <button
+                  <motion.button
+                    whileHover={{ scale: 1.05 }}
+                    whileTap={{ scale: 0.95 }}
                     onClick={() => handleCopy(message.content)}
                     style={{
                       background: 'var(--bg-secondary)',
                       border: '1px solid var(--border-color)',
-                      borderRadius: 4,
+                      borderRadius: 6,
                       padding: '3px 8px',
                       fontSize: 11,
                       color: 'var(--text-muted)',
@@ -2683,15 +2728,17 @@ export function AssistantChatPanel() {
                       <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                     </svg>
                     复制
-                  </button>
+                  </motion.button>
                   
                   {message.role === 'assistant' && (
-                    <button
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
                       onClick={() => handleOpenNote(message.id, message.content)}
                       style={{
                         background: 'var(--bg-secondary)',
                         border: '1px solid var(--border-color)',
-                        borderRadius: 4,
+                        borderRadius: 6,
                         padding: '3px 8px',
                         fontSize: 11,
                         color: 'var(--text-muted)',
@@ -2715,16 +2762,18 @@ export function AssistantChatPanel() {
                         <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
                       </svg>
                       记笔记
-                    </button>
+                    </motion.button>
                   )}
 
                   {message.role === 'assistant' && (
-                    <button
+                    <motion.button
+                      whileHover={{ scale: 1.05 }}
+                      whileTap={{ scale: 0.95 }}
                       onClick={() => handleAddToAssets(message)}
                       style={{
                         background: 'var(--bg-secondary)',
                         border: '1px solid var(--border-color)',
-                        borderRadius: 4,
+                        borderRadius: 6,
                         padding: '3px 8px',
                         fontSize: 11,
                         color: 'var(--text-muted)',
@@ -2748,11 +2797,12 @@ export function AssistantChatPanel() {
                         <path d="M5 12h14" />
                       </svg>
                       添加到资产库
-                    </button>
+                    </motion.button>
                   )}
                 </div>
-              </div>
-            ))
+                </motion.div>
+              ))}
+            </AnimatePresence>
           )}
           <div ref={messagesEndRef} />
         </div>
@@ -2767,6 +2817,64 @@ export function AssistantChatPanel() {
             position: 'relative',
           }}
         >
+          {/* 选中文本引用 */}
+          <AnimatePresence>
+            {selectedQuote && (
+              <motion.div
+                initial={{ opacity: 0, height: 0, marginBottom: 0 }}
+                animate={{ opacity: 1, height: 'auto', marginBottom: 8 }}
+                exit={{ opacity: 0, height: 0, marginBottom: 0 }}
+                transition={{ duration: 0.2 }}
+                style={{
+                  borderLeft: '3px solid var(--accent-color)',
+                  background: 'var(--bg-secondary)',
+                  borderRadius: '0 6px 6px 0',
+                  padding: '6px 10px',
+                  fontSize: 12,
+                  color: 'var(--text-secondary)',
+                  position: 'relative',
+                  maxHeight: 80,
+                  overflow: 'auto',
+                }}
+              >
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: 6,
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" strokeWidth="2" style={{ flexShrink: 0, marginTop: 2 }}>
+                    <path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21z"/>
+                    <path d="M15 21c3 0 7-1 7-8V5c0-1.25-.757-2.017-2-2h-4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2h.75c0 2.25.25 4-2.75 4v3z"/>
+                  </svg>
+                  <span style={{
+                    flex: 1,
+                    lineHeight: 1.5,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}>
+                    {selectedQuote.length > 200 ? selectedQuote.slice(0, 200) + '…' : selectedQuote}
+                  </span>
+                  <button
+                    onClick={() => setSelectedQuote(null)}
+                    style={{
+                      background: 'transparent',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: 0,
+                      flexShrink: 0,
+                      fontSize: 12,
+                      opacity: 0.6,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.opacity = '1' }}
+                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.6' }}
+                  >
+                    ✕
+                  </button>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
           {/* 输入框容器 */}
           <div style={{
             position: 'relative',
@@ -3285,6 +3393,15 @@ export function AssistantChatPanel() {
           @keyframes spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
+          }
+          @keyframes spin-border {
+            from { outline-color: transparent; }
+            50% { outline-color: #3b82f6; }
+            to { outline-color: transparent; }
+          }
+          @keyframes slideUp {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
           }
           .markdown-content h1, .markdown-content h2, .markdown-content h3, 
           .markdown-content h4, .markdown-content h5, .markdown-content h6 {

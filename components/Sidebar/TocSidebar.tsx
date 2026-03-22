@@ -81,7 +81,8 @@ export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
           animate={{ width: 220, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-          className="h-full bg-[#F7F5F0] border-r border-stone-200/60 flex flex-col z-10 shrink-0 overflow-hidden"
+          className="h-full border-r flex flex-col z-10 shrink-0 overflow-hidden"
+          style={{ background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}
         >
           {/* Header */}
           <div className="p-4 flex items-center gap-2 w-[220px]">
@@ -94,17 +95,17 @@ export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
                 </Button>
               </Link>
             </Tooltip>
-            <span className="font-medium text-sm text-stone-700 truncate flex-1" title={docTitle}>
+            <span className="font-medium text-sm truncate flex-1" style={{ color: 'var(--text-primary)' }} title={docTitle}>
               {docTitle || '无标题文档'}
             </span>
           </div>
 
           {/* TOC */}
           <div className="flex-1 overflow-y-auto px-4 pb-4 w-[220px]">
-            <div className="text-[11px] font-bold text-stone-400 uppercase tracking-widest mb-4 px-2">目录</div>
+            <div className="text-[11px] font-bold uppercase tracking-widest mb-4 px-2" style={{ color: 'var(--text-muted)' }}>目录</div>
             
             {toc.length === 0 ? (
-              <p className="text-xs text-stone-400 px-2 italic">
+              <p className="text-xs px-2 italic" style={{ color: 'var(--text-muted)' }}>
                 使用标题 (# ## ###) 生成目录
               </p>
             ) : (
@@ -117,17 +118,28 @@ export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
                       onClick={() => scrollToBlock(entry.id)}
                       className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors relative z-10 ${
                         activeSection === entry.id
-                          ? 'text-indigo-700 font-medium'
+                          ? 'font-medium'
                           : entry.level === 1
-                            ? 'text-stone-700 font-medium hover:text-stone-900 hover:bg-stone-200/50'
-                            : 'text-stone-500 hover:text-stone-800 hover:bg-stone-200/50'
+                            ? 'font-medium'
+                            : ''
                       }`}
-                      style={{ marginLeft: indent }}
+                      style={{
+                        marginLeft: indent,
+                        color: activeSection === entry.id
+                          ? 'var(--accent-color)'
+                          : entry.level === 1
+                            ? 'var(--text-primary)'
+                            : 'var(--text-secondary)',
+                      }}
                     >
                       {activeSection === entry.id && (
                         <motion.div
                           layoutId="active-nav"
-                          className="absolute inset-0 bg-white rounded-lg shadow-sm border border-stone-200/50 -z-10"
+                          className="absolute inset-0 rounded-lg shadow-sm border -z-10"
+                          style={{
+                            background: 'var(--bg-primary)',
+                            borderColor: 'var(--border-color)',
+                          }}
                           transition={{ type: 'spring', bounce: 0.2, duration: 0.6 }}
                         />
                       )}
@@ -142,10 +154,11 @@ export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
           </div>
 
           {/* Collapse button */}
-          <div className="p-3 border-t border-stone-200/60 w-[220px]">
+          <div className="p-3 border-t w-[220px]" style={{ borderColor: 'var(--border-color)' }}>
             <button
               onClick={() => setIsCollapsed(true)}
-              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs text-stone-400 hover:text-stone-600 hover:bg-stone-200/50 rounded-lg transition-colors"
+              className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors"
+              style={{ color: 'var(--text-muted)' }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="11,17 6,12 11,7" />
@@ -163,13 +176,14 @@ export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="h-full bg-[#F7F5F0] border-r border-stone-200/60 flex flex-col items-center py-4 z-10 shrink-0"
-          style={{ width: 48 }}
+          className="h-full border-r flex flex-col items-center py-4 z-10 shrink-0"
+          style={{ width: 48, background: 'var(--bg-secondary)', borderColor: 'var(--border-color)' }}
         >
           <Tooltip content="展开侧边栏" placement="right">
             <button
               onClick={() => setIsCollapsed(false)}
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-stone-500 hover:text-stone-700 hover:bg-stone-200/60 transition-colors"
+              className="w-9 h-9 rounded-xl flex items-center justify-center transition-colors"
+              style={{ color: 'var(--text-muted)' }}
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                 <polyline points="9,18 15,12 9,6" />

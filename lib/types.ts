@@ -806,3 +806,21 @@ export interface GraphBuildResponse {
   edgesCreated: number
   error?: string
 }
+
+// ============ 编辑器评论相关类型 ============
+
+// 编辑器评论类型
+export interface EditorComment {
+  id: string
+  documentId: string
+  // 选中的文本信息
+  selectedText: string
+  blockId?: string // 关联的 BlockNote 块 ID
+  startOffset?: number // 在块中的起始位置
+  endOffset?: number // 在块中的结束位置
+  // 评论内容
+  content: string
+  // 元数据
+  createdAt: string
+  updatedAt: string
+}

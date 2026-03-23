@@ -1,4 +1,4 @@
-import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote, AssetType, AssetItem } from './types'
+import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote, AssetType, AssetItem, EditorComment } from './types'
 import { defaultSettings } from './types'
 import { getStorage } from './storage/StorageFactory'
 import { getJSON, setJSON, getString, setString, removeItem as removeStorageItem } from './storage/StorageUtils'
@@ -608,4 +608,46 @@ export function calculateWordCount(blocks: unknown[]): number {
     }
   }
   return count
+}
+
+// ============ 编辑器评论存储 ============
+
+const COMMENTS_KEY = 'editor_comments'
+
+export function getComments(): EditorComment[] {
+  if (!isBrowser()) return []
+  return getJSON<EditorComment[]>(COMMENTS_KEY, [])
+}
+
+export function saveComments(comments: EditorComment[]): void {
+  if (!isBrowser()) return
+  setJSON(COMMENTS_KEY, comments)
+  emitStorageEvent('editor-comments-updated')
+}
+
+export function getDocumentComments(documentId: string): EditorComment[] {
+  return getComments().filter(c => c.documentId === documentId)
+}
+
+export function addComment(comment: EditorComment): void {
+  const comments = getComments()
+  comments.unshift(comment)
+  saveComments(comments)
+}
+
+export function updateComment(id: string, updates: Partial<EditorComment>): void {
+  const comments = getComments()
+  const idx = comments.findIndex(c => c.id === id)
+  if (idx >= 0) {
+    comments[idx] = { ...comments[idx], ...updates, updatedAt: new Date().toISOString() }
+    saveComments(comments)
+  }
+}
+
+export function deleteComment(id: string): void {
+  saveComments(getComments().filter(c => c.id !== id))
+}
+
+export function getComment(id: string): EditorComment | null {
+  return getComments().find(c => c.id === id) ?? null
 }

@@ -30,7 +30,7 @@ import { DefaultChatTransport } from 'ai'
 import { Button, Divider, Tooltip, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure } from '@heroui/react'
 import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
-import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems, saveDocumentVersion, deleteAllDocumentVersions, calculateWordCount } from '@/lib/storage'
+import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems, saveDocumentVersion, deleteAllDocumentVersions, calculateWordCount, addComment, generateId } from '@/lib/storage'
 import type { AppDocument, AppSettings, ArticleAuthor, DocumentVersion } from '@/lib/types'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
@@ -44,6 +44,7 @@ import { insertMarkdownBlocksAtCursor, looksLikeMarkdownContent } from '@/lib/bl
 import { useThemeContext } from '@/components/Providers'
 import { CanvasBlockSpec } from './CanvasBlock'
 import { QuoteToAssistantButton } from './QuoteToAssistantButton'
+import { CommentToolbarButton } from './CommentToolbarButton'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -390,6 +391,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const [citations, setCitations] = useState<Map<string, CitationData>>(new Map()) // 引用列表
   const { isDark, mounted: themeMounted } = useThemeContext()
 
+  // 选中文本评论相关状态
+  const [selectedText, setSelectedText] = useState<string | null>(null)
+  const [selectedBlockId, setSelectedBlockId] = useState<string | undefined>(undefined)
+  const [commentModalPosition, setCommentModalPosition] = useState<{ top: number; left: number } | null>(null)
+  const [commentContent, setCommentContent] = useState('')
+
   // 文章元数据状态
   const [articleTitle, setArticleTitle] = useState('')
   const [articleAuthors, setArticleAuthors] = useState<ArticleAuthor[]>([])
@@ -658,9 +665,20 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     editorElement?.addEventListener('blur', handleBlur, true)
     editorElement?.addEventListener('focusin', handleFocusIn)
     
+    // 监听评论工具栏按钮事件
+    const handleEditorComment = (e: CustomEvent<{ text: string; blockId?: string; position: { top: number; left: number } }>) => {
+      const { text, blockId, position } = e.detail
+      setSelectedText(text)
+      setSelectedBlockId(blockId)
+      setCommentModalPosition(position)
+      setCommentContent('')
+    }
+    window.addEventListener('editor-comment', handleEditorComment as EventListener)
+    
     return () => {
       document.removeEventListener('keydown', handleKeyDown, { capture: true })
       document.removeEventListener('selectionchange', handleSelectionChange)
+      window.removeEventListener('editor-comment', handleEditorComment as EventListener)
       editorElement?.removeEventListener('blur', handleBlur, true)
       editorElement?.removeEventListener('focusin', handleFocusIn)
     }
@@ -1554,6 +1572,89 @@ export function EditorPageContent({ docId }: EditorPageProps) {
             {/* 分隔线 */}
             <Divider style={{ marginBottom: 32 }} />
 
+            {/* 评论输入浮层 */}
+            {selectedText && commentModalPosition && (
+              <div
+                style={{
+                  position: 'fixed',
+                  top: commentModalPosition.top,
+                  left: commentModalPosition.left,
+                  zIndex: 1001,
+                  backgroundColor: 'var(--bg-primary)',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: 8,
+                  padding: 12,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  width: 300,
+                }}
+              >
+                <div style={{
+                  fontSize: 12,
+                  color: 'var(--text-secondary)',
+                  marginBottom: 8,
+                  maxHeight: 60,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  borderLeft: '3px solid var(--accent-color)',
+                  paddingLeft: 8,
+                }}>
+                  {selectedText.length > 100 ? selectedText.slice(0, 100) + '...' : selectedText}
+                </div>
+                <textarea
+                  autoFocus
+                  placeholder="添加评论..."
+                  value={commentContent}
+                  onChange={(e) => setCommentContent(e.target.value)}
+                  style={{
+                    width: '100%',
+                    minHeight: 60,
+                    border: '1px solid var(--border-color)',
+                    borderRadius: 4,
+                    padding: 8,
+                    fontSize: 13,
+                    resize: 'vertical',
+                    outline: 'none',
+                    backgroundColor: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+                      e.preventDefault()
+                      if (commentContent.trim()) {
+                        addComment({
+                          id: generateId(),
+                          documentId: docId,
+                          selectedText,
+                          blockId: selectedBlockId,
+                          content: commentContent.trim(),
+                          createdAt: new Date().toISOString(),
+                          updatedAt: new Date().toISOString(),
+                        })
+                        addToast({ title: '评论已添加', color: 'success' })
+                        setSelectedText(null)
+                        setCommentModalPosition(null)
+                        setCommentContent('')
+                      }
+                    } else if (e.key === 'Escape') {
+                      setSelectedText(null)
+                      setCommentModalPosition(null)
+                      setCommentContent('')
+                    }
+                  }}
+                />
+                <div style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  marginTop: 8,
+                  fontSize: 11,
+                  color: 'var(--text-muted)',
+                }}>
+                  <span>Ctrl+Enter 发送</span>
+                  <span>Esc 取消</span>
+                </div>
+              </div>
+            )}
+
             <BlockNoteView
               key={settings.editorThemeId ?? 'default'}
               editor={editor}
@@ -1582,6 +1683,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                     {getFormattingToolbarItems()}
                     <AIToolbarButton />
                     <QuoteToAssistantButton />
+                    <CommentToolbarButton />
                   </FormattingToolbar>
                 )}
               />
@@ -1779,7 +1881,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       </div>
 
       {/* Right Icon Sidebar - Fixed */}
-      <RightSidebar />
+      <RightSidebar documentId={docId} />
 
       {/* 作者编辑弹窗 */}
       <Modal isOpen={isAuthorModalOpen} onClose={onAuthorModalClose} size="sm">

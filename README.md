@@ -86,13 +86,23 @@ PaperSpark 面向科研与高阶学习场景，提供从文献导入、沉浸式
         </td>
     </tr>
     <tr>
-        <td width="62%" valign="top">
+        <td width="50%" valign="top">
+            <img src="md_assets/file_主编辑区_插入画布绘图.png" alt="插入画布绘图" width="100%" />
+            <p align="center">主编辑区内插入画布绘图操作</p>
+        </td>
+        <td width="50%" valign="top">
+            <img src="md_assets/file_主编辑区_版本控制.png" alt="版本控制" width="100%" />
+            <p align="center">文档侧重点与版本控制支持</p>
+        </td>
+    </tr>
+    <tr>
+        <td width="50%" valign="top">
             <img src="md_assets/file_导出_支持tex基本导出_基本数学环境支持.png" alt="TeX 导出能力" width="100%" />
             <p align="center">TeX 导出与数学环境兼容</p>
         </td>
-        <td width="38%" valign="top">
-            <img src="md_assets/file_沉浸式阅读_paper ref链接指引.png" alt="参考文献链接指引" width="100%" />
-            <p align="center">文献阅读中的链接定位</p>
+        <td width="50%" valign="top">
+            <img src="md_assets/flie_主编辑区文档评论.png" alt="文档评论" width="100%" />
+            <p align="center">主编辑区文档选区评论功能</p>
         </td>
     </tr>
 </table>
@@ -112,12 +122,22 @@ PaperSpark 面向科研与高阶学习场景，提供从文献导入、沉浸式
     </tr>
     <tr>
         <td width="50%" valign="top">
-            <img src="md_assets/file_沉浸式阅读_文章结构导图.png" alt="文章结构导图" width="100%" />
-            <p align="center">章节结构导图</p>
+            <img src="md_assets/file_沉浸式阅读_paper ref链接指引.png" alt="参考文献链接指引" width="100%" />
+            <p align="center">文献阅读中的链接定位</p>
         </td>
         <td width="50%" valign="top">
             <img src="md_assets/file_沉浸式阅读_高亮和批注.png" alt="高亮与批注" width="100%" />
             <p align="center">高亮与批注工作流</p>
+        </td>
+    </tr>
+    <tr>
+        <td width="50%" valign="top">
+            <img src="md_assets/file_沉浸式阅读_文章结构导图.png" alt="文章结构导图" width="100%" />
+            <p align="center">章节结构导图</p>
+        </td>
+        <td width="50%" valign="top">
+            <img src="md_assets/file_沉浸式阅读_论文可交互网页生成.png" alt="论文可交互网页生成" width="100%" />
+            <p align="center">基于论文的交互网页生成</p>
         </td>
     </tr>
 </table>

@@ -2,18 +2,24 @@
 import { useState, useCallback, useEffect } from 'react'
 import { Button, Input, Textarea, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, addToast, Tooltip } from '@heroui/react'
 import { getAgents, saveAgent, deleteAgent, generateId } from '@/lib/storage'
-import type { Agent } from '@/lib/types'
+import { AGENT_CAPABILITY_DEFINITIONS, getAgentCapabilityDefinitions, normalizeAgent } from '@/lib/agents'
+import type { Agent, AgentCapabilityId } from '@/lib/types'
 
 export function AgentSettingsPanel() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [editingDescription, setEditingDescription] = useState('')
   const [editingPrompt, setEditingPrompt] = useState('')
+  const [editingCapabilities, setEditingCapabilities] = useState<AgentCapabilityId[]>([])
   const { isOpen, onOpen, onClose } = useDisclosure()
 
   // 加载
   useEffect(() => {
     setAgents(getAgents())
+    const handleAgentsUpdated = () => setAgents(getAgents())
+    window.addEventListener('agents-updated', handleAgentsUpdated)
+    return () => window.removeEventListener('agents-updated', handleAgentsUpdated)
   }, [])
 
   // 新增自定义智能体
@@ -21,20 +27,27 @@ export function AgentSettingsPanel() {
     const newAgent: Agent = {
       id: generateId(),
       title: '',
+      description: '',
       prompt: '',
+      capabilities: [],
       isPreset: false,
     }
     setEditingAgent(newAgent)
     setEditingTitle('')
+    setEditingDescription('')
     setEditingPrompt('')
+    setEditingCapabilities([])
     onOpen()
   }, [onOpen])
 
   // 点击编辑
   const handleEdit = useCallback((agent: Agent) => {
-    setEditingAgent(agent)
-    setEditingTitle(agent.title)
-    setEditingPrompt(agent.prompt)
+    const normalizedAgent = normalizeAgent(agent)
+    setEditingAgent(normalizedAgent)
+    setEditingTitle(normalizedAgent.title)
+    setEditingDescription(normalizedAgent.description ?? '')
+    setEditingPrompt(normalizedAgent.prompt)
+    setEditingCapabilities(normalizedAgent.capabilities ?? [])
     onOpen()
   }, [onOpen])
 
@@ -61,19 +74,29 @@ export function AgentSettingsPanel() {
     const updated: Agent = {
       ...editingAgent,
       title: editingTitle.trim(),
+      description: editingDescription.trim() || undefined,
       prompt: editingPrompt,
+      capabilities: editingCapabilities,
     }
     saveAgent(updated)
     setAgents(getAgents())
     onClose()
     addToast({ title: '保存成功', color: 'success' })
-  }, [editingAgent, editingTitle, editingPrompt, onClose])
+  }, [editingAgent, editingTitle, editingDescription, editingPrompt, editingCapabilities, onClose])
 
   // 关闭
   const handleClose = useCallback(() => {
     setEditingAgent(null)
     onClose()
   }, [onClose])
+
+  const handleToggleCapability = useCallback((capabilityId: AgentCapabilityId) => {
+    setEditingCapabilities((current) => (
+      current.includes(capabilityId)
+        ? current.filter(item => item !== capabilityId)
+        : [...current, capabilityId]
+    ))
+  }, [])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -177,6 +200,90 @@ export function AgentSettingsPanel() {
               />
             </div>
 
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                display: 'block',
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                marginBottom: 6
+              }}>
+                智能体定位
+              </label>
+              <Textarea
+                value={editingDescription}
+                onValueChange={setEditingDescription}
+                placeholder="例如：侧重学术评审，可阅读文档并输出批注，不直接改写正文。"
+                minRows={2}
+                maxRows={4}
+                style={{ fontSize: 13 }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{
+                display: 'block',
+                fontSize: 12,
+                color: 'var(--text-muted)',
+                marginBottom: 8
+              }}>
+                技能与权限
+              </label>
+              <div style={{ display: 'grid', gap: 8 }}>
+                {(['assistant', 'document'] as const).map(group => (
+                  <div key={group}>
+                    <div style={{
+                      fontSize: 11,
+                      color: 'var(--text-muted)',
+                      marginBottom: 6,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.4px',
+                    }}>
+                      {group === 'assistant' ? '助手能力' : '文稿能力'}
+                    </div>
+                    <div style={{ display: 'grid', gap: 8 }}>
+                      {AGENT_CAPABILITY_DEFINITIONS
+                        .filter(capability => capability.group === group)
+                        .map(capability => {
+                          const active = editingCapabilities.includes(capability.id)
+                          return (
+                            <button
+                              key={capability.id}
+                              type="button"
+                              onClick={() => handleToggleCapability(capability.id)}
+                              style={{
+                                textAlign: 'left',
+                                padding: '10px 12px',
+                                borderRadius: 10,
+                                border: active ? '1px solid var(--accent-color)' : '1px solid var(--border-color)',
+                                background: active ? 'rgba(0, 153, 255, 0.08)' : 'var(--bg-secondary)',
+                                cursor: 'pointer',
+                                transition: 'all 0.15s',
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 4 }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+                                  {capability.label}
+                                </span>
+                                <span style={{
+                                  fontSize: 11,
+                                  color: active ? 'var(--accent-color)' : 'var(--text-muted)',
+                                  fontWeight: 600,
+                                }}>
+                                  {active ? '已启用' : '未启用'}
+                                </span>
+                              </div>
+                              <div style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                                {capability.description}
+                              </div>
+                            </button>
+                          )
+                        })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div>
               <label style={{ 
                 display: 'block', 
@@ -196,7 +303,7 @@ export function AgentSettingsPanel() {
               />
               {editingAgent?.isPreset && (
                 <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-                  这是预设智能体，prompt 留空供您自定义填写
+                  这是预设智能体，您可以继续微调它的 prompt 与权限配置
                 </p>
               )}
             </div>
@@ -221,9 +328,13 @@ function AgentCard({
   onEdit: (agent: Agent) => void
   onDelete: (id: string, e: React.MouseEvent) => void
 }) {
+  const normalizedAgent = normalizeAgent(agent)
+  const capabilityLabels = getAgentCapabilityDefinitions(normalizedAgent).map(capability => capability.label)
+  const previewText = normalizedAgent.description || normalizedAgent.prompt || '点击编辑填写 prompt...'
+
   return (
     <div
-      onClick={() => onEdit(agent)}
+      onClick={() => onEdit(normalizedAgent)}
       style={{
         padding: '10px 12px',
         background: 'var(--bg-secondary)',
@@ -247,9 +358,9 @@ function AgentCard({
             fontWeight: 500, 
             color: 'var(--text-primary)',
           }}>
-            {agent.title || '未命名智能体'}
+            {normalizedAgent.title || '未命名智能体'}
           </span>
-          {agent.isDefault && (
+          {normalizedAgent.isDefault && (
             <span style={{
               fontSize: 9,
               padding: '1px 4px',
@@ -260,7 +371,7 @@ function AgentCard({
               默认
             </span>
           )}
-          {agent.isPreset && (
+          {normalizedAgent.isPreset && (
             <span style={{
               fontSize: 9,
               padding: '1px 4px',
@@ -272,14 +383,14 @@ function AgentCard({
             </span>
           )}
         </div>
-        <Tooltip content={agent.isPreset ? '预设不可删除' : '删除'} placement="top">
+        <Tooltip content={normalizedAgent.isPreset ? '预设不可删除' : '删除'} placement="top">
           <button
-            onClick={(e) => onDelete(agent.id, e)}
+            onClick={(e) => onDelete(normalizedAgent.id, e)}
             style={{
               background: 'transparent',
               border: 'none',
-              color: agent.isPreset ? 'var(--text-muted)' : 'var(--text-secondary)',
-              cursor: agent.isPreset ? 'not-allowed' : 'pointer',
+              color: normalizedAgent.isPreset ? 'var(--text-muted)' : 'var(--text-secondary)',
+              cursor: normalizedAgent.isPreset ? 'not-allowed' : 'pointer',
               padding: '2px 4px',
               fontSize: 11,
             }}
@@ -288,6 +399,30 @@ function AgentCard({
           </button>
         </Tooltip>
       </div>
+      {capabilityLabels.length > 0 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
+          {capabilityLabels.slice(0, 4).map(label => (
+            <span
+              key={label}
+              style={{
+                fontSize: 10,
+                padding: '2px 6px',
+                borderRadius: 999,
+                background: 'rgba(0, 153, 255, 0.08)',
+                color: 'var(--accent-color)',
+                border: '1px solid rgba(0, 153, 255, 0.16)',
+              }}
+            >
+              {label}
+            </span>
+          ))}
+          {capabilityLabels.length > 4 && (
+            <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>
+              +{capabilityLabels.length - 4}
+            </span>
+          )}
+        </div>
+      )}
       <p style={{ 
         fontSize: 11, 
         color: 'var(--text-muted)', 
@@ -298,7 +433,7 @@ function AgentCard({
         WebkitBoxOrient: 'vertical',
         overflow: 'hidden',
       }}>
-        {agent.prompt || '点击编辑填写 prompt...'}
+        {previewText}
       </p>
     </div>
   )

@@ -15,7 +15,7 @@ import { CustomDragHandleMenu } from './CustomDragHandleMenu'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import { filterSuggestionItems } from '@blocknote/core/extensions'
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core'
+import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultStyleSpecs } from '@blocknote/core'
 import type { Block } from '@blocknote/core'
 import {
   AIExtension,
@@ -32,11 +32,14 @@ import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
 import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems, saveDocumentVersion, deleteAllDocumentVersions, calculateWordCount, addComment, generateId } from '@/lib/storage'
 import type { AppDocument, AppSettings, ArticleAuthor, DocumentVersion } from '@/lib/types'
+import { extractInlineText } from '@/lib/agentDocument'
+import { syncCommentStyles } from '@/lib/commentStyles'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
 import { FormulaInputExtension } from '@/lib/formulaInputExtension'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
+import { CommentThreadStyleSpec } from './CommentThreadStyle'
 import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
 import { registerEditor, unregisterEditor } from '@/lib/editorContext'
 import { exportToLatex, type LatexExportLanguage } from '@/lib/latexExporter'
@@ -45,6 +48,7 @@ import { useThemeContext } from '@/components/Providers'
 import { CanvasBlockSpec } from './CanvasBlock'
 import { QuoteToAssistantButton } from './QuoteToAssistantButton'
 import { CommentToolbarButton } from './CommentToolbarButton'
+import { DocumentIssueHighlighter } from '@/components/Assistant/tools/DocumentIssueHighlighter'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -56,6 +60,10 @@ const schema = BlockNoteSchema.create({
     ...defaultInlineContentSpecs,
     formula: FormulaInlineContentSpec,
     citation: CitationInlineContentSpec,
+  },
+  styleSpecs: {
+    ...defaultStyleSpecs,
+    commentThread: CommentThreadStyleSpec,
   },
 })
 
@@ -157,7 +165,7 @@ function extractTitle(content: Block[], articleTitle?: string): string {
   if (content.length > 0) {
     const first = content[0] as { type: string; content?: { type: string; text: string }[] }
     if (first.type === 'heading' || first.type === 'paragraph') {
-      const text = first.content?.filter(c => c.type === 'text').map(c => c.text).join('') ?? ''
+      const text = extractInlineText(first.content)
       if (text.trim()) return (first.type === 'heading' ? text.trim() : text.trim().slice(0, 40))
     }
   }
@@ -165,8 +173,8 @@ function extractTitle(content: Block[], articleTitle?: string): string {
 }
 
 function getBlockPlainText(block: Block): string {
-  const b = block as { content?: { type: string; text: string }[] }
-  return b.content?.filter(c => c.type === 'text').map(c => c.text).join('') ?? ''
+  const b = block as { content?: unknown }
+  return extractInlineText(b.content)
 }
 
 function sanitizeInlineContent(content: unknown): unknown[] {
@@ -394,6 +402,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   // 选中文本评论相关状态
   const [selectedText, setSelectedText] = useState<string | null>(null)
   const [selectedBlockId, setSelectedBlockId] = useState<string | undefined>(undefined)
+  const [selectedCommentStartOffset, setSelectedCommentStartOffset] = useState<number | undefined>(undefined)
+  const [selectedCommentEndOffset, setSelectedCommentEndOffset] = useState<number | undefined>(undefined)
   const [commentModalPosition, setCommentModalPosition] = useState<{ top: number; left: number } | null>(null)
   const [commentContent, setCommentContent] = useState('')
 
@@ -545,6 +555,29 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     citationsRef.current = citations
   }, [citations])
 
+  useEffect(() => {
+    const frameId = requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('editor-content-updated'))
+    })
+
+    return () => cancelAnimationFrame(frameId)
+  }, [docId, blocks.length])
+
+  useEffect(() => {
+    const sync = () => {
+      requestAnimationFrame(() => {
+        syncCommentStyles(docId)
+      })
+    }
+
+    sync()
+    window.addEventListener('editor-comments-updated', sync)
+
+    return () => {
+      window.removeEventListener('editor-comments-updated', sync)
+    }
+  }, [docId])
+
   // 监听引用插入事件
   useEffect(() => {
     const handleCitationInsert = (e: CustomEvent<CitationData>) => {
@@ -666,10 +699,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     editorElement?.addEventListener('focusin', handleFocusIn)
     
     // 监听评论工具栏按钮事件
-    const handleEditorComment = (e: CustomEvent<{ text: string; blockId?: string; position: { top: number; left: number } }>) => {
-      const { text, blockId, position } = e.detail
+    const handleEditorComment = (e: CustomEvent<{ text: string; blockId?: string; startOffset?: number; endOffset?: number; position: { top: number; left: number } }>) => {
+      const { text, blockId, startOffset, endOffset, position } = e.detail
       setSelectedText(text)
       setSelectedBlockId(blockId)
+      setSelectedCommentStartOffset(startOffset)
+      setSelectedCommentEndOffset(endOffset)
       setCommentModalPosition(position)
       setCommentContent('')
     }
@@ -701,6 +736,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       if (safeLoadedContent.length > 0) {
         const { appliedContent } = applyCompatibleBlockContent(editor, safeLoadedContent, '文档包含兼容性内容')
         setBlocks(appliedContent)
+        requestAnimationFrame(() => syncCommentStyles(docId))
         
         // 提取已有的引用（从行内内容中）
         const extractedCitations = new Map<string, CitationData>()
@@ -1322,15 +1358,17 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   }
 
   return (
-    <div style={{ 
-      position: 'fixed', 
-      top: 52, 
-      left: 0, 
-      right: 0, 
-      bottom: 0, 
-      display: 'flex', 
-      overflow: 'hidden' 
-    }}>
+    <>
+      <DocumentIssueHighlighter />
+      <div style={{ 
+        position: 'fixed', 
+        top: 52, 
+        left: 0, 
+        right: 0, 
+        bottom: 0, 
+        display: 'flex', 
+        overflow: 'hidden' 
+      }}>
       {/* Left TOC Sidebar - Fixed */}
       <TocSidebar blocks={blocks} docTitle={doc.title} />
 
@@ -1626,17 +1664,26 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                           documentId: docId,
                           selectedText,
                           blockId: selectedBlockId,
+                          startOffset: selectedCommentStartOffset,
+                          endOffset: selectedCommentEndOffset,
                           content: commentContent.trim(),
+                          source: 'user',
                           createdAt: new Date().toISOString(),
                           updatedAt: new Date().toISOString(),
                         })
                         addToast({ title: '评论已添加', color: 'success' })
                         setSelectedText(null)
+                        setSelectedBlockId(undefined)
+                        setSelectedCommentStartOffset(undefined)
+                        setSelectedCommentEndOffset(undefined)
                         setCommentModalPosition(null)
                         setCommentContent('')
                       }
                     } else if (e.key === 'Escape') {
                       setSelectedText(null)
+                      setSelectedBlockId(undefined)
+                      setSelectedCommentStartOffset(undefined)
+                      setSelectedCommentEndOffset(undefined)
                       setCommentModalPosition(null)
                       setCommentContent('')
                     }
@@ -1967,7 +2014,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           </ModalFooter>
         </ModalContent>
       </Modal>
-    </div>
+      </div>
+    </>
   )
 }
 

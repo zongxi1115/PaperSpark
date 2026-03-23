@@ -1,5 +1,5 @@
 'use client'
-import { useBlockNoteEditor, useComponentsContext, useSelectedBlocks } from '@blocknote/react'
+import { useComponentsContext, useSelectedBlocks } from '@blocknote/react'
 import { addToast } from '@heroui/react'
 
 /**
@@ -7,7 +7,6 @@ import { addToast } from '@heroui/react'
  * 选中文字后在浮动工具栏中点击，弹出评论输入浮层
  */
 export function CommentToolbarButton() {
-  const editor = useBlockNoteEditor()
   const Components = useComponentsContext()!
 
   // 仅在有 inline content 的块被选中时显示
@@ -37,8 +36,27 @@ export function CommentToolbarButton() {
       const range = selection.getRangeAt(0)
       const rect = range.getBoundingClientRect()
       const blockElement = range.startContainer.parentElement?.closest('[data-id]')
+      let startOffset: number | undefined
+      let endOffset: number | undefined
       if (blockElement) {
         blockId = blockElement.getAttribute('data-id') || undefined
+        try {
+          const blockRange = document.createRange()
+          blockRange.selectNodeContents(blockElement)
+
+          const startRange = blockRange.cloneRange()
+          startRange.setEnd(range.startContainer, range.startOffset)
+          startOffset = startRange.toString().length
+
+          if (blockElement.contains(range.endContainer)) {
+            const endRange = blockRange.cloneRange()
+            endRange.setEnd(range.endContainer, range.endOffset)
+            endOffset = endRange.toString().length
+          }
+        } catch {
+          startOffset = undefined
+          endOffset = undefined
+        }
       }
 
       // 通过自定义事件触发评论浮层
@@ -46,6 +64,8 @@ export function CommentToolbarButton() {
         detail: { 
           text, 
           blockId,
+          startOffset,
+          endOffset,
           position: {
             top: rect.bottom + 8,
             left: Math.min(rect.left, window.innerWidth - 320),

@@ -4,6 +4,8 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getEditor } from '@/lib/editorContext'
+import { getDocumentStructure } from '@/lib/agentDocument'
+import type { AgentEditToolOutput } from '@/lib/agentTooling'
 import { convertMarkdownToBlocks } from '@/lib/blocknoteMarkdown'
 import type { PartialBlock, Block } from '@blocknote/core'
 import { insertBlocks } from '@blocknote/core'
@@ -23,66 +25,6 @@ export interface EditDocumentRequest {
 
 export type EditStatus = 'idle' | 'running' | 'reviewing' | 'accepted' | 'rejected' | 'error'
 type SuggestionId = string | number
-
-// ─────────────────────────────────────────────────────────────────────────────
-// 文档结构信息
-// ─────────────────────────────────────────────────────────────────────────────
-
-export interface DocumentBlockInfo {
-  id: string
-  type: string
-  text: string
-  level?: number
-}
-
-/**
- * 获取当前文档的块结构信息
- */
-export function getDocumentStructure(): DocumentBlockInfo[] | null {
-  const editor = getEditor()
-  if (!editor) return null
-
-  const blocks = editor.document as Block<any, any, any>[]
-
-  return blocks.map(block => {
-    const b = block as Record<string, unknown>
-    const type = (b.type as string) || 'paragraph'
-    const props = (b.props as Record<string, unknown>) || {}
-    const content = b.content
-
-    // 提取文本内容
-    const extractText = (c: unknown): string => {
-      if (!c) return ''
-      if (typeof c === 'string') return c
-      if (Array.isArray(c)) return c.map(extractText).join('')
-      if (typeof c !== 'object') return ''
-      const r = c as Record<string, unknown>
-      if (r.type === 'text') return typeof r.text === 'string' ? r.text : ''
-      if (r.type === 'formula') {
-        const props = typeof r.props === 'object' && r.props !== null
-          ? r.props as Record<string, unknown>
-          : null
-        return typeof props?.latex === 'string' ? `$${props.latex}$` : ''
-      }
-      if (r.type === 'link') return extractText(r.content)
-      if (r.type === 'tableContent' && Array.isArray(r.rows)) {
-        return r.rows.map((row: any) =>
-          (row.cells || []).map((cell: any) => extractText(cell)).join(' | ')
-        ).join(' / ')
-      }
-      return extractText(r.content) || extractText(r.text)
-    }
-
-    const text = extractText(content).slice(0, 100)
-
-    return {
-      id: block.id,
-      type,
-      text,
-      level: type === 'heading' ? (props.level as number) : undefined,
-    }
-  })
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 简化格式解析
@@ -545,6 +487,41 @@ export function convertToolCallsToRequest(toolCalls: ParsedToolCall[]): EditDocu
   }
 
   return { operations }
+}
+
+export function convertAgentEditToolOutputToRequest(output: AgentEditToolOutput): EditDocumentRequest {
+  const toolCalls: ParsedToolCall[] = output.operations.map((operation) => {
+    if (operation.type === 'insert') {
+      return {
+        type: 'insert',
+        params: {
+          position: operation.position,
+          referenceId: operation.referenceId || '',
+        },
+        content: operation.content,
+      }
+    }
+
+    if (operation.type === 'update') {
+      return {
+        type: 'update',
+        params: {
+          blockId: operation.blockId,
+        },
+        content: operation.content,
+      }
+    }
+
+    return {
+      type: 'delete',
+      params: {
+        blockId: operation.blockId,
+      },
+      content: '',
+    }
+  })
+
+  return convertToolCallsToRequest(toolCalls)
 }
 
 /**

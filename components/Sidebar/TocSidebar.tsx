@@ -4,6 +4,7 @@ import type { Block } from '@blocknote/core'
 import Link from 'next/link'
 import { Button, Tooltip } from '@heroui/react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { extractInlineText } from '@/lib/agentDocument'
 
 interface TocEntry {
   id: string
@@ -15,11 +16,8 @@ function extractToc(blocks: Block[]): TocEntry[] {
   const entries: TocEntry[] = []
   for (const block of blocks) {
     if (block.type === 'heading') {
-      const b = block as { type: 'heading'; id: string; props: { level: number }; content: { type: string; text: string }[] }
-      const text = b.content
-        ?.filter(c => c.type === 'text')
-        .map(c => c.text)
-        .join('') ?? ''
+      const b = block as { type: 'heading'; id: string; props: { level: number }; content: unknown }
+      const text = extractInlineText(b.content)
       if (text.trim()) {
         const level = b.props.level ?? 1
         entries.push({ id: b.id, text: text.trim(), level })

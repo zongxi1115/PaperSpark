@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Button, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure, addToast, Chip } from '@heroui/react'
 import type { DocumentVersion, ArticleAuthor } from '@/lib/types'
 import { getDocumentVersions, deleteDocumentVersion, calculateWordCount } from '@/lib/storage'
+import { extractInlineText } from '@/lib/agentDocument'
 import type { Block } from '@blocknote/core'
 
 interface VersionHistoryPanelProps {
@@ -81,11 +82,8 @@ function extractHeadings(blocks: Block[]): { id: string; level: number; text: st
   return blocks
     .filter(b => b.type === 'heading')
     .map(b => {
-      const block = b as { id: string; type: string; props?: { level?: number }; content?: { type: string; text: string }[] }
-      const text = block.content
-        ?.filter(c => c.type === 'text')
-        .map(c => c.text)
-        .join('') ?? ''
+      const block = b as { id: string; type: string; props?: { level?: number }; content?: unknown }
+      const text = extractInlineText(block.content)
       return {
         id: block.id,
         level: block.props?.level ?? 1,
@@ -133,7 +131,7 @@ function extractInlineContent(content: unknown): InlineContentData[] {
   if (!Array.isArray(content)) return []
   
   return content.map(c => {
-    const item = c as { type: string; text?: string; props?: { latex?: string; citationIndex?: number; citationTitle?: string } }
+    const item = c as { type: string; text?: string; props?: { latex?: string; citationIndex?: number; citationTitle?: string }; content?: unknown }
     if (item.type === 'formula') {
       return {
         type: 'formula',
@@ -148,7 +146,7 @@ function extractInlineContent(content: unknown): InlineContentData[] {
     } else {
       return {
         type: 'text',
-        text: item.text || '',
+        text: typeof item.text === 'string' ? item.text : extractInlineText(item.content),
       }
     }
   })

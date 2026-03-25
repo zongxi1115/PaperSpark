@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const SURYA_SERVICE_URL = process.env.SURYA_OCR_SERVICE_URL || 'http://127.0.0.1:8765'
+const SURYA_SERVICE_URL =
+  process.env.SURYA_OCR_SERVICE_URL ||
+  process.env.SURYA_SERVICE_URL ||
+  'http://127.0.0.1:8765'
 
 export async function POST(request: NextRequest) {
   try {

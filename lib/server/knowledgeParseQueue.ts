@@ -4,7 +4,10 @@ import { extractMetadata } from '@/lib/ai'
 import { normalizeSuryaParseResult } from '@/lib/suryaParser'
 import type { KnowledgeItem, ModelConfig, PDFDocumentCache, PDFMetadata, PDFPageCache } from '@/lib/types'
 
-const SURYA_SERVICE_URL = process.env.SURYA_OCR_SERVICE_URL || 'http://127.0.0.1:8765'
+const SURYA_SERVICE_URL =
+  process.env.SURYA_OCR_SERVICE_URL ||
+  process.env.SURYA_SERVICE_URL ||
+  'http://127.0.0.1:8765'
 const QUEUE_DIR = path.join(process.cwd(), 'out', 'knowledge-parse-queue')
 const QUEUE_STORE_FILE = path.join(QUEUE_DIR, 'queue.json')
 const QUEUE_FILES_DIR = path.join(QUEUE_DIR, 'files')

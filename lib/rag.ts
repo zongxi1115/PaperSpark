@@ -3,7 +3,10 @@
 import type { ModelConfig, TextBlock, EmbeddingModelConfig } from './types'
 import { deleteVectorDocumentsByDocumentId, saveVectorDocuments } from './pdfCache'
 
-const SURYA_SERVICE_URL = process.env.NEXT_PUBLIC_SURYA_SERVICE_URL || 'http://127.0.0.1:8765'
+const SURYA_SERVICE_URL =
+  process.env.NEXT_PUBLIC_SURYA_SERVICE_URL ||
+  process.env.NEXT_PUBLIC_SURYA_OCR_SERVICE_URL ||
+  'http://127.0.0.1:8765'
 
 export type RAGIndexResult = {
   success: boolean

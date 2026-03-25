@@ -6,14 +6,17 @@ import { resolveEmbeddingProvider, resolveRerankProvider } from '@/lib/ragServer
 export const maxDuration = 60
 
 // Surya 服务地址
-const SURYA_SERVICE_URL = process.env.SURYA_SERVICE_URL || 'http://127.0.0.1:8765'
+const SURYA_SERVICE_URL =
+  process.env.SURYA_SERVICE_URL ||
+  process.env.SURYA_OCR_SERVICE_URL ||
+  'http://127.0.0.1:8765'
 
 // 检查 Surya 服务是否可用
 async function checkSuryaService(): Promise<boolean> {
   try {
     const response = await fetch(`${SURYA_SERVICE_URL}/rag/health`, {
       method: 'GET',
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(10000),
     })
     return response.ok
   } catch {

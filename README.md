@@ -202,7 +202,80 @@ PaperSpark 面向科研与高阶学习场景，提供从文献导入、沉浸式
 
 ## 快速开始
 
-### 方式一：Docker 部署（推荐）
+### 方式一：Modal 云部署（最推荐）
+
+适合希望获得更稳定 OCR 性能、较低本地环境负担，同时又不想自己长期维护 GPU 服务的用户。
+
+> [!NOTE]
+> 首次使用 Surya OCR 时需要下载模型并建立缓存，启动时间会明显更长，请耐心等待。Docker GPU、本地 GPU 等其他方案第一次启动也存在同样现象。
+> 按 2026-03-26 的 Modal 公开价格粗略估算，首次模型下载与冷启动完成一次解析的成本大约在 `$0.1` 左右；缓存建立后，20 页 PDF 单次解析成本通常约 `$0.05`。
+> 实际成本会受 PDF 页数、版面复杂度、请求间隔、模型缓存命中情况和 Modal GPU 单价变化影响。
+
+#### 环境要求
+
+- Node.js 18+
+- pnpm 8+
+- Python 3.10+（推荐直接使用 conda base 环境）
+- 一个可用的 Modal 账号
+
+#### 部署步骤
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/zongxi1115/paperspark.git
+cd paperspark
+
+# 2. 复制本地环境变量示例
+cp .env.local.example .env.local
+
+# 3. 安装前端依赖
+pnpm install
+
+# 4. 在 conda base 环境安装 modal CLI
+python -m pip install -r services/surya_ocr_service/requirements-modal.txt
+
+# 5. 首次登录 modal
+python -m modal setup
+
+# 6. 部署 Surya OCR 微服务
+python -m modal deploy services/surya_ocr_service/modal_service.py
+```
+
+部署成功后，终端会打印一个类似下面的地址：
+
+```text
+https://your-name--paperspark-surya-web-app.modal.run
+```
+
+把它填入 `.env.local` 里的以下 4 个变量：
+
+```env
+SURYA_OCR_SERVICE_URL=https://your-name--paperspark-surya-web-app.modal.run
+SURYA_SERVICE_URL=https://your-name--paperspark-surya-web-app.modal.run
+NEXT_PUBLIC_SURYA_SERVICE_URL=https://your-name--paperspark-surya-web-app.modal.run
+NEXT_PUBLIC_SURYA_OCR_SERVICE_URL=https://your-name--paperspark-surya-web-app.modal.run
+```
+
+然后启动前端：
+
+```bash
+pnpm dev
+```
+
+默认访问地址为 `http://localhost:3000`。
+
+#### 推荐配置
+
+- 默认 GPU：`L4`
+- 默认执行后端：`python`（直接调用 Surya predictor，而不是反复启动 CLI）
+- 默认空闲缩容窗口：`2s`
+- 默认模型缓存：使用 Modal Volume 持久化
+
+更完整的 Modal 部署细节见 [services/surya_ocr_service/MODAL.md](services/surya_ocr_service/MODAL.md)。
+
+---
+
+### 方式二：Docker 部署
 
 适合快速体验和生产环境部署。
 
@@ -251,7 +324,7 @@ docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
 ---
 
-### 方式二：本地构建
+### 方式三：本地构建
 
 适合开发者二次开发和调试。
 
@@ -264,6 +337,7 @@ docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 #### 安装与运行
 
 ```bash
+cp .env.local.example .env.local
 pnpm install
 pnpm dev
 ```

@@ -11,6 +11,7 @@ import tempfile
 import threading
 import uuid
 from collections import Counter
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,9 +39,6 @@ TEXTUAL_LABELS = {
     "Picture",
 }
 
-JOB_ROOT = Path("out") / "surya_jobs"
-JOB_ROOT.mkdir(parents=True, exist_ok=True)
-
 
 def load_local_env_file() -> None:
     env_path = Path('.env.local')
@@ -58,10 +56,203 @@ def load_local_env_file() -> None:
 
 load_local_env_file()
 
+
+def resolve_data_root() -> Path:
+    configured = (os.environ.get("SURYA_DATA_ROOT") or "out").strip() or "out"
+    root = Path(configured)
+    if not root.is_absolute():
+        root = Path.cwd() / root
+    return root
+
+
+DATA_ROOT = resolve_data_root()
+JOB_ROOT = DATA_ROOT / "surya_jobs"
+SURYA_OUTPUT_ROOT = DATA_ROOT / "surya_service"
+CHROMA_ROOT = DATA_ROOT / "chroma_db"
+for directory in (JOB_ROOT, SURYA_OUTPUT_ROOT, CHROMA_ROOT):
+    directory.mkdir(parents=True, exist_ok=True)
+
+
 MAX_WORKERS = max(1, int(os.environ.get("SURYA_MAX_WORKERS", "1")))
 JOB_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="surya-job")
 JOB_LOCK = threading.Lock()
 JOBS: dict[str, dict[str, Any]] = {}
+_PERSISTENCE_COMMITTER: Callable[[], None] | None = None
+_PERSISTENCE_RELOADER: Callable[[], None] | None = None
+_EXTERNAL_JOB_SUBMITTER: Callable[[str], Any] | None = None
+SURYA_EXECUTION_BACKEND = (os.environ.get("SURYA_EXECUTION_BACKEND") or "python").strip().lower()
+_PREDICTOR_LOCK = threading.Lock()
+_PREDICTORS: dict[str, Any] | None = None
+
+
+def configure_runtime(
+    *,
+    persistence_committer: Callable[[], None] | None = None,
+    persistence_reloader: Callable[[], None] | None = None,
+    job_submitter: Callable[[str], Any] | None = None,
+) -> None:
+    global _PERSISTENCE_COMMITTER, _PERSISTENCE_RELOADER, _EXTERNAL_JOB_SUBMITTER
+    _PERSISTENCE_COMMITTER = persistence_committer
+    _PERSISTENCE_RELOADER = persistence_reloader
+    _EXTERNAL_JOB_SUBMITTER = job_submitter
+
+
+def checkpoint_persisted_state() -> None:
+    if _PERSISTENCE_COMMITTER:
+        _PERSISTENCE_COMMITTER()
+
+
+def refresh_persisted_state() -> None:
+    if _PERSISTENCE_RELOADER:
+        _PERSISTENCE_RELOADER()
+
+
+def safe_refresh_persisted_state() -> None:
+    try:
+        refresh_persisted_state()
+    except Exception as exc:
+        print(f"[Persistence] Failed to reload persisted state: {exc}", flush=True)
+
+
+def submit_job(job_id: str) -> None:
+    if _EXTERNAL_JOB_SUBMITTER:
+        _EXTERNAL_JOB_SUBMITTER(job_id)
+        return
+    JOB_EXECUTOR.submit(process_job, job_id)
+
+
+def get_optional_int_env(*keys: str) -> int | None:
+    for key in keys:
+        value = (os.environ.get(key) or "").strip()
+        if not value:
+            continue
+        return int(value)
+    return None
+
+
+def parse_page_range(page_range: str | None) -> list[int] | None:
+    if not page_range:
+        return None
+
+    page_numbers: list[int] = []
+    for part in page_range.split(","):
+        chunk = part.strip()
+        if not chunk:
+            continue
+        if "-" in chunk:
+            start_str, end_str = chunk.split("-", 1)
+            start = int(start_str)
+            end = int(end_str)
+            page_numbers.extend(list(range(start, end + 1)))
+        else:
+            page_numbers.append(int(chunk))
+
+    if not page_numbers:
+        return None
+
+    return sorted(set(page_numbers))
+
+
+def get_surya_predictors() -> dict[str, Any]:
+    global _PREDICTORS
+    if _PREDICTORS is not None:
+        return _PREDICTORS
+
+    with _PREDICTOR_LOCK:
+        if _PREDICTORS is not None:
+            return _PREDICTORS
+
+        from surya.detection import DetectionPredictor
+        from surya.foundation import FoundationPredictor
+        from surya.layout import LayoutPredictor
+        from surya.recognition import RecognitionPredictor
+        from surya.settings import settings
+
+        layout_foundation = FoundationPredictor(checkpoint=settings.LAYOUT_MODEL_CHECKPOINT)
+        ocr_foundation = FoundationPredictor()
+
+        _PREDICTORS = {
+            "layout": LayoutPredictor(layout_foundation),
+            "detection": DetectionPredictor(),
+            "recognition": RecognitionPredictor(ocr_foundation),
+        }
+        return _PREDICTORS
+
+
+def load_document_images(input_path: Path, page_range: str | None) -> tuple[list[Any], list[Any], str]:
+    from filetype import guess
+    from PIL import Image
+    from surya.input.processing import get_page_images, open_pdf
+    from surya.settings import settings
+
+    guessed_type = guess(str(input_path))
+    is_pdf = bool(guessed_type and guessed_type.extension == "pdf")
+    document_name = input_path.stem
+
+    if is_pdf:
+        page_indices = parse_page_range(page_range)
+        pdf = open_pdf(str(input_path))
+        try:
+            last_page = len(pdf)
+            if page_indices is None:
+                page_indices = list(range(last_page))
+            elif any(page < 0 or page >= last_page for page in page_indices):
+                raise RuntimeError(f"Invalid page range: {page_range}")
+
+            images = get_page_images(pdf, page_indices, dpi=settings.IMAGE_DPI)
+            highres_images = get_page_images(pdf, page_indices, dpi=settings.IMAGE_DPI_HIGHRES)
+        finally:
+            pdf.close()
+
+        return images, highres_images, document_name
+
+    image = Image.open(input_path).convert("RGB")
+    return [image], [image.copy()], document_name
+
+
+def build_prediction_payloads(
+    input_path: Path,
+    page_range: str | None,
+) -> tuple[dict[str, Any], dict[str, Any], str]:
+    from surya.common.surya.schema import TaskNames
+
+    predictors = get_surya_predictors()
+    images, highres_images, document_name = load_document_images(input_path, page_range)
+
+    layout_batch_size = get_optional_int_env("LAYOUT_BATCH_SIZE")
+    detection_batch_size = get_optional_int_env("DETECTOR_BATCH_SIZE", "DETECTION_BATCH_SIZE")
+    recognition_batch_size = get_optional_int_env("RECOGNITION_BATCH_SIZE")
+
+    layout_predictions = predictors["layout"](images, batch_size=layout_batch_size)
+    ocr_predictions = predictors["recognition"](
+        images,
+        task_names=[TaskNames.ocr_with_boxes] * len(images),
+        det_predictor=predictors["detection"],
+        detection_batch_size=detection_batch_size,
+        recognition_batch_size=recognition_batch_size,
+        highres_images=highres_images,
+        math_mode=True,
+    )
+
+    layout_data = {
+        document_name: [
+            {
+                **prediction.model_dump(),
+                "page": index + 1,
+            }
+            for index, prediction in enumerate(layout_predictions)
+        ]
+    }
+    ocr_data = {
+        document_name: [
+            {
+                **prediction.model_dump(),
+                "page": index + 1,
+            }
+            for index, prediction in enumerate(ocr_predictions)
+        ]
+    }
+    return layout_data, ocr_data, document_name
 
 
 class LayoutRegion(BaseModel):
@@ -180,6 +371,7 @@ def persist_job_record(job_id: str, record: dict[str, Any]) -> None:
         json.dumps(record, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    checkpoint_persisted_state()
 
 
 def load_job_record(job_id: str) -> dict[str, Any] | None:
@@ -189,8 +381,17 @@ def load_job_record(job_id: str) -> dict[str, Any] | None:
     return json.loads(manifest.read_text(encoding="utf-8"))
 
 
-def get_job_record(job_id: str) -> dict[str, Any] | None:
+def get_job_record(job_id: str, refresh_from_disk: bool = False) -> dict[str, Any] | None:
     with JOB_LOCK:
+        if refresh_from_disk:
+            disk_record = load_job_record(job_id)
+            if not disk_record:
+                JOBS.pop(job_id, None)
+                return None
+
+            JOBS[job_id] = disk_record
+            return dict(disk_record)
+
         record = JOBS.get(job_id)
         if record:
             return dict(record)
@@ -205,7 +406,7 @@ def get_job_record(job_id: str) -> dict[str, Any] | None:
 
 def update_job_record(job_id: str, **updates: Any) -> dict[str, Any]:
     with JOB_LOCK:
-        record = JOBS.get(job_id) or load_job_record(job_id)
+        record = load_job_record(job_id) or JOBS.get(job_id)
         if not record:
             raise KeyError(job_id)
 
@@ -397,9 +598,9 @@ def run_surya_command(command: list[str], cwd: Path) -> None:
         raise RuntimeError(stderr) from exc
 
 
-def persist_raw_outputs(job_record: dict[str, Any], layout_json: Path, ocr_json: Path) -> dict[str, str]:
+def persist_raw_outputs_from_files(job_record: dict[str, Any], layout_json: Path, ocr_json: Path) -> dict[str, str]:
     target_name = job_record.get("output_name") or Path(job_record["file_name"]).stem
-    persisted_dir = Path("out") / "surya_service" / target_name
+    persisted_dir = SURYA_OUTPUT_ROOT / target_name
     persisted_dir.mkdir(parents=True, exist_ok=True)
     layout_target = persisted_dir / "layout.results.json"
     ocr_target = persisted_dir / "ocr.results.json"
@@ -411,50 +612,100 @@ def persist_raw_outputs(job_record: dict[str, Any], layout_json: Path, ocr_json:
     }
 
 
+def persist_raw_outputs_from_data(
+    job_record: dict[str, Any],
+    layout_data: dict[str, Any],
+    ocr_data: dict[str, Any],
+) -> dict[str, str]:
+    target_name = job_record.get("output_name") or Path(job_record["file_name"]).stem
+    persisted_dir = SURYA_OUTPUT_ROOT / target_name
+    persisted_dir.mkdir(parents=True, exist_ok=True)
+    layout_target = persisted_dir / "layout.results.json"
+    ocr_target = persisted_dir / "ocr.results.json"
+    layout_target.write_text(json.dumps(layout_data, ensure_ascii=False, indent=2), encoding="utf-8")
+    ocr_target.write_text(json.dumps(ocr_data, ensure_ascii=False, indent=2), encoding="utf-8")
+    checkpoint_persisted_state()
+    return {
+        "layout_json": str(layout_target.resolve()),
+        "ocr_json": str(ocr_target.resolve()),
+    }
+
+
+def process_job_with_cli(job_id: str, job_record: dict[str, Any]) -> ParseResponse:
+    ensure_cli("surya_layout")
+    ensure_cli("surya_ocr")
+
+    update_job_record(job_id, status="processing", stage="layout", error=None)
+    input_path = Path(job_record["input_path"])
+
+    with tempfile.TemporaryDirectory(prefix=f"surya_job_{job_id}_") as temp_dir:
+        work_dir = Path(temp_dir)
+        layout_output_dir = work_dir / "layout_out"
+        ocr_output_dir = work_dir / "ocr_out"
+
+        layout_cmd = ["surya_layout", str(input_path), "--output_dir", str(layout_output_dir)]
+        ocr_cmd = ["surya_ocr", str(input_path), "--output_dir", str(ocr_output_dir)]
+        page_range = job_record.get("page_range")
+        if page_range:
+            layout_cmd.extend(["--page_range", page_range])
+            ocr_cmd.extend(["--page_range", page_range])
+
+        run_surya_command(layout_cmd, work_dir)
+        update_job_record(job_id, status="processing", stage="ocr")
+        run_surya_command(ocr_cmd, work_dir)
+        update_job_record(job_id, status="processing", stage="normalize")
+
+        layout_json = result_json_path(layout_output_dir, input_path)
+        ocr_json = result_json_path(ocr_output_dir, input_path)
+        layout_data = load_json(layout_json)
+        ocr_data = load_json(ocr_json)
+        parsed = normalize_pages(layout_data, ocr_data, input_path.stem)
+
+        if job_record.get("keep_outputs"):
+            parsed.artifacts = persist_raw_outputs_from_files(job_record, layout_json, ocr_json)
+
+        return parsed
+
+
+def process_job_with_python(job_id: str, job_record: dict[str, Any]) -> ParseResponse:
+    input_path = Path(job_record["input_path"])
+    update_job_record(job_id, status="processing", stage="loading_models", error=None)
+    get_surya_predictors()
+
+    update_job_record(job_id, status="processing", stage="rendering_pages")
+    layout_data, ocr_data, document_name = build_prediction_payloads(
+        input_path=input_path,
+        page_range=job_record.get("page_range"),
+    )
+
+    update_job_record(job_id, status="processing", stage="normalize")
+    parsed = normalize_pages(layout_data, ocr_data, document_name)
+
+    if job_record.get("keep_outputs"):
+        parsed.artifacts = persist_raw_outputs_from_data(job_record, layout_data, ocr_data)
+
+    return parsed
+
+
 def process_job(job_id: str) -> None:
-    job_record = get_job_record(job_id)
+    safe_refresh_persisted_state()
+    job_record = get_job_record(job_id, refresh_from_disk=True)
     if not job_record:
         return
 
     try:
-        ensure_cli("surya_layout")
-        ensure_cli("surya_ocr")
+        if SURYA_EXECUTION_BACKEND == "cli":
+            parsed = process_job_with_cli(job_id, job_record)
+        else:
+            parsed = process_job_with_python(job_id, job_record)
 
-        update_job_record(job_id, status="processing", stage="layout", error=None)
-        input_path = Path(job_record["input_path"])
-
-        with tempfile.TemporaryDirectory(prefix=f"surya_job_{job_id}_") as temp_dir:
-            work_dir = Path(temp_dir)
-            layout_output_dir = work_dir / "layout_out"
-            ocr_output_dir = work_dir / "ocr_out"
-
-            layout_cmd = ["surya_layout", str(input_path), "--output_dir", str(layout_output_dir)]
-            ocr_cmd = ["surya_ocr", str(input_path), "--output_dir", str(ocr_output_dir)]
-            page_range = job_record.get("page_range")
-            if page_range:
-                layout_cmd.extend(["--page_range", page_range])
-                ocr_cmd.extend(["--page_range", page_range])
-
-            run_surya_command(layout_cmd, work_dir)
-            update_job_record(job_id, status="processing", stage="ocr")
-            run_surya_command(ocr_cmd, work_dir)
-            update_job_record(job_id, status="processing", stage="normalize")
-
-            layout_json = result_json_path(layout_output_dir, input_path)
-            ocr_json = result_json_path(ocr_output_dir, input_path)
-            layout_data = load_json(layout_json)
-            ocr_data = load_json(ocr_json)
-            parsed = normalize_pages(layout_data, ocr_data, input_path.stem)
-
-            if job_record.get("keep_outputs"):
-                parsed.artifacts = persist_raw_outputs(job_record, layout_json, ocr_json)
-
-            update_job_record(job_id, status="processing", stage="persisting")
-            result_path = job_result_path(job_id)
-            result_path.write_text(
-                json.dumps(model_to_dict(parsed), ensure_ascii=False, indent=2),
-                encoding="utf-8",
-            )
+        update_job_record(job_id, status="processing", stage="persisting")
+        result_path = job_result_path(job_id)
+        result_path.write_text(
+            json.dumps(model_to_dict(parsed), ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        checkpoint_persisted_state()
 
         update_job_record(
             job_id,
@@ -476,11 +727,16 @@ def process_job(job_id: str) -> None:
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    safe_refresh_persisted_state()
     return {
         "ok": True,
+        "execution_backend": SURYA_EXECUTION_BACKEND,
         "surya_layout": bool(shutil.which("surya_layout")),
         "surya_ocr": bool(shutil.which("surya_ocr")),
+        "predictors_loaded": _PREDICTORS is not None,
         "max_workers": MAX_WORKERS,
+        "data_root": str(DATA_ROOT.resolve()),
+        "job_execution_mode": "external" if _EXTERNAL_JOB_SUBMITTER else "local",
         "job_root": str(JOB_ROOT.resolve()),
     }
 
@@ -492,8 +748,9 @@ async def create_job(
     keep_outputs: bool = Form(default=False),
     output_name: str | None = Form(default=None),
 ) -> JobSubmissionResponse:
-    ensure_cli("surya_layout")
-    ensure_cli("surya_ocr")
+    if _EXTERNAL_JOB_SUBMITTER is None and SURYA_EXECUTION_BACKEND == "cli":
+        ensure_cli("surya_layout")
+        ensure_cli("surya_ocr")
 
     job_id = uuid.uuid4().hex
     directory = job_dir(job_id)
@@ -524,7 +781,7 @@ async def create_job(
         JOBS[job_id] = record
         persist_job_record(job_id, record)
 
-    JOB_EXECUTOR.submit(process_job, job_id)
+    submit_job(job_id)
     return JobSubmissionResponse(
         job_id=job_id,
         status="queued",
@@ -536,7 +793,8 @@ async def create_job(
 
 @app.get("/jobs/{job_id}", response_model=JobStatusResponse)
 def get_job_status(job_id: str) -> JobStatusResponse:
-    record = get_job_record(job_id)
+    safe_refresh_persisted_state()
+    record = get_job_record(job_id, refresh_from_disk=True)
     if not record:
         raise HTTPException(status_code=404, detail="Job not found")
     return build_job_status(record)
@@ -544,7 +802,8 @@ def get_job_status(job_id: str) -> JobStatusResponse:
 
 @app.get("/jobs/{job_id}/result", response_model=JobResultResponse)
 def get_job_result(job_id: str):
-    record = get_job_record(job_id)
+    safe_refresh_persisted_state()
+    record = get_job_record(job_id, refresh_from_disk=True)
     if not record:
         raise HTTPException(status_code=404, detail="Job not found")
 
@@ -571,10 +830,6 @@ def get_job_result(job_id: str):
 
 
 # ============ ChromaDB 向量存储功能 ============
-
-# ChromaDB 数据目录
-CHROMA_ROOT = Path("out") / "chroma_db"
-CHROMA_ROOT.mkdir(parents=True, exist_ok=True)
 
 # 初始化 ChromaDB 客户端（嵌入式持久化模式）
 _chroma_client: chromadb.ClientAPI | None = None
@@ -752,6 +1007,7 @@ async def rag_embed(request: EmbedRequest = Body(...)) -> EmbedResponse:
             documents=request.texts,
             metadatas=sanitize_metadatas(request.metadatas),
         )
+        checkpoint_persisted_state()
 
         return EmbedResponse(
             success=True,
@@ -824,6 +1080,7 @@ def rag_delete(document_id: str) -> dict[str, Any]:
         
         try:
             client.delete_collection(name=collection_name)
+            checkpoint_persisted_state()
             return {"success": True, "message": f"已删除文档 {document_id} 的向量数据"}
         except Exception:
             return {"success": True, "message": "集合不存在或已删除"}

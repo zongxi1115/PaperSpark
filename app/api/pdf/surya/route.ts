@@ -8,7 +8,10 @@ import type { ModelConfig } from '@/lib/types'
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const SURYA_SERVICE_URL = process.env.SURYA_OCR_SERVICE_URL || 'http://127.0.0.1:8765'
+const SURYA_SERVICE_URL =
+  process.env.SURYA_OCR_SERVICE_URL ||
+  process.env.SURYA_SERVICE_URL ||
+  'http://127.0.0.1:8765'
 const SURYA_BINDING_DIR = path.join(process.cwd(), 'out', 'surya')
 const SURYA_BINDING_FILE = path.join(SURYA_BINDING_DIR, 'job-bindings.json')
 

@@ -4,7 +4,8 @@ pydantic
 python-multipart
 chromadb
 httpx
-surya-ocr
+surya-ocr==0.17.1
+transformers>=4.56.1,<5
 mammoth
 beautifulsoup4
 reportlab

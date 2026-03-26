@@ -20,9 +20,9 @@ jobs:
       matrix:
         include:
           - tag: cpu
-            torch_version: cpu
-          - tag: gpu-cu121
-            torch_version: cu121
+            torch_channel: cpu
+          - tag: gpu-cu126
+            torch_channel: cu126
 
     steps:
       - name: Checkout
@@ -43,8 +43,9 @@ jobs:
           context: ./services/surya_ocr_service
           file: ./services/surya_ocr_service/Dockerfile
           push: true
+          platforms: linux/amd64
           build-args: |
-            TORCH_VERSION=${{ matrix.torch_version }}
+            TORCH_CHANNEL=${{ matrix.torch_channel }}
           tags: |
             ${{ secrets.DOCKERHUB_USERNAME }}/paperspark-surya:${{ matrix.tag }}
           cache-from: type=gha,scope=surya-${{ matrix.tag }}

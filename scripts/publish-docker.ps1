@@ -18,7 +18,7 @@ param(
     [switch]$BuildGpu = $false,
 
     # GPU CUDA 版本
-    [string]$CudaVersion = "cu121"
+    [string]$CudaVersion = "cu126"
 )
 
 $ErrorActionPreference = "Stop"
@@ -66,7 +66,7 @@ Write-Host "[4/5] 构建 Surya OCR 后端镜像..." -ForegroundColor Yellow
 # CPU 版本
 Write-Host "  构建 CPU 版本..." -ForegroundColor Gray
 docker build `
-    --build-arg TORCH_VERSION=cpu `
+    --build-arg TORCH_CHANNEL=cpu `
     -f services/surya_ocr_service/Dockerfile `
     -t "${DockerHubUsername}/paperspark-surya:cpu" `
     -t "${DockerHubUsername}/paperspark-surya:${Version}-cpu" `
@@ -82,7 +82,7 @@ Write-Host "  CPU 版本构建完成" -ForegroundColor Green
 if ($BuildGpu) {
     Write-Host "  构建 GPU 版本 (CUDA ${CudaVersion})..." -ForegroundColor Gray
     docker build `
-        --build-arg TORCH_VERSION=$CudaVersion `
+        --build-arg TORCH_CHANNEL=$CudaVersion `
         -f services/surya_ocr_service/Dockerfile `
         -t "${DockerHubUsername}/paperspark-surya:gpu-${CudaVersion}" `
         -t "${DockerHubUsername}/paperspark-surya:${Version}-gpu-${CudaVersion}" `

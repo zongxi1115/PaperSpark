@@ -320,7 +320,7 @@ docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 | --- | --- |
 | `xiaozongxi/paperspark-nextjs:latest` | Next.js 前端 |
 | `xiaozongxi/paperspark-surya:cpu` | OCR 后端 CPU 版本 |
-| `xiaozongxi/paperspark-surya:gpu-cu121` | OCR 后端 CUDA 12.1 版本 |
+| `xiaozongxi/paperspark-surya:gpu-cu126` | OCR 后端 CUDA 12.6 版本 |
 
 ---
 
@@ -360,8 +360,8 @@ python scripts/start_surya_service.py
 # CPU 模式（自动安装）
 python scripts/start_surya_service.py --accelerator cpu
 
-# GPU 模式（示例：CUDA 12.1）
-python scripts/start_surya_service.py --accelerator gpu --cuda cu121
+# GPU 模式（示例：CUDA 12.6）
+python scripts/start_surya_service.py --accelerator gpu --cuda cu126
 
 # 仅启动，不安装依赖
 python scripts/start_surya_service.py --accelerator skip-install
@@ -383,6 +383,7 @@ SURYA_OCR_SERVICE_URL=http://127.0.0.1:8765
 - 启动器会按你的选择自动安装匹配通道的 PyTorch（支持 `cu118`/`cu121`/`cu124`/`cu126`）。
 - 若无 GPU，会自动以 CPU 方式运行，但大文件处理耗时会明显增加。
 - 后续将考虑找到surya-ocr的更轻量级替代方案，以降低对 GPU 的依赖。
+- 仓库已补充 ARM64 Docker 打包工作流，CPU 版 Surya 与 Next.js 镜像可额外发布为 ARM 标签。
 
 ## Have Problems or Want to Contribute?
 

@@ -18,9 +18,8 @@ services:
   surya-ocr:
     build:
       args:
-        # CUDA 12.1 版本（推荐，兼容性较好）
-        # 可选值：cu118 (CUDA 11.8), cu121 (CUDA 12.1)
-        TORCH_VERSION: cu121
+        # CUDA 12.6 版本（与当前依赖栈对齐）
+        TORCH_CHANNEL: cu126
     deploy:
       resources:
         reservations:
@@ -30,4 +29,5 @@ services:
               capabilities: [gpu]
     environment:
       - SURYA_MAX_WORKERS=4
+      - SURYA_EXECUTION_BACKEND=python
       - CUDA_VISIBLE_DEVICES=all

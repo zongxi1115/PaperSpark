@@ -19,6 +19,7 @@ services:
       - "3000:3000"
     environment:
       - SURYA_OCR_SERVICE_URL=http://surya-ocr:8765
+      - SURYA_SERVICE_URL=http://surya-ocr:8765
       - NEXT_PUBLIC_SMALL_MODEL_BASE_URL=${NEXT_PUBLIC_SMALL_MODEL_BASE_URL}
       - NEXT_PUBLIC_SMALL_MODEL_API_KEY=${NEXT_PUBLIC_SMALL_MODEL_API_KEY}
       - NEXT_PUBLIC_SMALL_MODEL_NAME=${NEXT_PUBLIC_SMALL_MODEL_NAME}
@@ -41,9 +42,11 @@ services:
       - "8765:8765"
     environment:
       - SURYA_MAX_WORKERS=${SURYA_MAX_WORKERS:-2}
+      - SURYA_EXECUTION_BACKEND=python
     volumes:
       - surya-jobs:/app/out/surya_jobs
       - chroma-data:/app/out/chroma_db
+      - surya-outputs:/app/out/surya_service
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
       interval: 30s
@@ -61,3 +64,4 @@ networks:
 volumes:
   surya-jobs:
   chroma-data:
+  surya-outputs:

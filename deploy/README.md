@@ -113,7 +113,7 @@ docker compose pull
 docker compose up -d
 ```
 
-### B3. 选择 GPU（CUDA 12.1）
+### B3. 选择 GPU（CUDA 12.6）
 
 前提条件：
 
@@ -124,13 +124,13 @@ docker compose up -d
 可先验证：
 
 ```bash
-docker run --gpus all nvidia/cuda:12.1-base nvidia-smi
+docker run --gpus all nvidia/cuda:12.6.3-base-ubuntu24.04 nvidia-smi
 ```
 
 在 `.env` 中设置：
 
 ```env
-SURYA_GPU_VERSION=gpu-cu121
+SURYA_GPU_VERSION=gpu-cu126
 SURYA_MAX_WORKERS=4
 ```
 
@@ -197,7 +197,12 @@ docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 |---------|------|
 | `xiaozongxi/paperspark-nextjs:latest` | Next.js 前端 |
 | `xiaozongxi/paperspark-surya:cpu` | OCR 后端（CPU 版本） |
-| `xiaozongxi/paperspark-surya:gpu-cu121` | OCR 后端（CUDA 12.1，推荐） |
+| `xiaozongxi/paperspark-surya:gpu-cu126` | OCR 后端（CUDA 12.6，推荐） |
+
+如果你需要 ARM64 镜像，GitHub Actions 里已补充单独的 ARM 打包工作流，默认会发布：
+
+- `paperspark-nextjs:latest-arm64`
+- `paperspark-surya:cpu-arm64`
 
 ---
 

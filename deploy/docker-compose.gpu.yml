@@ -12,7 +12,7 @@
 
 services:
   surya-ocr:
-    image: ${DOCKER_REGISTRY:-docker.io}/${DOCKER_USER:-xiaozongxi}/paperspark-surya:${SURYA_GPU_VERSION:-gpu-cu121}
+    image: ${DOCKER_REGISTRY:-docker.io}/${DOCKER_USER:-xiaozongxi}/paperspark-surya:${SURYA_GPU_VERSION:-gpu-cu126}
     deploy:
       resources:
         reservations:
@@ -22,4 +22,5 @@ services:
               capabilities: [gpu]
     environment:
       - SURYA_MAX_WORKERS=${SURYA_MAX_WORKERS:-4}
+      - SURYA_EXECUTION_BACKEND=python
       - CUDA_VISIBLE_DEVICES=all

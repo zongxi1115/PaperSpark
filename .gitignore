@@ -33,3 +33,4 @@ AGENTS.md
 .claude/
 .vercel
 .env*.local
+docs/

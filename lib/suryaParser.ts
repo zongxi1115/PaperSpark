@@ -133,7 +133,8 @@ function regionToBlock(
   region: SuryaLayoutRegion,
 ): TextBlock | null {
   const text = normalizeText(region.text)
-  if (!text) return null
+  const isPictureRegion = region.label === 'Picture'
+  if (!text && !isPictureRegion) return null
 
   const blockType = mapSuryaLabelToTextBlockType(region.label, text, pageNum, region.position)
   const [x1, y1, x2, y2] = region.bbox

@@ -21,6 +21,7 @@ import {
   deleteKnowledgeItemCache,
 } from '@/lib/pdfCache'
 import PDFViewer from '@/components/PDF/PDFViewer'
+import HTMLReader from '@/components/PDF/HTMLReader'
 import AIGuidePanel from '@/components/Guide/AIGuidePanel'
 import ImmersiveChatPanel from '@/components/Assistant/ImmersiveChatPanel'
 import ImmersiveCanvasPanel from '@/components/Assistant/ImmersiveCanvasPanel'
@@ -147,6 +148,7 @@ export default function ImmersiveReaderPage() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
   const [scale, setScale] = useState(1.2)
+  const [readerMode, setReaderMode] = useState<'pdf' | 'html'>('pdf')
   const [sidebarTab, setSidebarTab] = useState<'info' | 'translate' | 'notes' | 'guide' | 'qa' | 'canvas'>('guide')
   const [sidebarWidth, setSidebarWidth] = useState(288) // 288px = 72 * 4
 
@@ -349,10 +351,16 @@ export default function ImmersiveReaderPage() {
           .map(block => block.id),
       ),
     )
+    const missingPictureBlocks =
+      existingDoc?.parser === 'surya' &&
+      existingDoc?.parseStatus === 'completed' &&
+      Number(existingDoc?.structureCounts?.Picture || 0) > 0 &&
+      pictureBlockIds.size === 0
     const hasCompletedSuryaCache =
       existingDoc?.parser === 'surya' &&
       existingDoc?.parseStatus === 'completed' &&
-      existingPages.length > 0
+      existingPages.length > 0 &&
+      !missingPictureBlocks
     setSuryaReady(hasCompletedSuryaCache)
 
     // 同步缓存状态到 localStorage（修复缓存标记与实际数据不一致的问题）
@@ -769,6 +777,17 @@ export default function ImmersiveReaderPage() {
     ([id]) => blocks.find(block => block.id === id)?.sourceLabel !== 'Picture',
   )
   const canTranslate = suryaReady && !structureParsing && blocks.length > 0
+  const canUseHtmlView = suryaReady && blocks.length > 0
+  const structurePendingTooltip = '文档结构未完成，请等待解析完成后操作'
+  const translateActionTooltip = canTranslate
+    ? '开始翻译文档'
+    : structurePendingTooltip
+
+  useEffect(() => {
+    if (!canUseHtmlView && readerMode === 'html') {
+      setReaderMode('pdf')
+    }
+  }, [canUseHtmlView, readerMode])
 
   useEffect(() => {
     loadPDF()
@@ -1411,6 +1430,36 @@ export default function ImmersiveReaderPage() {
 
           <div className="w-px h-5 bg-[#444] mx-2" />
 
+          <div className="flex items-center gap-1 rounded-lg border border-[#3a3a3a] bg-[#1a1a1a] p-1">
+            <Tooltip content="查看原生 PDF 页面">
+              <Button
+                isIconOnly
+                size="sm"
+                variant={readerMode === 'pdf' ? 'solid' : 'light'}
+                color={readerMode === 'pdf' ? 'primary' : 'default'}
+                className="min-w-8 h-8"
+                onPress={() => setReaderMode('pdf')}
+              >
+                <Icon icon="mdi:file-pdf-box" className="text-lg" />
+              </Button>
+            </Tooltip>
+            <Tooltip content={canUseHtmlView ? '使用 Surya 结构块进入 HTML 阅览模式' : structurePendingTooltip}>
+              <span className="inline-flex">
+                <Button
+                  isIconOnly
+                  size="sm"
+                  variant={readerMode === 'html' ? 'solid' : 'light'}
+                  color={readerMode === 'html' ? 'primary' : 'default'}
+                  className="min-w-8 h-8"
+                  onPress={() => setReaderMode('html')}
+                  isDisabled={!canUseHtmlView}
+                >
+                  <Icon icon="mdi:text-box-search-outline" className="text-lg" />
+                </Button>
+              </span>
+            </Tooltip>
+          </div>
+
           {/* 翻译切换 */}
           <Tooltip content={showTranslation ? '隐藏译文' : '显示译文'}>
             <Button
@@ -1428,7 +1477,7 @@ export default function ImmersiveReaderPage() {
 
           {(hasTranslation || translating || translatedBlocks.size > 0) && (
             <div className="flex items-center gap-1 rounded-lg border border-[#3a3a3a] bg-[#1a1a1a] p-1">
-              <Tooltip content="译文覆盖在原 PDF 上">
+              <Tooltip content={readerMode === 'pdf' ? '译文覆盖在原 PDF 上' : '在原文段落下方显示译文'}>
                 <Button
                   isIconOnly
                   size="sm"
@@ -1441,7 +1490,7 @@ export default function ImmersiveReaderPage() {
                   <Icon icon="mdi:layers-outline" className="text-lg" />
                 </Button>
               </Tooltip>
-              <Tooltip content="右侧生成对应位置的译文页，图片保持原样">
+              <Tooltip content={readerMode === 'pdf' ? '右侧生成对应位置的译文页，图片保持原样' : '按双栏对照阅读原文与译文'}>
                 <Button
                   isIconOnly
                   size="sm"
@@ -1458,15 +1507,19 @@ export default function ImmersiveReaderPage() {
           )}
 
           {!hasTranslation && !translating && (
-            <Button
-              size="sm"
-              color="primary"
-              variant="flat"
-              onPress={startStreamingTranslation}
-              isDisabled={!canTranslate}
-            >
-              翻译文档
-            </Button>
+            <Tooltip content={translateActionTooltip}>
+              <span className="inline-flex">
+                <Button
+                  size="sm"
+                  color="primary"
+                  variant="flat"
+                  onPress={startStreamingTranslation}
+                  isDisabled={!canTranslate}
+                >
+                  翻译文档
+                </Button>
+              </span>
+            </Tooltip>
           )}
 
           {translating && (
@@ -1491,36 +1544,62 @@ export default function ImmersiveReaderPage() {
           </span>
         </div>
 
-        {/* PDF 查看器 */}
+        {/* 阅读查看器 */}
         <div className="flex-1 overflow-hidden">
           {pdfBlob ? (
-            <PDFViewer
-              pdfBlob={pdfBlob}
-              currentPage={currentPage}
-              scale={scale}
-              documentId={knowledgeId}
-              onPageChange={setCurrentPage}
-              onTotalPagesChange={setTotalPages}
-              blocks={blocksWithTranslation}
-              showTranslation={showTranslation}
-              translationDisplayMode={translationDisplayMode}
-              annotations={annotations}
-              onAnnotationAdd={handleAnnotationAdd}
-              onAnnotationDelete={handleAnnotationDelete}
-              onAnnotationUpdate={handleAnnotationUpdate}
-              onAskSelection={(selection) => {
-                setSelectionQuestionContext({
-                  id: `${Date.now()}`,
-                  text: selection.text,
-                  pageNum: selection.pageNum,
-                  blockId: selection.blockId,
-                })
-                setSidebarTab('qa')
-              }}
-              jumpToBlock={jumpToBlock}
-              focusTarget={focusedGuideTarget}
-              focusOverlayMode={focusOverlayMode}
-            />
+            readerMode === 'pdf' ? (
+              <PDFViewer
+                pdfBlob={pdfBlob}
+                currentPage={currentPage}
+                scale={scale}
+                documentId={knowledgeId}
+                onPageChange={setCurrentPage}
+                onTotalPagesChange={setTotalPages}
+                blocks={blocksWithTranslation}
+                showTranslation={showTranslation}
+                translationDisplayMode={translationDisplayMode}
+                annotations={annotations}
+                onAnnotationAdd={handleAnnotationAdd}
+                onAnnotationDelete={handleAnnotationDelete}
+                onAnnotationUpdate={handleAnnotationUpdate}
+                onAskSelection={(selection) => {
+                  setSelectionQuestionContext({
+                    id: `${Date.now()}`,
+                    text: selection.text,
+                    pageNum: selection.pageNum,
+                    blockId: selection.blockId,
+                  })
+                  setSidebarTab('qa')
+                }}
+                jumpToBlock={jumpToBlock}
+                focusTarget={focusedGuideTarget}
+                focusOverlayMode={focusOverlayMode}
+              />
+            ) : (
+              <HTMLReader
+                pdfBlob={pdfBlob}
+                documentId={knowledgeId}
+                currentPage={currentPage}
+                scale={scale}
+                onPageChange={setCurrentPage}
+                onTotalPagesChange={setTotalPages}
+                blocks={blocksWithTranslation}
+                showTranslation={showTranslation}
+                translationDisplayMode={translationDisplayMode}
+                onAnnotationAdd={handleAnnotationAdd}
+                onAskSelection={(selection) => {
+                  setSelectionQuestionContext({
+                    id: `${Date.now()}`,
+                    text: selection.text,
+                    pageNum: selection.pageNum,
+                    blockId: selection.blockId,
+                  })
+                  setSidebarTab('qa')
+                }}
+                jumpToBlock={jumpToBlock}
+                focusTarget={focusedGuideTarget}
+              />
+            )
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500">
               <p>PDF 加载中...</p>

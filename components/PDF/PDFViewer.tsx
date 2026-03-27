@@ -4,6 +4,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@heroui/react'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { TextBlock, PDFAnnotation, HIGHLIGHT_COLORS, HighlightColor, GuideFocusTarget } from '@/lib/types'
 import { saveAnnotation, updateAnnotation } from '@/lib/pdfCache'
+import SelectionToolbar from './SelectionToolbar'
 
 // PDF.js 类型定义
 interface PDFDocumentProxy {
@@ -1041,112 +1042,24 @@ function PDFPage({
 
       {/* 选中文本 toolbar（高亮 / 笔记 / 问 AI） */}
       {showHighlightMenu && selection && (
-        <div
-          ref={menuRef}
-          className="highlight-menu absolute bg-[#1e1e2e] border border-gray-700 rounded-xl shadow-2xl p-2 z-50"
-          style={{
-            left: highlightPosition.x,
-            top: highlightPosition.y,
-            minWidth: '190px',
-            maxWidth: '260px',
-          }}
-        >
-          <div className="flex items-center gap-1">
-            <span className="text-[10px] text-gray-500 mr-1">高亮</span>
-            {(['yellow', 'green', 'blue', 'pink', 'purple'] as HighlightColor[]).map(color => (
-              <button
-                key={color}
-                className="w-5 h-5 rounded-full border-2 border-transparent hover:border-white hover:scale-110 transition-all"
-                style={{ backgroundColor: HIGHLIGHT_COLORS[color].border }}
-                onMouseDown={e => e.preventDefault()}
-                onClick={() => handleAddHighlight(color)}
-                title={`高亮 (${color})`}
-              />
-            ))}
-
-            <div className="w-px h-4 bg-gray-600 mx-1" />
-
-            <button
-              className={`w-6 h-6 rounded-lg flex items-center justify-center text-xs transition-colors ${
-                noteMenuOpen
-                  ? 'bg-blue-600 text-white'
-                  : 'text-gray-400 hover:text-white hover:bg-gray-700'
-              }`}
-              onMouseDown={e => e.preventDefault()}
-              onClick={() => setNoteMenuOpen(v => !v)}
-              title="添加笔记"
-              type="button"
-            >
-              <svg viewBox="0 0 24 24" className="w-3.5 h-3.5 fill-current">
-                <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
-              </svg>
-            </button>
-
-            <div className="w-px h-4 bg-gray-600 mx-1" />
-
-            <button
-              className="rounded-lg px-2 py-1 text-[11px] text-sky-300 transition-colors hover:bg-sky-500/15 hover:text-sky-200"
-              onMouseDown={e => e.preventDefault()}
-              onClick={handleAskSelection}
-              title="基于选中文本提问"
-              type="button"
-            >
-              问 AI
-            </button>
-          </div>
-
-          {noteMenuOpen && (
-            <div className="mt-2 border-t border-gray-700 pt-2">
-              <p className="text-[10px] text-gray-500 mb-1.5 line-clamp-2">
-                &ldquo;{selection.text.slice(0, 80)}{selection.text.length > 80 ? '…' : ''}&rdquo;
-              </p>
-              <textarea
-                className="w-full bg-[#2a2a3e] text-gray-100 text-xs rounded-lg px-2.5 py-2 resize-none focus:outline-none border border-gray-600 focus:border-blue-500 placeholder-gray-600"
-                rows={3}
-                placeholder="写下你的想法..."
-                value={noteText}
-                onChange={e => setNoteText(e.target.value)}
-                autoFocus
-              />
-              <div className="flex items-center gap-1 mt-1.5">
-                <div className="flex gap-1">
-                  {(['yellow', 'green', 'blue', 'pink', 'purple'] as HighlightColor[]).map(color => (
-                    <button
-                      key={color}
-                      className={`w-4 h-4 rounded-full transition-all ${
-                        noteSelectedColor === color
-                          ? 'ring-2 ring-white ring-offset-1 ring-offset-[#1e1e2e] scale-110'
-                          : 'opacity-60 hover:opacity-100'
-                      }`}
-                      style={{ backgroundColor: HIGHLIGHT_COLORS[color].border }}
-                      onMouseDown={e => e.preventDefault()}
-                      title={color}
-                      onClick={() => setNoteSelectedColor(color)}
-                      type="button"
-                    />
-                  ))}
-                </div>
-                <div className="flex-1" />
-                <button
-                  className="text-[11px] text-gray-400 hover:text-gray-200 px-2 py-0.5 rounded transition-colors"
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={() => { setNoteMenuOpen(false); setNoteText('') }}
-                  type="button"
-                >
-                  取消
-                </button>
-                <button
-                  className="text-[11px] bg-blue-600 hover:bg-blue-500 text-white rounded px-2.5 py-0.5 transition-colors"
-                  onMouseDown={e => e.preventDefault()}
-                  onClick={handleAddNote}
-                  type="button"
-                >
-                  保存
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
+        <SelectionToolbar
+          toolbarRef={menuRef}
+          position={highlightPosition}
+          selectionText={selection.text}
+          noteMenuOpen={noteMenuOpen}
+          noteText={noteText}
+          noteSelectedColor={noteSelectedColor}
+          onHighlight={handleAddHighlight}
+          onToggleNote={() => setNoteMenuOpen(v => !v)}
+          onAskAI={handleAskSelection}
+          onDictionary={() => {}}
+          onTranslate={() => {}}
+          onExplain={() => {}}
+          onNoteTextChange={setNoteText}
+          onNoteColorChange={setNoteSelectedColor}
+          onNoteCancel={() => { setNoteMenuOpen(false); setNoteText('') }}
+          onNoteSave={() => { void handleAddNote() }}
+        />
       )}
 
       {/* 翻译覆盖层 */}

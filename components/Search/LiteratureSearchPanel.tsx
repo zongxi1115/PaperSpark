@@ -26,6 +26,7 @@ import type {
 } from '@/lib/literatureSearchTypes'
 import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
 import { ToolCallFeed } from './ToolCallFeed'
+import { AnimatedShinyText } from '@/components/ui/AnimatedShinyText'
 
 type AnswerState = Record<string, { value: string; customText: string }>
 
@@ -589,26 +590,9 @@ export function LiteratureSearchPanel() {
                       <div style={{ fontSize: 12, lineHeight: 1.5, color: 'rgba(15, 23, 42, 0.65)', marginTop: 2 }}>
                         {bubble.text}
                         {isLatest && isLoading && (
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>
-                            {[0, 1, 2].map(i => (
-                              <motion.span
-                                key={i}
-                                animate={!reduceMotion ? { opacity: [0.3, 1, 0.3] } : undefined}
-                                transition={{
-                                  duration: 1,
-                                  repeat: Infinity,
-                                  delay: i * 0.15,
-                                  ease: 'easeInOut',
-                                }}
-                                style={{
-                                  width: 3,
-                                  height: 3,
-                                  borderRadius: '50%',
-                                  background: 'rgba(15, 23, 42, 0.45)',
-                                }}
-                              />
-                            ))}
-                          </span>
+                          <AnimatedShinyText shimmerWidth={180} style={{ fontSize: 12, marginLeft: 2 }}>
+                            …
+                          </AnimatedShinyText>
                         )}
                       </div>
                     </div>
@@ -832,29 +816,9 @@ export function LiteratureSearchPanel() {
                 ? '回答后会重新规划整轮检索'
                 : isLoading
                   ? (
-                    <>
-                      <span>正在检索</span>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-                        {[0, 1, 2].map(i => (
-                          <motion.span
-                            key={i}
-                            animate={!reduceMotion ? { opacity: [0.3, 1, 0.3] } : undefined}
-                            transition={{
-                              duration: 1,
-                              repeat: Infinity,
-                              delay: i * 0.15,
-                              ease: 'easeInOut',
-                            }}
-                            style={{
-                              width: 3,
-                              height: 3,
-                              borderRadius: '50%',
-                              background: 'var(--text-muted)',
-                            }}
-                          />
-                        ))}
-                      </span>
-                    </>
+                    <AnimatedShinyText shimmerWidth={200} style={{ fontSize: 11 }}>
+                      正在检索中…
+                    </AnimatedShinyText>
                   )
                   : '支持中途停止并补充说明后重新规划'}
             </div>

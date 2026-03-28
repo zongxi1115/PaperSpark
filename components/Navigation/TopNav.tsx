@@ -7,6 +7,8 @@ import { useThemeContext } from '@/components/Providers'
 import { Icon } from '@iconify/react'
 import Image from 'next/image'
 
+const HELP_DOCS_URL = 'https://docs.paper.062679.xyz'
+
 function ThoughtIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -124,6 +126,21 @@ export function TopNav() {
 
       {/* 右侧区域 */}
       <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <Tooltip content="打开帮助文档" placement="bottom">
+          <Button
+            as="a"
+            href={HELP_DOCS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            size="sm"
+            variant="flat"
+            color="primary"
+            startContent={<Icon icon="solar:book-bookmark-bold" width={16} />}
+            endContent={<Icon icon="solar:arrow-right-up-linear" width={14} />}
+          >
+            帮助文档
+          </Button>
+        </Tooltip>
         <Tooltip content="关于项目" placement="bottom">
           <Button
             size="sm"

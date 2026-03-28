@@ -1,5 +1,5 @@
 'use client'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { Tooltip } from '@heroui/react'
 import { KnowledgePanel } from '@/components/Knowledge/KnowledgePanel'
@@ -17,6 +17,11 @@ interface SidebarItem {
   label: string
   icon: React.ReactNode
 }
+
+const SIDEBAR_ICON_WIDTH = 48
+const TOP_NAV_HEIGHT = 52
+const MIN_PANEL_WIDTH = 220
+const MAX_PANEL_WIDTH = 680
 
 const sidebarItems: SidebarItem[] = [
   {
@@ -56,13 +61,58 @@ const sidebarItems: SidebarItem[] = [
   },
 ]
 
+const panelActionButtonStyle: React.CSSProperties = {
+  width: 28,
+  height: 28,
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  background: 'transparent',
+  color: 'var(--text-secondary)',
+  border: '1px solid var(--border-color)',
+  borderRadius: 8,
+  cursor: 'pointer',
+  transition: 'all 0.15s ease',
+}
+
 export function RightSidebar({ documentId }: { documentId?: string }) {
   const [activeTab, setActiveTab] = useState<SidebarTab | null>(null)
   const [panelWidth, setPanelWidth] = useState(500)
   const [isResizing, setIsResizing] = useState(false)
   const [isHoveringHandle, setIsHoveringHandle] = useState(false)
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
+
+  const activeItem = activeTab ? sidebarItems.find(item => item.id === activeTab) : null
+  const resolvedPanelWidth = activeTab
+    ? (isFullscreen ? Math.max(MIN_PANEL_WIDTH, viewportWidth - SIDEBAR_ICON_WIDTH) : panelWidth)
+    : 0
+
+  useEffect(() => {
+    if (!activeTab && isFullscreen) {
+      setIsFullscreen(false)
+    }
+  }, [activeTab, isFullscreen])
+
+  useEffect(() => {
+    const handleResize = () => setViewportWidth(window.innerWidth)
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsFullscreen(false)
+      }
+    }
+
+    handleResize()
+    window.addEventListener('resize', handleResize)
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [])
 
   const handleMouseDown = (e: React.MouseEvent) => {
+    if (isFullscreen) return
     e.preventDefault()
     setIsResizing(true)
     document.body.style.cursor = 'col-resize'
@@ -73,7 +123,7 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
 
     const handleMouseMove = (e: MouseEvent) => {
       const newWidth = startWidth - (e.clientX - startX)
-      if (newWidth >= 220 && newWidth <= 680) {
+      if (newWidth >= MIN_PANEL_WIDTH && newWidth <= MAX_PANEL_WIDTH) {
         setPanelWidth(newWidth)
       }
     }
@@ -92,22 +142,39 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
 
   return (
     <div style={{ display: 'flex', height: '100%' }}>
+      {activeTab && isFullscreen && (
+        <div
+          aria-hidden="true"
+          style={{
+            width: panelWidth,
+            flexShrink: 0,
+            height: '100%',
+          }}
+        />
+      )}
+
       {/* 展开的面板 - 始终挂载，用动画控制显示 */}
       <motion.div
         initial={false}
         animate={{
-          width: activeTab ? panelWidth : 0,
+          width: resolvedPanelWidth,
           opacity: activeTab ? 1 : 0,
         }}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
         style={{
-          position: 'relative',
+          position: isFullscreen ? 'fixed' : 'relative',
+          top: isFullscreen ? TOP_NAV_HEIGHT : undefined,
+          right: isFullscreen ? SIDEBAR_ICON_WIDTH : undefined,
+          bottom: isFullscreen ? 0 : undefined,
+          height: isFullscreen ? `calc(100vh - ${TOP_NAV_HEIGHT}px)` : '100%',
           background: 'var(--bg-primary)',
           borderLeft: '1px solid var(--border-color)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
           flexShrink: 0,
+          zIndex: isFullscreen ? 70 : 'auto',
+          boxShadow: isFullscreen ? '0 24px 80px rgba(0, 0, 0, 0.24)' : 'none',
         }}
       >
         {/* 面板标题 */}
@@ -120,8 +187,35 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
           flexShrink: 0,
         }}>
           <span style={{ fontSize: 14, fontWeight: 600 }}>
-            {activeTab ? sidebarItems.find(i => i.id === activeTab)?.label : ''}
+            {activeItem?.label ?? ''}
           </span>
+          {activeTab && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Tooltip content={isFullscreen ? '退出全屏' : '全屏展开'} placement="bottom">
+                <button
+                  type="button"
+                  onClick={() => setIsFullscreen(prev => !prev)}
+                  aria-label={isFullscreen ? '退出全屏' : '全屏展开'}
+                  style={panelActionButtonStyle}
+                >
+                  {isFullscreen ? <ExitFullscreenIcon /> : <FullscreenIcon />}
+                </button>
+              </Tooltip>
+              <Tooltip content="关闭侧栏" placement="bottom">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab(null)
+                    setIsFullscreen(false)
+                  }}
+                  aria-label="关闭侧栏"
+                  style={panelActionButtonStyle}
+                >
+                  <CloseIcon />
+                </button>
+              </Tooltip>
+            </div>
+          )}
         </div>
 
         {/* 面板内容 - 所有面板保持挂载，用 CSS 控制显示隐藏以保持状态 */}
@@ -154,25 +248,27 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
         </div>
 
         {/* 可拖拽调整宽度 */}
-        <div
-          onMouseDown={handleMouseDown}
-          onMouseEnter={() => setIsHoveringHandle(true)}
-          onMouseLeave={() => setIsHoveringHandle(false)}
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: 0,
-            bottom: 0,
-            width: 6,
-            cursor: 'col-resize',
-            zIndex: 10,
-            background: (isResizing || isHoveringHandle)
-              ? 'var(--accent-color)'
-              : 'transparent',
-            opacity: isResizing ? 1 : isHoveringHandle ? 0.5 : 0,
-            transition: 'background 0.15s, opacity 0.15s',
-          }}
-        />
+        {!isFullscreen && (
+          <div
+            onMouseDown={handleMouseDown}
+            onMouseEnter={() => setIsHoveringHandle(true)}
+            onMouseLeave={() => setIsHoveringHandle(false)}
+            style={{
+              position: 'absolute',
+              left: 0,
+              top: 0,
+              bottom: 0,
+              width: 6,
+              cursor: 'col-resize',
+              zIndex: 10,
+              background: (isResizing || isHoveringHandle)
+                ? 'var(--accent-color)'
+                : 'transparent',
+              opacity: isResizing ? 1 : isHoveringHandle ? 0.5 : 0,
+              transition: 'background 0.15s, opacity 0.15s',
+            }}
+          />
+        )}
       </motion.div>
 
       {/* 图标侧边栏 */}
@@ -344,6 +440,37 @@ function HelpIcon() {
       <circle cx="12" cy="12" r="10" />
       <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
       <line x1="12" y1="17" x2="12.01" y2="17" />
+    </svg>
+  )
+}
+
+function FullscreenIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="15 3 21 3 21 9" />
+      <polyline points="9 21 3 21 3 15" />
+      <line x1="21" y1="3" x2="14" y2="10" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  )
+}
+
+function ExitFullscreenIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polyline points="4 14 10 14 10 20" />
+      <polyline points="20 10 14 10 14 4" />
+      <line x1="14" y1="10" x2="21" y2="3" />
+      <line x1="3" y1="21" x2="10" y2="14" />
+    </svg>
+  )
+}
+
+function CloseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <line x1="18" y1="6" x2="6" y2="18" />
+      <line x1="6" y1="6" x2="18" y2="18" />
     </svg>
   )
 }

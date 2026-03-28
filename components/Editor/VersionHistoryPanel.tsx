@@ -14,8 +14,8 @@ interface VersionHistoryPanelProps {
   articleAbstract?: string
   articleKeywords?: string[]
   articleDate?: string
-  onRestoreVersion: (version: DocumentVersion) => void
-  onSaveVersion: (title: string) => void
+  onRestoreVersion: (version: DocumentVersion) => Promise<void> | void
+  onSaveVersion: (title: string) => Promise<void> | void
 }
 
 function HistoryIcon() {
@@ -425,52 +425,70 @@ export function VersionHistoryPanel({
   const { isOpen: isSaveOpen, onOpen: onSaveOpen, onClose: onSaveClose } = useDisclosure()
   const { isOpen: isConfirmOpen, onOpen: onConfirmOpen, onClose: onConfirmClose } = useDisclosure()
 
-  const loadVersions = useCallback(() => {
-    const loaded = getDocumentVersions(documentId)
-    setVersions(loaded)
-    if (loaded.length > 0 && !selectedVersion) {
-      setSelectedVersion(loaded[0])
+  const loadVersions = useCallback(async () => {
+    try {
+      const loaded = await getDocumentVersions(documentId)
+      setVersions(loaded)
+      setSelectedVersion((current) => {
+        if (loaded.length === 0) return null
+        if (!current) return loaded[0]
+        return loaded.find(version => version.id === current.id) ?? loaded[0]
+      })
+    } catch (error) {
+      console.error('Failed to load document versions:', error)
     }
-  }, [documentId, selectedVersion])
+  }, [documentId])
 
   useEffect(() => {
     if (isHistoryOpen) {
-      loadVersions()
+      void loadVersions()
     }
   }, [isHistoryOpen, loadVersions])
 
   useEffect(() => {
-    const handleVersionsUpdate = () => loadVersions()
+    const handleVersionsUpdate = () => {
+      void loadVersions()
+    }
     window.addEventListener('document-versions-updated', handleVersionsUpdate)
     return () => window.removeEventListener('document-versions-updated', handleVersionsUpdate)
   }, [loadVersions])
 
-  const handleSaveVersion = useCallback(() => {
+  const handleSaveVersion = useCallback(async () => {
     if (!newVersionTitle.trim()) {
       addToast({ title: '请输入版本名称', color: 'warning' })
       return
     }
-    onSaveVersion(newVersionTitle.trim())
-    setNewVersionTitle('')
-    onSaveClose()
-    loadVersions()
+    try {
+      await onSaveVersion(newVersionTitle.trim())
+      setNewVersionTitle('')
+      onSaveClose()
+      await loadVersions()
+    } catch (error) {
+      console.error('Failed to save version from panel:', error)
+    }
   }, [newVersionTitle, onSaveVersion, onSaveClose, loadVersions])
 
-  const handleDeleteVersion = useCallback((versionId: string) => {
-    deleteDocumentVersion(versionId)
-    loadVersions()
-    if (selectedVersion?.id === versionId) {
-      setSelectedVersion(versions.find(v => v.id !== versionId) ?? null)
+  const handleDeleteVersion = useCallback(async (versionId: string) => {
+    try {
+      await deleteDocumentVersion(versionId)
+      await loadVersions()
+      addToast({ title: '版本已删除', color: 'success' })
+    } catch (error) {
+      console.error('Failed to delete version:', error)
+      addToast({ title: '版本删除失败', color: 'danger' })
     }
-    addToast({ title: '版本已删除', color: 'success' })
-  }, [loadVersions, selectedVersion, versions])
+  }, [loadVersions])
 
-  const handleConfirmRestore = useCallback(() => {
+  const handleConfirmRestore = useCallback(async () => {
     if (selectedVersion) {
-      onRestoreVersion(selectedVersion)
-      onConfirmClose()
-      onHistoryClose()
-      addToast({ title: '已恢复到历史版本', color: 'success' })
+      try {
+        await onRestoreVersion(selectedVersion)
+        onConfirmClose()
+        onHistoryClose()
+        addToast({ title: '已恢复到历史版本', color: 'success' })
+      } catch (error) {
+        console.error('Failed to restore version:', error)
+      }
     }
   }, [selectedVersion, onRestoreVersion, onConfirmClose, onHistoryClose])
 
@@ -906,7 +924,9 @@ export function VersionHistoryPanel({
                               variant="light"
                               color="danger"
                               isIconOnly
-                              onPress={() => handleDeleteVersion(version.id)}
+                              onPress={() => {
+                                void handleDeleteVersion(version.id)
+                              }}
                               style={{ minWidth: 24, height: 24 }}
                             >
                               <TrashIcon />
@@ -1111,7 +1131,9 @@ export function VersionHistoryPanel({
           </ModalBody>
           <ModalFooter>
             <Button variant="light" onPress={onSaveClose}>取消</Button>
-            <Button color="primary" onPress={handleSaveVersion}>保存</Button>
+            <Button color="primary" onPress={() => {
+              void handleSaveVersion()
+            }}>保存</Button>
           </ModalFooter>
         </ModalContent>
       </Modal>
@@ -1128,7 +1150,9 @@ export function VersionHistoryPanel({
           </ModalBody>
           <ModalFooter>
             <Button variant="light" onPress={onConfirmClose}>取消</Button>
-            <Button color="primary" onPress={handleConfirmRestore}>确认恢复</Button>
+            <Button color="primary" onPress={() => {
+              void handleConfirmRestore()
+            }}>确认恢复</Button>
           </ModalFooter>
         </ModalContent>
       </Modal>

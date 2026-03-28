@@ -1,4 +1,4 @@
-import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote, AssetType, AssetItem, EditorComment } from './types'
+import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote, AssetType, AssetItem, EditorComment, DocumentVersion } from './types'
 import { defaultSettings } from './types'
 import { getStorage } from './storage/StorageFactory'
 import { getJSON, setJSON, getString, setString, removeItem as removeStorageItem } from './storage/StorageUtils'
@@ -511,87 +511,62 @@ export function getAssetsByType(typeId: string): AssetItem[] {
 
 // ============ 文档版本历史存储 ============
 
-const VERSIONS_KEY = 'document_versions'
-const MAX_VERSIONS_PER_DOC = 20 // 每个文档最多保存的版本数
-
-export function getDocumentVersions(documentId: string): import('./types').DocumentVersion[] {
-  if (!isBrowser()) return []
-  try {
-    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
-    return allVersions
-      .filter(v => v.documentId === documentId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-  } catch {
-    return []
-  }
+async function loadDocumentVersionStore() {
+  return await import('./documentVersionStore')
 }
 
-export function getAllVersions(): import('./types').DocumentVersion[] {
+export async function getDocumentVersions(documentId: string): Promise<DocumentVersion[]> {
   if (!isBrowser()) return []
-  return getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
+  const store = await loadDocumentVersionStore()
+  return await store.getVersionsByDocumentId(documentId)
 }
 
-export function saveDocumentVersion(version: import('./types').DocumentVersion): void {
+export async function getAllVersions(): Promise<DocumentVersion[]> {
+  if (!isBrowser()) return []
+  const store = await loadDocumentVersionStore()
+  return await store.getAllDocumentVersions()
+}
+
+export async function saveDocumentVersion(version: DocumentVersion): Promise<void> {
   if (!isBrowser()) return
   try {
-    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
-    
-    // 添加新版本
-    allVersions.push(version)
-    
-    // 限制每个文档的版本数量
-    const docVersions = allVersions
-      .filter(v => v.documentId === version.documentId)
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-    
-    if (docVersions.length > MAX_VERSIONS_PER_DOC) {
-      // 删除最旧的版本
-      const toRemove = docVersions.slice(MAX_VERSIONS_PER_DOC)
-      const toRemoveIds = new Set(toRemove.map(v => v.id))
-      const filtered = allVersions.filter(v => !toRemoveIds.has(v.id))
-      setJSON(VERSIONS_KEY, filtered)
-    } else {
-      setJSON(VERSIONS_KEY, allVersions)
-    }
-    
+    const store = await loadDocumentVersionStore()
+    await store.saveVersion(version)
     emitStorageEvent('document-versions-updated')
   } catch (e) {
     console.error('Failed to save document version:', e)
+    throw e
   }
 }
 
-export function deleteDocumentVersion(versionId: string): void {
+export async function deleteDocumentVersion(versionId: string): Promise<void> {
   if (!isBrowser()) return
   try {
-    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
-    const filtered = allVersions.filter(v => v.id !== versionId)
-    setJSON(VERSIONS_KEY, filtered)
+    const store = await loadDocumentVersionStore()
+    await store.deleteVersion(versionId)
     emitStorageEvent('document-versions-updated')
   } catch (e) {
     console.error('Failed to delete document version:', e)
+    throw e
   }
 }
 
-export function deleteAllDocumentVersions(documentId: string): void {
+export async function deleteAllDocumentVersions(documentId: string): Promise<void> {
   if (!isBrowser()) return
   try {
-    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
-    const filtered = allVersions.filter(v => v.documentId !== documentId)
-    setJSON(VERSIONS_KEY, filtered)
+    const store = await loadDocumentVersionStore()
+    await store.deleteVersionsByDocumentId(documentId)
     emitStorageEvent('document-versions-updated')
   } catch (e) {
     console.error('Failed to delete all document versions:', e)
+    throw e
   }
 }
 
-export function getDocumentVersion(versionId: string): import('./types').DocumentVersion | null {
+export async function getDocumentVersion(versionId: string): Promise<DocumentVersion | null> {
   if (!isBrowser()) return null
-  try {
-    const allVersions = getJSON<import('./types').DocumentVersion[]>(VERSIONS_KEY, [])
-    return allVersions.find(v => v.id === versionId) ?? null
-  } catch {
-    return null
-  }
+  const store = await loadDocumentVersionStore()
+  return await store.getVersionById(versionId)
 }
 
 // 计算文档字数

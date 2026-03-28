@@ -30,7 +30,7 @@ import { DefaultChatTransport } from 'ai'
 import { Button, Divider, Tooltip, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure } from '@heroui/react'
 import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
-import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems, saveDocumentVersion, deleteAllDocumentVersions, calculateWordCount, addComment, generateId } from '@/lib/storage'
+import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems, saveDocumentVersion, calculateWordCount, addComment, generateId } from '@/lib/storage'
 import type { AppDocument, AppSettings, ArticleAuthor, DocumentVersion } from '@/lib/types'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
@@ -817,7 +817,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   }, [doc, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])
 
   // 版本控制：保存版本快照
-  const handleSaveVersion = useCallback((title: string) => {
+  const handleSaveVersion = useCallback(async (title: string) => {
     if (!doc) return
     const currentBlocks = editor.document as Block[]
     const version: DocumentVersion = {
@@ -834,8 +834,14 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       wordCount: calculateWordCount(currentBlocks),
       createdAt: new Date().toISOString(),
     }
-    saveDocumentVersion(version)
-    addToast({ title: '版本快照已保存', color: 'success' })
+    try {
+      await saveDocumentVersion(version)
+      addToast({ title: '版本快照已保存', color: 'success' })
+    } catch (error) {
+      console.error('Failed to save document version:', error)
+      addToast({ title: '版本快照保存失败', color: 'danger' })
+      throw error
+    }
   }, [doc, editor, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])
 
   // Ctrl+S 监听：保存版本快照
@@ -846,7 +852,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
         if (!doc) return
         const now = new Date()
         const title = `手动保存 ${now.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' })} ${now.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
-        handleSaveVersion(title)
+        void handleSaveVersion(title).catch(() => {})
       }
     }
     document.addEventListener('keydown', handleKeyDown)
@@ -854,7 +860,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   }, [doc, handleSaveVersion])
 
   // 版本控制：恢复历史版本
-  const handleRestoreVersion = useCallback((version: DocumentVersion) => {
+  const handleRestoreVersion = useCallback(async (version: DocumentVersion) => {
     if (!doc) return
     
     // 先保存当前版本（自动）
@@ -873,7 +879,13 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       wordCount: calculateWordCount(currentBlocks),
       createdAt: new Date().toISOString(),
     }
-    saveDocumentVersion(autoVersion)
+    try {
+      await saveDocumentVersion(autoVersion)
+    } catch (error) {
+      console.error('Failed to save restore backup version:', error)
+      addToast({ title: '恢复前自动备份失败，已取消恢复', color: 'danger' })
+      throw error
+    }
     
     // 恢复版本内容
     const safeVersionContent = sanitizeBlockTree(version.content)
@@ -913,7 +925,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   useEffect(() => {
     if (!doc) return
     
-    const autoSaveVersion = () => {
+    const autoSaveVersion = async () => {
       const currentBlocks = editor.document as Block[]
       const contentStr = JSON.stringify(currentBlocks)
       
@@ -949,10 +961,16 @@ export function EditorPageContent({ docId }: EditorPageProps) {
         wordCount,
         createdAt: now.toISOString(),
       }
-      saveDocumentVersion(version)
+      try {
+        await saveDocumentVersion(version)
+      } catch (error) {
+        console.error('Failed to auto save document version:', error)
+      }
     }
     
-    const intervalId = setInterval(autoSaveVersion, AUTO_VERSION_INTERVAL)
+    const intervalId = setInterval(() => {
+      void autoSaveVersion()
+    }, AUTO_VERSION_INTERVAL)
     
     return () => clearInterval(intervalId)
   }, [doc, editor, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])

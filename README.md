@@ -510,6 +510,7 @@ pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.jso
 - [ ] 主编辑区AI交互栏 对开启可编辑功能时，经常会莫名调用进行调整控制
 - [ ] 云服务部署支持数据库持久化
 - [ ] 教程文档撰写
+- [ ] 阅读器AI概览（对这篇文章还有那些不足之处可以扩展研究，）
 
 
 

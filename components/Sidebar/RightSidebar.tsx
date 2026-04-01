@@ -227,7 +227,7 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
             <KnowledgePanel />
           </div>
           <div style={{ display: activeTab === 'search' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-            <LiteratureSearchPanel />
+            <LiteratureSearchPanel layoutMode={isFullscreen ? 'fullscreen' : 'sidebar'} />
           </div>
           <div style={{ display: activeTab === 'assets' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
             <AssetsPanel />

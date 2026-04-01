@@ -92,10 +92,50 @@ const paperSchema = {
   ],
 } as const
 
+function summarizeValue(value: unknown, depth = 0): unknown {
+  if (value == null) return value
+
+  if (typeof value === 'string') {
+    return value.length > 160 ? `${value.slice(0, 157)}...` : value
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    if (depth >= 2) {
+      return `[${value.length} items]`
+    }
+
+    if (value.length <= 6) {
+      return value.map(item => summarizeValue(item, depth + 1))
+    }
+
+    return [
+      ...value.slice(0, 3).map(item => summarizeValue(item, depth + 1)),
+      `...(+${value.length - 3})`,
+    ]
+  }
+
+  if (typeof value === 'object') {
+    if (depth >= 2) {
+      return '[object]'
+    }
+
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        key,
+        summarizeValue(entry, depth + 1),
+      ]),
+    )
+  }
+
+  return String(value)
+}
+
 function summarizeInput(input: unknown) {
-  const json = JSON.stringify(input)
-  if (json.length <= 180) return json
-  return `${json.slice(0, 177)}...`
+  return JSON.stringify(summarizeValue(input))
 }
 
 function getResultCount(result: unknown) {

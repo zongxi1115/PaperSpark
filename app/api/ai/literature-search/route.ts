@@ -325,6 +325,7 @@ async function runDiscoveryPass(
   },
   queryGroups: QueryExpansionGroup[],
   filters: SearchFilters,
+  onProgress?: (message: string) => void,
   abortSignal?: AbortSignal,
 ): Promise<DiscoveryPassResult> {
   const extraKeywords = [...intent.coreConcepts, ...intent.relatedFields]
@@ -341,12 +342,14 @@ async function runDiscoveryPass(
       }, abortSignal),
     ),
   )
+  onProgress?.(`关键词检索已返回 ${keywordSearchResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
 
   const conceptTreeResults = await Promise.all(
     intent.coreConcepts.slice(0, 2).map(conceptName =>
       callTool<ConceptTreeOutput>(tools.getConceptTree, { conceptName }, abortSignal),
     ),
   )
+  onProgress?.(`概念扩展完成，命中 ${conceptTreeResults.filter(result => result.matched?.id).length} 个概念节点。`)
 
   const conceptSearchResults = await Promise.all(
     conceptTreeResults
@@ -363,6 +366,7 @@ async function runDiscoveryPass(
         }, abortSignal),
       ),
   )
+  onProgress?.(`概念检索补充 ${conceptSearchResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
 
   let combined = mergeWorks(
     [
@@ -385,6 +389,7 @@ async function runDiscoveryPass(
       relaxIfSparse: true,
     },
   }, abortSignal)
+  onProgress?.(`筛选阶段保留 ${filterResult.works.length} 篇候选文献。`)
 
   combined = mergeWorks(filterResult.works, queryGroups, extraKeywords)
 
@@ -393,6 +398,7 @@ async function runDiscoveryPass(
     queryGroups,
     extraKeywords,
   }, abortSignal)
+  onProgress?.(`重排去重后保留 ${ranked.works.length} 篇候选，去除重复 ${ranked.duplicatesRemoved} 篇。`)
 
   return {
     works: combined,
@@ -426,13 +432,48 @@ export async function POST(req: NextRequest) {
 
   const stream = new ReadableStream({
     async start(controller) {
+      let lastEventAt = Date.now()
+      let heartbeatStage: LiteratureSearchStage = 'intent'
+      let heartbeatIndex = 0
+      const heartbeatHints: Record<LiteratureSearchStage, string[]> = {
+        intent: [
+          'Working... 正在等待意图分析模型返回澄清结果。',
+          'Working... 正在整理研究目标、核心概念与时间窗口。',
+        ],
+        expansion: [
+          'Working... 正在扩展同义词、近义术语和多语关键词。',
+          'Working... 正在组织多组检索表达式。',
+        ],
+        'parallel-search': [
+          'Working... OpenAlex 正在返回关键词检索结果。',
+          'Working... 正在汇总并行检索批次的候选文献。',
+        ],
+        analysis: [
+          'Working... 正在执行滚雪球扩展与作者追踪。',
+          'Working... 正在补充分析阶段的关联证据。',
+        ],
+        aggregation: [
+          'Working... 正在检阅结果质量并准备最终推荐。',
+          'Working... 正在生成结果摘要与阅读建议。',
+        ],
+      }
+      const heartbeatEnabledStages = new Set<LiteratureSearchStage>([
+        'parallel-search',
+        'analysis',
+        'aggregation',
+      ])
+
       const send = (event: LiteratureSearchEvent) => {
+        lastEventAt = Date.now()
         controller.enqueue(
           encoder.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`),
         )
       }
 
       const pushStage = (stage: LiteratureSearchStage, status: StepStatus, detail?: string) => {
+        if (status === 'in_progress') {
+          heartbeatStage = stage
+        }
         send({
           type: 'stage',
           stage,
@@ -451,6 +492,15 @@ export async function POST(req: NextRequest) {
           },
         })
       }
+
+      const heartbeat = setInterval(() => {
+        if (!heartbeatEnabledStages.has(heartbeatStage)) return
+        if (Date.now() - lastEventAt < 2800) return
+        const hints = heartbeatHints[heartbeatStage]
+        const message = hints[heartbeatIndex % hints.length]
+        heartbeatIndex += 1
+        pushThinking(heartbeatStage, message)
+      }, 3000)
 
       try {
         send({
@@ -473,13 +523,13 @@ export async function POST(req: NextRequest) {
 
         if (!intent.isClear && (!answers || answers.length === 0)) {
           pushStage('intent', 'waiting', '当前研究意图仍偏宽，需要先完成澄清题。')
-          pushThinking('intent', '已生成澄清题，等待补充研究范围、时间窗口和文献类型偏好。')
           send({
             type: 'clarification',
             questions: intent.clarificationQuestions || [],
             intent,
           })
           send({ type: 'done', outcome: 'clarification' })
+          clearInterval(heartbeat)
           controller.close()
           return
         }
@@ -500,7 +550,14 @@ export async function POST(req: NextRequest) {
         pushStage('parallel-search', 'in_progress')
         pushThinking('parallel-search', '并行拉起关键词检索与概念检索，再根据候选规模决定是否自动放宽条件。')
 
-        let discovery = await runDiscoveryPass(tools, intent, activeQueryGroups, baseFilters, req.signal)
+        let discovery = await runDiscoveryPass(
+          tools,
+          intent,
+          activeQueryGroups,
+          baseFilters,
+          message => pushThinking('parallel-search', message),
+          req.signal,
+        )
 
         if (discovery.filterResult.note) {
           pushThinking('parallel-search', discovery.filterResult.note)
@@ -518,7 +575,14 @@ export async function POST(req: NextRequest) {
           send({ type: 'strategy', queryGroups: activeQueryGroups, intent })
 
           const retryFilters = buildRetryFilters(baseFilters, retryCount)
-          const retryPass = await runDiscoveryPass(tools, intent, activeQueryGroups, retryFilters, req.signal)
+          const retryPass = await runDiscoveryPass(
+            tools,
+            intent,
+            activeQueryGroups,
+            retryFilters,
+            message => pushThinking('parallel-search', message),
+            req.signal,
+          )
 
           if (retryPass.filterResult.note) {
             pushThinking('parallel-search', retryPass.filterResult.note)
@@ -568,6 +632,9 @@ export async function POST(req: NextRequest) {
               ),
             )
           : []
+        if (reSearchResults.length > 0) {
+          pushThinking('analysis', `补充检索新增 ${reSearchResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
+        }
 
         const relatedResults = analysis.corePaperIds.length > 0
           ? await Promise.all(
@@ -579,6 +646,9 @@ export async function POST(req: NextRequest) {
                 ])),
             )
           : []
+        if (relatedResults.length > 0) {
+          pushThinking('analysis', `关联文献扩展新增 ${relatedResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
+        }
 
         const authorIds = getPrimaryAuthorIds(analysisEnriched.slice(0, 5))
         const authorResults = authorIds.length > 0
@@ -592,6 +662,9 @@ export async function POST(req: NextRequest) {
               ),
             )
           : []
+        if (authorResults.length > 0) {
+          pushThinking('analysis', `作者追踪补充 ${authorResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
+        }
 
         analysisEnriched = mergeWorks(
           [
@@ -648,6 +721,7 @@ export async function POST(req: NextRequest) {
             intent,
             activeQueryGroups,
             reviewRetryFilters,
+            message => pushThinking('aggregation', message),
             req.signal,
           )
 
@@ -715,8 +789,10 @@ export async function POST(req: NextRequest) {
           `最终输出 ${finalPapers.length} 篇推荐文献${retryCount > 0 ? `，自动重检 ${retryCount} 次` : ''}。`,
         )
         send({ type: 'done', outcome: 'results' })
+        clearInterval(heartbeat)
         controller.close()
       } catch (error) {
+        clearInterval(heartbeat)
         send({
           type: 'error',
           message: error instanceof Error ? error.message : '论文检索失败',

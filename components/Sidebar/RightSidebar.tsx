@@ -9,6 +9,7 @@ import { AssistantChatPanel } from '@/components/Assistant/AssistantChatPanel'
 import { LiteratureSearchPanel } from '@/components/Search/LiteratureSearchPanel'
 import { ReadingPanel } from '@/components/Sidebar/ReadingPanel'
 import { CommentsPanel } from '@/components/Comments/CommentsPanel'
+import { useIsMobile } from '@/lib/useIsMobile'
 
 type SidebarTab = 'assistant' | 'search' | 'knowledge' | 'assets' | 'agents' | 'read' | 'comments'
 
@@ -82,10 +83,15 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
   const [isHoveringHandle, setIsHoveringHandle] = useState(false)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [viewportWidth, setViewportWidth] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1440))
+  const isMobile = useIsMobile()
 
   const activeItem = activeTab ? sidebarItems.find(item => item.id === activeTab) : null
   const resolvedPanelWidth = activeTab
-    ? (isFullscreen ? Math.max(MIN_PANEL_WIDTH, viewportWidth - SIDEBAR_ICON_WIDTH) : panelWidth)
+    ? (isMobile
+      ? viewportWidth - SIDEBAR_ICON_WIDTH
+      : isFullscreen
+        ? Math.max(MIN_PANEL_WIDTH, viewportWidth - SIDEBAR_ICON_WIDTH)
+        : panelWidth)
     : 0
 
   useEffect(() => {
@@ -142,7 +148,19 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
 
   return (
     <div style={{ display: 'flex', height: '100%' }}>
-      {activeTab && isFullscreen && (
+      {/* Mobile backdrop */}
+      {isMobile && activeTab && (
+        <div
+          className="sidebar-backdrop"
+          style={{ zIndex: 55 }}
+          onClick={() => {
+            setActiveTab(null)
+            setIsFullscreen(false)
+          }}
+        />
+      )}
+
+      {activeTab && isFullscreen && !isMobile && (
         <div
           aria-hidden="true"
           style={{
@@ -161,20 +179,22 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
           opacity: activeTab ? 1 : 0,
         }}
         transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+        className={isMobile && activeTab ? 'right-sidebar-overlay' : ''}
         style={{
-          position: isFullscreen ? 'fixed' : 'relative',
-          top: isFullscreen ? TOP_NAV_HEIGHT : undefined,
-          right: isFullscreen ? SIDEBAR_ICON_WIDTH : undefined,
-          bottom: isFullscreen ? 0 : undefined,
-          height: isFullscreen ? `calc(100vh - ${TOP_NAV_HEIGHT}px)` : '100%',
+          position: isMobile && activeTab ? 'fixed' : isFullscreen ? 'fixed' : 'relative',
+          top: isMobile && activeTab ? 52 : isFullscreen ? TOP_NAV_HEIGHT : undefined,
+          right: isMobile && activeTab ? 0 : isFullscreen ? SIDEBAR_ICON_WIDTH : undefined,
+          bottom: isMobile && activeTab ? 0 : isFullscreen ? 0 : undefined,
+          left: isMobile && activeTab ? 0 : undefined,
+          height: (isMobile && activeTab) || isFullscreen ? `calc(100vh - ${TOP_NAV_HEIGHT}px)` : '100%',
           background: 'var(--bg-primary)',
-          borderLeft: '1px solid var(--border-color)',
+          borderLeft: isMobile && activeTab ? 'none' : '1px solid var(--border-color)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
           flexShrink: 0,
-          zIndex: isFullscreen ? 70 : 'auto',
-          boxShadow: isFullscreen ? '0 24px 80px rgba(0, 0, 0, 0.24)' : 'none',
+          zIndex: (isMobile && activeTab) || isFullscreen ? 70 : 'auto',
+          boxShadow: (isMobile && activeTab) || isFullscreen ? '0 24px 80px rgba(0, 0, 0, 0.24)' : 'none',
         }}
       >
         {/* 面板标题 */}
@@ -191,16 +211,18 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
           </span>
           {activeTab && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Tooltip content={isFullscreen ? '退出全屏' : '全屏展开'} placement="bottom">
-                <button
-                  type="button"
-                  onClick={() => setIsFullscreen(prev => !prev)}
-                  aria-label={isFullscreen ? '退出全屏' : '全屏展开'}
-                  style={panelActionButtonStyle}
-                >
-                  {isFullscreen ? <ExitFullscreenIcon /> : <FullscreenIcon />}
-                </button>
-              </Tooltip>
+              {!isMobile && (
+                <Tooltip content={isFullscreen ? '退出全屏' : '全屏展开'} placement="bottom">
+                  <button
+                    type="button"
+                    onClick={() => setIsFullscreen(prev => !prev)}
+                    aria-label={isFullscreen ? '退出全屏' : '全屏展开'}
+                    style={panelActionButtonStyle}
+                  >
+                    {isFullscreen ? <ExitFullscreenIcon /> : <FullscreenIcon />}
+                  </button>
+                </Tooltip>
+              )}
               <Tooltip content="关闭侧栏" placement="bottom">
                 <button
                   type="button"
@@ -248,7 +270,7 @@ export function RightSidebar({ documentId }: { documentId?: string }) {
         </div>
 
         {/* 可拖拽调整宽度 */}
-        {!isFullscreen && (
+        {!isFullscreen && !isMobile && (
           <div
             onMouseDown={handleMouseDown}
             onMouseEnter={() => setIsHoveringHandle(true)}

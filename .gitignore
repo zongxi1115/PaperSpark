@@ -34,3 +34,4 @@ AGENTS.md
 .vercel
 .env*.local
 docs/
+data/

@@ -32,12 +32,15 @@ function extractToc(blocks: Block[]): TocEntry[] {
 interface TocSidebarProps {
   blocks: Block[]
   docTitle: string
+  onCollapse?: () => void
 }
 
-export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
+export function TocSidebar({ blocks, docTitle, onCollapse }: TocSidebarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [activeSection, setActiveSection] = useState<string | null>(null)
   const toc = extractToc(blocks)
+
+  const handleCollapse = onCollapse ?? (() => setIsCollapsed(true))
 
   const scrollToBlock = (blockId: string) => {
     const el = document.querySelector(`[data-id="${blockId}"]`)
@@ -156,7 +159,7 @@ export function TocSidebar({ blocks, docTitle }: TocSidebarProps) {
           {/* Collapse button */}
           <div className="p-3 border-t w-[220px]" style={{ borderColor: 'var(--border-color)' }}>
             <button
-              onClick={() => setIsCollapsed(true)}
+              onClick={handleCollapse}
               className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-lg transition-colors"
               style={{ color: 'var(--text-muted)' }}
             >

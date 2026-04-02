@@ -45,6 +45,7 @@ import { useThemeContext } from '@/components/Providers'
 import { CanvasBlockSpec } from './CanvasBlock'
 import { QuoteToAssistantButton } from './QuoteToAssistantButton'
 import { CommentToolbarButton } from './CommentToolbarButton'
+import { useIsMobile } from '@/lib/useIsMobile'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -390,6 +391,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const lastCursorPositionRef = useRef<{ top: number; left: number } | null>(null) // 记录上次光标位置
   const [citations, setCitations] = useState<Map<string, CitationData>>(new Map()) // 引用列表
   const { isDark, mounted: themeMounted } = useThemeContext()
+  const isMobile = useIsMobile()
+  const [mobileTocOpen, setMobileTocOpen] = useState(false)
 
   // 选中文本评论相关状态
   const [selectedText, setSelectedText] = useState<string | null>(null)
@@ -1349,14 +1352,26 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       display: 'flex', 
       overflow: 'hidden' 
     }}>
-      {/* Left TOC Sidebar - Fixed */}
-      <TocSidebar blocks={blocks} docTitle={doc.title} />
+      {/* Left TOC Sidebar - Desktop: inline, Mobile: overlay */}
+      {isMobile ? (
+        mobileTocOpen && (
+          <>
+            <div className="sidebar-backdrop" onClick={() => setMobileTocOpen(false)} />
+            <div className="toc-sidebar-overlay">
+              <TocSidebar blocks={blocks} docTitle={doc.title} onCollapse={() => setMobileTocOpen(false)} />
+            </div>
+          </>
+        )
+      ) : (
+        <TocSidebar blocks={blocks} docTitle={doc.title} />
+      )}
 
       {/* Main editor area - only this part scrolls */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
         {/* Ghost Text 浮层 - 补全提示 */}
         {ghostText && ghostPosition && (
           <div
+            className={isMobile ? 'editor-mobile-ghost' : ''}
             style={{
               position: 'fixed',
               top: ghostPosition.top,
@@ -1365,12 +1380,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               backgroundColor: 'rgba(240, 240, 240, 0.8)',
               padding: '2px 4px',
               borderRadius: '3px',
-              fontSize: '15px',
+              fontSize: isMobile ? 13 : 15,
               fontFamily: 'inherit',
               pointerEvents: 'none',
               zIndex: 1000,
               whiteSpace: 'pre-wrap',
-              maxWidth: '400px',
+              maxWidth: isMobile ? 260 : 400,
               lineHeight: 1.6,
               opacity: ghostVisible ? 1 : 0,
               transform: ghostVisible ? 'translateY(0)' : 'translateY(-4px)',
@@ -1391,7 +1406,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           </div>
         )}
         {/* Toolbar - Fixed */}
-        <div style={{
+        <div className={isMobile ? 'editor-mobile-toolbar' : ''} style={{
           padding: '8px 20px',
           background: 'var(--bg-primary)',
           borderBottom: '1px solid var(--border-color)',
@@ -1400,6 +1415,19 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           gap: 8,
           flexShrink: 0,
         }}>
+          {isMobile && (
+            <Tooltip content="目录" placement="bottom">
+              <Button
+                size="sm"
+                variant="light"
+                isIconOnly
+                onPress={() => setMobileTocOpen(true)}
+              >
+                <TocIcon />
+              </Button>
+            </Tooltip>
+          )}
+
           <Tooltip content="导出为 Markdown" placement="bottom">
             <Button
               size="sm"
@@ -1408,7 +1436,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               startContent={<ExportIcon />}
               onPress={handleExport}
             >
-              导出 MD
+              <span className="btn-label">导出 MD</span>
             </Button>
           </Tooltip>
 
@@ -1420,7 +1448,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               startContent={<LatexIcon />}
               onPress={handleExportLatex}
             >
-              导出 TeX
+              <span className="btn-label">导出 TeX</span>
             </Button>
           </Tooltip>
 
@@ -1436,7 +1464,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                   isLoading={correcting}
                   onPress={handleManualCorrect}
                 >
-                  AI 纠错
+                  <span className="btn-label">AI 纠错</span>
                 </Button>
               </Tooltip>
               {correcting && (
@@ -1459,13 +1487,15 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           />
 
           <div style={{ flex: 1 }} />
-          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            {doc.title}
-          </span>
+          {!isMobile && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              {doc.title}
+            </span>
+          )}
         </div>
 
         {/* Editor - Only scrollable area */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '40px 60px', background: 'var(--bg-primary)' }}>
+        <div className={isMobile ? 'editor-mobile-padding' : ''} style={{ flex: 1, overflowY: 'auto', padding: isMobile ? 16 : '40px 60px', background: 'var(--bg-primary)' }}>
           <div
             className="editor-themed-surface"
             style={{
@@ -1476,7 +1506,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
             }}
           >
             {/* 文章标题区域 */}
-            <div style={{ marginBottom: 24 }}>
+            <div style={{ marginBottom: isMobile ? 16 : 24 }}>
               <input
                 type="text"
                 value={articleTitle}
@@ -1492,15 +1522,16 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                   }
                 }}
                 placeholder="点击输入文章标题"
+                className={isMobile ? 'editor-mobile-title' : ''}
                 style={{
                   width: '100%',
-                  fontSize: 28,
+                  fontSize: isMobile ? 22 : 28,
                   fontWeight: 700,
                   border: 'none',
                   outline: 'none',
                   background: 'transparent',
                   color: 'var(--text-primary)',
-                  padding: '8px 0',
+                  padding: isMobile ? '4px 0' : '8px 0',
                   borderBottom: '2px solid transparent',
                   transition: 'border-color 0.2s',
                   textAlign: 'center',
@@ -1516,13 +1547,14 @@ export function EditorPageContent({ docId }: EditorPageProps) {
             </div>
 
             {/* 描述表格 */}
-            <div style={{
+            <div className={isMobile ? 'editor-mobile-meta' : ''} style={{
               display: 'flex',
               justifyContent: 'center',
-              gap: 32,
-              marginBottom: 32,
+              gap: isMobile ? 8 : 32,
+              marginBottom: isMobile ? 16 : 32,
               fontSize: 13,
               color: 'var(--text-secondary)',
+              flexWrap: 'wrap',
             }}>
               {/* 日期 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1593,17 +1625,20 @@ export function EditorPageContent({ docId }: EditorPageProps) {
             {/* 评论输入浮层 */}
             {selectedText && commentModalPosition && (
               <div
+                className={isMobile ? 'editor-mobile-comment' : ''}
                 style={{
                   position: 'fixed',
-                  top: commentModalPosition.top,
-                  left: commentModalPosition.left,
+                  top: isMobile ? 'auto' : commentModalPosition.top,
+                  bottom: isMobile ? 80 : 'auto',
+                  left: isMobile ? 16 : commentModalPosition.left,
+                  right: isMobile ? 16 : 'auto',
                   zIndex: 1001,
                   backgroundColor: 'var(--bg-primary)',
                   border: '1px solid var(--border-color)',
                   borderRadius: 8,
                   padding: 12,
                   boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                  width: 300,
+                  width: isMobile ? 'auto' : 300,
                 }}
               >
                 <div style={{
@@ -2069,6 +2104,16 @@ function UserIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
       <circle cx="12" cy="7" r="4" />
+    </svg>
+  )
+}
+
+function TocIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <line x1="3" y1="6" x2="21" y2="6" />
+      <line x1="3" y1="12" x2="15" y2="12" />
+      <line x1="3" y1="18" x2="18" y2="18" />
     </svg>
   )
 }

@@ -27,7 +27,6 @@ import type {
 } from '@/lib/literatureSearchTypes'
 import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
 import { AnimatedShinyText } from '@/components/ui/AnimatedShinyText'
-import { OdometerNumber } from './OdometerNumber'
 import { AnimatedStepper, CompactProgressStrip, type Step as StepperStep } from '@/components/ui/animated-stepper'
 import { AnimatedCounter } from '@/components/ui/animated-counter'
 import {
@@ -1156,7 +1155,7 @@ function ToolCallItem({
         <div className="flex items-center gap-2">
           {typeof call.resultCount === 'number' && (
             <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-700 shadow-sm">
-              <OdometerNumber value={call.resultCount} /> 条
+              <AnimatedCounter value={call.resultCount} duration={0.8} /> 条
             </span>
           )}
           <span

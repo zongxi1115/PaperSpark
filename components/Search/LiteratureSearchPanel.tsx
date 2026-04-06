@@ -29,6 +29,14 @@ import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
 import { AnimatedShinyText } from '@/components/ui/AnimatedShinyText'
 import { OdometerNumber } from './OdometerNumber'
 import { AnimatedStepper, CompactProgressStrip, type Step as StepperStep } from '@/components/ui/animated-stepper'
+import { AnimatedCounter } from '@/components/ui/animated-counter'
+import {
+  ChainOfThought,
+  ChainOfThoughtStep,
+  ChainOfThoughtTrigger,
+  ChainOfThoughtContent,
+  ChainOfThoughtItem,
+} from '@/components/ui/chain-of-thought'
 
 type AnswerState = Record<string, { value: string; customText: string }>
 
@@ -262,18 +270,38 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
   const scrollRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const latestQueryRef = useRef('')
+  const eventSequenceRef = useRef(0) // Track event arrival order
   const [settings, setSettings] = useState<AppSettings>(() => getSettings())
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [steps, setSteps] = useState<LiteratureSearchStep[]>(LITERATURE_SEARCH_STEPS)
-  const [thinking, setThinking] = useState<ThoughtBubble[]>([])
-  const [toolCalls, setToolCalls] = useState<ToolCallEvent[]>([])
-  const [queryGroups, setQueryGroups] = useState<QueryExpansionGroup[]>([])
+  
+  // Unified timeline with sequence numbers
+  type TimelineEvent = 
+    | { seq: number; type: 'thought'; data: ThoughtBubble }
+    | { seq: number; type: 'tool'; data: ToolCallEvent }
+    | { seq: number; type: 'queryGroup'; data: QueryExpansionGroup }
+  
+  const [timeline, setTimeline] = useState<TimelineEvent[]>([])
   const [intent, setIntent] = useState<SearchIntent | null>(null)
   const [questions, setQuestions] = useState<ClarificationQuestion[]>([])
   const [answers, setAnswers] = useState<AnswerState>({})
   const [results, setResults] = useState<LiteratureSearchResultPayload | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  // Extract data for backward compatibility
+  const thinking = useMemo(() => 
+    timeline.filter(e => e.type === 'thought').map(e => e.data as ThoughtBubble),
+    [timeline]
+  )
+  const toolCalls = useMemo(() => 
+    timeline.filter(e => e.type === 'tool').map(e => e.data as ToolCallEvent),
+    [timeline]
+  )
+  const queryGroups = useMemo(() => 
+    timeline.filter(e => e.type === 'queryGroup').map(e => e.data as QueryExpansionGroup),
+    [timeline]
+  )
 
   useEffect(() => {
     setSettings(getSettings())
@@ -313,9 +341,8 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
 
   function resetForRun() {
     setSteps(LITERATURE_SEARCH_STEPS)
-    setThinking([])
-    setToolCalls([])
-    setQueryGroups([])
+    setTimeline([])
+    eventSequenceRef.current = 0
     setIntent(null)
     setQuestions([])
     setAnswers({})
@@ -377,18 +404,34 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
             })
             break
           case 'thinking':
-            setThinking(current => [...current.slice(-9), event.bubble])
+            setTimeline(current => [...current, { seq: eventSequenceRef.current++, type: 'thought', data: event.bubble }])
             break
           case 'strategy':
             if (event.intent) setIntent(event.intent)
-            if (event.queryGroups) setQueryGroups(event.queryGroups)
+            if (event.queryGroups) {
+              // Add each query group as separate timeline events
+              event.queryGroups.forEach(group => {
+                setTimeline(current => [...current, { seq: eventSequenceRef.current++, type: 'queryGroup', data: group }])
+              })
+            }
             break
           case 'clarification':
             setIntent(event.intent)
             setQuestions(event.questions)
             break
           case 'tool':
-            setToolCalls(current => upsertToolEvent(current, event.tool))
+            setTimeline(current => {
+              const existing = current.findIndex(e => e.type === 'tool' && (e.data as ToolCallEvent).id === event.tool.id)
+              if (existing >= 0) {
+                // Update existing tool call in place
+                const updated = [...current]
+                updated[existing] = { seq: updated[existing].seq, type: 'tool', data: event.tool }
+                return updated
+              } else {
+                // Add new tool call
+                return [...current, { seq: eventSequenceRef.current++, type: 'tool', data: event.tool }]
+              }
+            })
             break
           case 'results':
             setResults(event.payload)
@@ -476,6 +519,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
             results={results}
             isLoading={isLoading}
             reduceMotion={reduceMotion}
+            timeline={timeline}
           />
         )}
 
@@ -815,6 +859,7 @@ function ProcessLogCard({
   results,
   isLoading,
   reduceMotion,
+  timeline,
 }: {
   thinking: ThoughtBubble[]
   toolCalls: ToolCallEvent[]
@@ -823,59 +868,11 @@ function ProcessLogCard({
   results: LiteratureSearchResultPayload | null
   isLoading: boolean
   reduceMotion: boolean | null
+  timeline: Array<{ seq: number; type: 'thought' | 'tool' | 'queryGroup'; data: ThoughtBubble | ToolCallEvent | QueryExpansionGroup }>
 }) {
-  // Build unified timeline - merge all events in their natural order
-  type TimelineItem =
-    | { type: 'thought'; data: ThoughtBubble }
-    | { type: 'tool'; data: ToolCallEvent }
-    | { type: 'queryGroup'; data: QueryExpansionGroup }
-
-  const timeline = useMemo(() => {
-    const items: TimelineItem[] = []
-    
-    // Add all items in their natural order (oldest first, newest last)
-    // Thoughts are added first, then we interleave tool calls
-    for (const thought of thinking) {
-      items.push({ type: 'thought', data: thought })
-    }
-    for (const tool of toolCalls) {
-      items.push({ type: 'tool', data: tool })
-    }
-    for (const group of queryGroups) {
-      items.push({ type: 'queryGroup', data: group })
-    }
-
-    return items
-  }, [thinking, toolCalls, queryGroups])
-
+  type TimelineItem = typeof timeline[number]
   const runningTools = toolCalls.filter(call => call.status === 'running')
   const processEventCount = timeline.length + (results ? 1 : 0)
-
-  // Get icon for timeline item type
-  const getTimelineIcon = (item: TimelineItem) => {
-    switch (item.type) {
-      case 'thought':
-        return <BrainIcon />
-      case 'tool':
-        return <ToolTypeIcon type={item.data.name} />
-      case 'queryGroup':
-        return <BranchIcon />
-    }
-  }
-
-  // Get label for timeline item
-  const getTimelineLabel = (item: TimelineItem) => {
-    switch (item.type) {
-      case 'thought': {
-        const stageLabel = steps.find(s => s.id === item.data.stage)?.label || item.data.stage
-        return `💭 ${stageLabel}`
-      }
-      case 'tool':
-        return `⚙️ ${TOOL_DISPLAY_NAMES[item.data.name]}`
-      case 'queryGroup':
-        return `🔍 ${item.data.label}`
-    }
-  }
 
   return (
     <div className="flex flex-col gap-5 font-sans text-sm">
@@ -892,9 +889,10 @@ function ProcessLogCard({
           <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">智能检索</span>
         </div>
         {processEventCount > 0 && (
-          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-            {processEventCount} 事件
-          </span>
+          <div className="flex items-center gap-1.5 rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+            <AnimatedCounter value={processEventCount} />
+            <span>事件</span>
+          </div>
         )}
       </div>
 
@@ -907,87 +905,88 @@ function ProcessLogCard({
         />
       </div>
 
-      {/* Unified Timeline - Using ChainOfThought */}
+      {/* Chain of Thought - AI Reasoning Process */}
       {timeline.length > 0 && (
-        <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
-          <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-            <ThinkingIcon />
-            <span>推理过程</span>
+        <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="mb-4 flex items-center gap-2">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+              <ThinkingIcon />
+              <span>AI推理过程</span>
+            </div>
             {runningTools.length > 0 && (
-              <motion.span
-                className="ml-auto flex items-center gap-1 text-blue-500"
-                animate={!reduceMotion ? { opacity: [0.5, 1, 0.5] } : undefined}
-                transition={{ duration: 1.2, repeat: Infinity }}
+              <motion.div
+                className="ml-auto flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-1 text-[10px] font-medium text-blue-600 dark:bg-blue-950/50 dark:text-blue-400"
+                animate={!reduceMotion ? { opacity: [0.7, 1, 0.7] } : undefined}
+                transition={{ duration: 1.5, repeat: Infinity }}
               >
-                <LoadingSpinnerIcon />
-                <span className="text-[10px]">执行中</span>
-              </motion.span>
+                <motion.span
+                  animate={!reduceMotion ? { rotate: 360 } : undefined}
+                  transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+                >
+                  <LoadingSpinnerIcon />
+                </motion.span>
+                <span>执行中</span>
+              </motion.div>
             )}
           </div>
           
-          <div className="flex flex-col gap-3">
+          <ChainOfThought>
             {timeline.map((item, index) => {
+              const isThought = item.type === 'thought'
+              const isTool = item.type === 'tool'
+              const isQuery = item.type === 'queryGroup'
               const isLatest = index === timeline.length - 1 && isLoading
-              
+
               return (
-                <motion.div
-                  key={item.type === 'thought' ? item.data.id : item.type === 'tool' ? item.data.id : item.data.id}
-                  initial={reduceMotion ? false : { opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: index * 0.03 }}
-                  className="flex gap-3"
-                >
-                  {/* Timeline connector */}
-                  <div className="flex flex-col items-center">
-                    <div className={cn(
-                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
-                      item.type === 'thought' && "border-purple-200 bg-purple-50 text-purple-500 dark:border-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
-                      item.type === 'tool' && (
-                        item.data.status === 'running' 
-                          ? "border-blue-300 bg-blue-50 text-blue-500 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
-                          : item.data.status === 'error'
-                            ? "border-red-300 bg-red-50 text-red-500 dark:border-red-700 dark:bg-red-900/30 dark:text-red-400"
-                            : "border-green-200 bg-green-50 text-green-500 dark:border-green-800 dark:bg-green-900/30 dark:text-green-400"
-                      ),
-                      item.type === 'queryGroup' && "border-indigo-200 bg-indigo-50 text-indigo-500 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400"
-                    )}>
-                      {item.type === 'tool' && item.data.status === 'running' ? (
-                        <motion.span
-                          animate={!reduceMotion ? { rotate: 360 } : undefined}
-                          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                        >
-                          <LoadingSpinnerIcon />
-                        </motion.span>
+                <ChainOfThoughtStep key={`${item.seq}-${item.type}`} defaultOpen={isLatest || index >= timeline.length - 3}>
+                  <ChainOfThoughtTrigger
+                    leftIcon={
+                      isThought ? (
+                        <BrainIcon />
+                      ) : isTool ? (
+                        <ToolTypeIcon type={(item.data as ToolCallEvent).name} />
                       ) : (
-                        getTimelineIcon(item)
-                      )}
-                    </div>
-                    {index < timeline.length - 1 && (
-                      <div className="w-0.5 flex-1 bg-gradient-to-b from-gray-200 to-gray-100 dark:from-gray-700 dark:to-gray-800" />
+                        <BranchIcon />
+                      )
+                    }
+                    className={cn(
+                      isLatest && "text-blue-600 dark:text-blue-400",
+                      isTool && (item.data as ToolCallEvent).status === 'running' && "text-blue-600 dark:text-blue-400",
+                      isTool && (item.data as ToolCallEvent).status === 'error' && "text-red-600 dark:text-red-400"
                     )}
-                  </div>
-                  
-                  {/* Content */}
-                  <div className="min-w-0 flex-1 pb-4">
-                    <div className="mb-1 flex items-center gap-2">
-                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
-                        {getTimelineLabel(item)}
-                      </span>
-                      {item.type === 'tool' && item.data.resultCount !== undefined && (
-                        <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                          {item.data.resultCount} 条
+                  >
+                    <span className="flex items-center gap-2">
+                      {isThought && (
+                        <span className="font-medium">
+                          💭 {steps.find(s => s.id === (item.data as ThoughtBubble).stage)?.label || (item.data as ThoughtBubble).stage}
                         </span>
                       )}
-                    </div>
-                    
-                    {item.type === 'thought' && (
+                      {isTool && (
+                        <>
+                          <span className="font-medium">⚙️ {TOOL_DISPLAY_NAMES[(item.data as ToolCallEvent).name]}</span>
+                          {(item.data as ToolCallEvent).resultCount !== undefined && (
+                            <span className="flex items-center gap-1 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                              <AnimatedCounter value={(item.data as ToolCallEvent).resultCount!} />
+                              <span>条</span>
+                            </span>
+                          )}
+                        </>
+                      )}
+                      {isQuery && (
+                        <span className="font-medium">🔍 {(item.data as QueryExpansionGroup).label}</span>
+                      )}
+                    </span>
+                  </ChainOfThoughtTrigger>
+                  
+                  <ChainOfThoughtContent>
+                    {isThought && (
                       <div className={cn(
-                        "rounded-lg border px-3 py-2 text-sm leading-relaxed",
+                        "rounded-lg border px-3 py-2.5 text-sm leading-relaxed",
                         isLatest
                           ? "border-blue-100 bg-blue-50/50 text-gray-800 dark:border-blue-900 dark:bg-blue-900/20 dark:text-gray-200"
                           : "border-gray-100 bg-gray-50/50 text-gray-600 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-300"
                       )}>
-                        {item.data.text}
+                        {(item.data as ThoughtBubble).text}
                         {isLatest && (
                           <AnimatedShinyText shimmerWidth={120} className="ml-1 inline">
                             …
@@ -996,51 +995,62 @@ function ProcessLogCard({
                       </div>
                     )}
                     
-                    {item.type === 'tool' && (
-                      <div className={cn(
-                        "rounded-lg border px-3 py-2 text-sm",
-                        item.data.status === 'running'
-                          ? "border-blue-100 bg-blue-50/30 dark:border-blue-900 dark:bg-blue-900/20"
-                          : item.data.status === 'error'
-                            ? "border-red-100 bg-red-50/30 dark:border-red-900 dark:bg-red-900/20"
-                            : "border-gray-100 bg-gray-50/30 dark:border-gray-800 dark:bg-gray-800/30"
-                      )}>
-                        <span className="font-mono text-xs text-gray-600 dark:text-gray-400">
-                          {item.data.inputSummary}
-                        </span>
-                        {item.data.note && (
-                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-500">
-                            {item.data.note}
-                          </p>
+                    {isTool && (
+                      <div className="space-y-2">
+                        <div className={cn(
+                          "rounded-lg border px-3 py-2.5 text-sm",
+                          (item.data as ToolCallEvent).status === 'running'
+                            ? "border-blue-100 bg-blue-50/30 dark:border-blue-900 dark:bg-blue-900/20"
+                            : (item.data as ToolCallEvent).status === 'error'
+                              ? "border-red-100 bg-red-50/30 dark:border-red-900 dark:bg-red-900/20"
+                              : "border-gray-100 bg-gray-50/30 dark:border-gray-800 dark:bg-gray-800/30"
+                        )}>
+                          <div className="font-mono text-xs text-gray-600 dark:text-gray-400">
+                            {(item.data as ToolCallEvent).inputSummary}
+                          </div>
+                        </div>
+                        {(item.data as ToolCallEvent).note && (
+                          <div className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs leading-relaxed text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
+                            💡 {(item.data as ToolCallEvent).note}
+                          </div>
                         )}
                       </div>
                     )}
                     
-                    {item.type === 'queryGroup' && (
-                      <div className="rounded-lg border border-gray-100 bg-gray-50/30 p-3 dark:border-gray-800 dark:bg-gray-800/30">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{item.data.focus}</span>
+                    {isQuery && (
+                      <div className="space-y-3">
+                        <div className="rounded-lg border border-gray-100 bg-gray-50/30 p-3 dark:border-gray-800 dark:bg-gray-800/30">
+                          <div className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">检索焦点</div>
+                          <div className="text-sm text-gray-700 dark:text-gray-300">{(item.data as QueryExpansionGroup).focus}</div>
                         </div>
-                        <div className="mt-2 rounded border border-gray-100 bg-white px-2 py-1.5 font-mono text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
-                          {item.data.query}
+                        <div className="rounded-lg border border-gray-100 bg-white p-3 dark:border-gray-800 dark:bg-gray-900">
+                          <div className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">查询语句</div>
+                          <div className="font-mono text-xs text-gray-600 dark:text-gray-400">{(item.data as QueryExpansionGroup).query}</div>
                         </div>
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {item.data.synonyms.slice(0, 4).map(syn => (
-                            <span key={syn} className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600 dark:bg-gray-800 dark:text-gray-400">
-                              {syn}
-                            </span>
-                          ))}
-                          {item.data.synonyms.length > 4 && (
-                            <span className="text-[10px] text-gray-400">+{item.data.synonyms.length - 4}</span>
-                          )}
-                        </div>
+                        {(item.data as QueryExpansionGroup).synonyms.length > 0 && (
+                          <div>
+                            <div className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">扩展词汇</div>
+                            <div className="flex flex-wrap gap-1.5">
+                              {(item.data as QueryExpansionGroup).synonyms.slice(0, 8).map(syn => (
+                                <span key={syn} className="rounded-full border border-gray-200 bg-white px-2.5 py-1 text-[11px] text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+                                  {syn}
+                                </span>
+                              ))}
+                              {(item.data as QueryExpansionGroup).synonyms.length > 8 && (
+                                <span className="flex items-center rounded-full bg-gray-100 px-2 py-1 text-[11px] text-gray-500 dark:bg-gray-800 dark:text-gray-400">
+                                  +<AnimatedCounter value={(item.data as QueryExpansionGroup).synonyms.length - 8} />
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
-                  </div>
-                </motion.div>
+                  </ChainOfThoughtContent>
+                </ChainOfThoughtStep>
               )
             })}
-          </div>
+          </ChainOfThought>
         </div>
       )}
 
@@ -1049,7 +1059,7 @@ function ProcessLogCard({
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          className="flex items-center justify-center gap-3 rounded-xl border border-blue-100 bg-blue-50/30 p-4 dark:border-blue-900 dark:bg-blue-900/20"
+          className="flex items-center justify-center gap-3 rounded-xl border border-blue-100 bg-blue-50/30 p-5 dark:border-blue-900 dark:bg-blue-900/20"
         >
           <motion.div
             animate={!reduceMotion ? { rotate: 360 } : undefined}
@@ -1058,9 +1068,7 @@ function ProcessLogCard({
           >
             <LoadingSpinnerIcon />
           </motion.div>
-          <AnimatedShinyText shimmerWidth={180} className="text-sm text-blue-600 dark:text-blue-400">
-            正在初始化检索流程...
-          </AnimatedShinyText>
+          <span className="text-sm font-medium text-blue-600 dark:text-blue-400">AI正在思考...</span>
         </motion.div>
       )}
 
@@ -1339,7 +1347,7 @@ function MetricPill({ label, value, tone = 'neutral' }: { label: string; value: 
           ? 'text-blue-700 dark:text-blue-300' 
           : 'text-gray-900 dark:text-white'
       )}>
-        {numeric ? <OdometerNumber value={value} /> : value}
+        {numeric ? <AnimatedCounter value={Number(value)} /> : value}
       </strong>
     </div>
   )
@@ -1486,8 +1494,8 @@ function ClarificationPanel({
         damping: 24,
         bounce: 0.22,
       }}
-      className="fixed inset-x-0 bottom-20 z-50 mx-auto flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:border-indigo-900/50 dark:bg-gray-900 dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)]"
-      style={{ maxHeight: 'min(520px, calc(100vh - 200px))' }}
+      className="fixed inset-x-0 bottom-24 z-50 mx-auto flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:border-indigo-900/50 dark:bg-gray-900 dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)]"
+      style={{ maxHeight: 'min(600px, calc(100vh - 160px))' }}
     >
       {/* Top gradient bar with progress */}
       <div className="relative h-1.5 shrink-0 bg-gray-100 dark:bg-gray-800">

@@ -326,11 +326,13 @@ async function runDiscoveryPass(
   queryGroups: QueryExpansionGroup[],
   filters: SearchFilters,
   onProgress?: (message: string) => void,
+  onThinking?: (message: string) => void,
   abortSignal?: AbortSignal,
 ): Promise<DiscoveryPassResult> {
   const extraKeywords = [...intent.coreConcepts, ...intent.relatedFields]
   const searchQueries = uniqueStrings(queryGroups.map(group => group.query)).slice(0, 5)
 
+  onThinking?.(`准备用 ${searchQueries.length} 组关键词并行检索 OpenAlex，涵盖核心概念及其同义表达。`)
   const keywordSearchResults = await Promise.all(
     searchQueries.map(query =>
       callTool<SearchWorksOutput>(tools.searchWorks, {
@@ -344,6 +346,7 @@ async function runDiscoveryPass(
   )
   onProgress?.(`关键词检索已返回 ${keywordSearchResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
 
+  onThinking?.(`使用 ${intent.coreConcepts.slice(0, 2).join('、')} 查询概念树，用于扩展检索范围到相关领域。`)
   const conceptTreeResults = await Promise.all(
     intent.coreConcepts.slice(0, 2).map(conceptName =>
       callTool<ConceptTreeOutput>(tools.getConceptTree, { conceptName }, abortSignal),
@@ -351,6 +354,9 @@ async function runDiscoveryPass(
   )
   onProgress?.(`概念扩展完成，命中 ${conceptTreeResults.filter(result => result.matched?.id).length} 个概念节点。`)
 
+  if (conceptTreeResults.some(result => result.matched?.id)) {
+    onThinking?.(`基于匹配的概念ID进行语义检索，补充关键词检索可能遗漏的相关文献。`)
+  }
   const conceptSearchResults = await Promise.all(
     conceptTreeResults
       .filter(result => result.matched?.id)
@@ -377,6 +383,7 @@ async function runDiscoveryPass(
     extraKeywords,
   )
 
+  onThinking?.(`对 ${combined.length} 篇候选应用筛选条件：年份范围、引用数阈值、开放获取等约束。`)
   const filterResult = await callTool<FilterWorksOutput>(tools.filterWorks, {
     workIds: combined.map(work => work.openAlexId),
     criteria: {
@@ -393,6 +400,7 @@ async function runDiscoveryPass(
 
   combined = mergeWorks(filterResult.works, queryGroups, extraKeywords)
 
+  onThinking?.(`对候选文献进行去重和综合排序，兼顾相关性、引用数、新颖性和开放性等多维度得分。`)
   const ranked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
     workList: combined,
     queryGroups,
@@ -556,6 +564,7 @@ export async function POST(req: NextRequest) {
           activeQueryGroups,
           baseFilters,
           message => pushThinking('parallel-search', message),
+          message => pushThinking('parallel-search', message), // Add onThinking callback
           req.signal,
         )
 
@@ -581,6 +590,7 @@ export async function POST(req: NextRequest) {
             activeQueryGroups,
             retryFilters,
             message => pushThinking('parallel-search', message),
+            message => pushThinking('parallel-search', message), // Add onThinking callback
             req.signal,
           )
 
@@ -619,6 +629,9 @@ export async function POST(req: NextRequest) {
         const activeFilters = buildRetryFilters(baseFilters, retryCount)
         let analysisEnriched = applyAnalysisToPapers(discovery.ranked.works, analysis)
 
+        if (analysis.newQueries.length > 0) {
+          pushThinking('analysis', `使用Agent提取的 ${analysis.newQueries.length} 个新查询词进行补充检索。`)
+        }
         const reSearchResults = analysis.newQueries.length > 0
           ? await Promise.all(
               analysis.newQueries.map(searchQuery =>
@@ -636,6 +649,9 @@ export async function POST(req: NextRequest) {
           pushThinking('analysis', `补充检索新增 ${reSearchResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
         }
 
+        if (analysis.corePaperIds.length > 0) {
+          pushThinking('analysis', `对 ${analysis.corePaperIds.slice(0, 2).length} 篇核心论文做引用和被引双向扩展。`)
+        }
         const relatedResults = analysis.corePaperIds.length > 0
           ? await Promise.all(
               analysis.corePaperIds
@@ -651,6 +667,9 @@ export async function POST(req: NextRequest) {
         }
 
         const authorIds = getPrimaryAuthorIds(analysisEnriched.slice(0, 5))
+        if (authorIds.length > 0) {
+          pushThinking('analysis', `追踪 ${authorIds.length} 位高产作者的近期工作，补充相关文献。`)
+        }
         const authorResults = authorIds.length > 0
           ? await Promise.all(
               authorIds.map(authorId =>
@@ -683,12 +702,14 @@ export async function POST(req: NextRequest) {
         pushStage('aggregation', 'in_progress')
         pushThinking('aggregation', '开始综合排序，并由结果检阅智能体判断是否需要再次重检。')
 
+        pushThinking('aggregation', `对 ${analysisEnriched.length} 篇候选文献进行最终排序和去重。`)
         let finalRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
           workList: analysisEnriched,
           queryGroups: activeQueryGroups,
           extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
         }, req.signal)
 
+        pushThinking('aggregation', '调用结果检阅Agent评估Top-12候选文献的质量和覆盖度。')
         let review = await runResultReviewAgent(intent, finalRanked.works.slice(0, 12), modelConfig)
         let reviewNotes = uniqueStrings(review.reviewNotes)
 
@@ -716,12 +737,14 @@ export async function POST(req: NextRequest) {
           send({ type: 'strategy', queryGroups: activeQueryGroups, intent })
 
           const reviewRetryFilters = buildRetryFilters(baseFilters, retryCount, review)
+          pushThinking('aggregation', `基于检阅意见，使用更宽松的筛选条件重新检索 ${retryQueries.length} 组查询。`)
           const reviewRetryPass = await runDiscoveryPass(
             tools,
             intent,
             activeQueryGroups,
             reviewRetryFilters,
             message => pushThinking('aggregation', message),
+            message => pushThinking('aggregation', message), // Add onThinking callback
             req.signal,
           )
 

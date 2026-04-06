@@ -32,6 +32,17 @@ export function DocumentListContent() {
   }, [])
 
   useEffect(() => {
+    const syncDocuments = () => setDocuments(getDocuments())
+    window.addEventListener('documents-changed', syncDocuments)
+    window.addEventListener('storage', syncDocuments)
+
+    return () => {
+      window.removeEventListener('documents-changed', syncDocuments)
+      window.removeEventListener('storage', syncDocuments)
+    }
+  }, [])
+
+  useEffect(() => {
     if (editingDocId && renameInputRef.current) {
       renameInputRef.current.focus()
       renameInputRef.current.select()
@@ -82,9 +93,7 @@ export function DocumentListContent() {
       return
     }
     renameDocument(editingDocId, renameValue.trim())
-    setDocuments(prev => prev.map(d =>
-      d.id === editingDocId ? { ...d, title: renameValue.trim(), updatedAt: new Date().toISOString() } : d
-    ))
+    setDocuments(getDocuments())
     setEditingDocId(null)
     setRenameValue('')
   }, [editingDocId, renameValue])

@@ -1,9 +1,14 @@
 'use client'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Button, Tooltip, Switch, Chip, Select, SelectItem, Autocomplete, AutocompleteItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure, Spinner } from '@heroui/react'
+import { Button, Tooltip, Autocomplete, AutocompleteItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure, Spinner } from '@heroui/react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { Button as UiButton } from '@/components/ui/button'
+import { ChatContainerRoot, ChatContainerContent, ChatContainerScrollAnchor } from '@/components/prompt-kit/chat-container'
+import { Message, MessageAction, MessageActions, MessageContent } from '@/components/prompt-kit/message'
+import { PromptInput, PromptInputAction, PromptInputActions, PromptInputTextarea } from '@/components/prompt-kit/prompt-input'
+import { ScrollButton } from '@/components/ui/scroll-button'
 import { readDocument } from './tools/ReadDocumentTool'
 
 // Python 运行结果接口
@@ -65,6 +70,14 @@ import { searchMyKnowledgeBase as runKnowledgeSearch } from '@/lib/assistantKnow
 import { indexKnowledgeForRAG } from '@/lib/rag'
 import { getJSON, setJSON } from '@/lib/storage/StorageUtils'
 import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote, AssistantToolEvent, AssistantCitation, AssetItem, ArticleAuthor } from '@/lib/types'
+
+import {
+  ChainOfThought,
+  ChainOfThoughtItem,
+  ChainOfThoughtTrigger,
+  ChainOfThoughtContent,
+  ChainOfThoughtStep,
+} from '@/components/ui/chain-of-thought'
 
 const ASSISTANT_CHECKPOINTS_KEY = 'assistant_doc_checkpoints'
 
@@ -152,11 +165,15 @@ export function AssistantChatPanel() {
   const { isOpen: isNoteModalOpen, onOpen: onNoteModalOpen, onClose: onNoteModalClose } = useDisclosure()
   
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLTextAreaElement>(null)
   const inputContainerRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const messageRefs = useRef<Map<string, HTMLDivElement>>(new Map())
+
+  const focusInput = useCallback(() => {
+    const textarea = inputContainerRef.current?.querySelector('textarea')
+    textarea?.focus()
+  }, [])
 
   // 加载数据
   useEffect(() => {
@@ -177,15 +194,16 @@ export function AssistantChatPanel() {
     return () => window.removeEventListener('assistant-quote', handleQuote as EventListener)
   }, [])
 
-  // 滚动到底部
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [currentConversation?.messages])
+  // 滚动到底部 - 已禁用自动滚动（不要光标滚动了）
+  // useEffect(() => {
+  //   messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  // }, [currentConversation?.messages])
 
-  // 处理输入变化
-  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const nextValue = e.target.value
-    if ((nextValue === '/' || nextValue === '／') && !showSlashMenu && inputValue.trim().length === 0) {
+  const handleInputValueChange = useCallback((nextValue: string) => {
+    const normalizedValue = nextValue.trim()
+    const isSlashTrigger = normalizedValue === '/' || normalizedValue === '／' || normalizedValue === '、'
+
+    if (!showSlashMenu && isSlashTrigger && normalizedValue.length === 1) {
       setShowSlashMenu(true)
       setInputValue('')
       return
@@ -205,11 +223,13 @@ export function AssistantChatPanel() {
     }
 
     setInputValue(nextValue)
-  }
+  }, [showSlashMenu])
 
   // 处理输入框按键
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if ((e.key === '/' || e.key === '／') && !showSlashMenu && inputValue.trim().length === 0) {
+    const isSlashTrigger = e.key === '/' || e.key === '／' || e.key === '、'
+
+    if (isSlashTrigger && !showSlashMenu && inputValue.trim().length === 0) {
       e.preventDefault()
       setShowSlashMenu(true)
       return
@@ -218,9 +238,6 @@ export function AssistantChatPanel() {
     if (e.key === 'Escape' && (showSlashMenu || showMentionMenu)) {
       setShowSlashMenu(false)
       setShowMentionMenu(false)
-    } else if (e.key === 'Enter' && !e.shiftKey && !showSlashMenu) {
-      e.preventDefault()
-      handleSend()
     }
   }
 
@@ -242,8 +259,8 @@ export function AssistantChatPanel() {
     }
 
     setShowSlashMenu(false)
-    inputRef.current?.focus()
-  }, [agents])
+    focusInput()
+  }, [agents, focusInput])
 
   const buildAssetContentBlocks = useCallback((text: string): unknown[] => {
     const lines = text
@@ -303,7 +320,7 @@ export function AssistantChatPanel() {
       saveConversation(updated)
       setConversations(getConversations())
     }
-    inputRef.current?.focus()
+    focusInput()
   }
 
   // 移除智能体
@@ -319,7 +336,7 @@ export function AssistantChatPanel() {
       saveConversation(updated)
       setConversations(getConversations())
     }
-    inputRef.current?.focus()
+    focusInput()
   }
 
   const buildAssetContext = useCallback((query: string) => {
@@ -493,15 +510,32 @@ export function AssistantChatPanel() {
       .slice(0, 8)
   }, [mentionQuery, mentions])
 
+  const getMentionDisplayText = useCallback((mention: { id: string; type: 'knowledge' | 'asset'; title: string }) => {
+    const typeLabel = mention.type === 'knowledge' ? '知识' : '资产'
+    return `@${typeLabel}:${mention.title}`
+  }, [])
+
   const handleMentionSelect = useCallback((candidate: { id: string; type: 'knowledge' | 'asset'; title: string }) => {
     setMentions(prev => [...prev, candidate])
-    setInputValue(prev => prev.replace(/(?:^|\s)@([^\s@]*)$/, ''))
+    setInputValue(prev => {
+      const mentionText = getMentionDisplayText(candidate)
+      const withoutQuery = prev.replace(/(?:^|\s)@([^\s@]*)$/, ' ')
+      const normalized = withoutQuery.replace(/\s+/g, ' ').trim()
+      return normalized ? `${normalized} ${mentionText} ` : `${mentionText} `
+    })
     setMentionQuery('')
     setShowMentionMenu(false)
     requestAnimationFrame(() => {
-      inputRef.current?.focus()
+      focusInput()
     })
-  }, [])
+  }, [focusInput, getMentionDisplayText])
+
+  useEffect(() => {
+    setMentions(prev => {
+      const filtered = prev.filter(item => inputValue.includes(getMentionDisplayText(item)))
+      return filtered.length === prev.length ? prev : filtered
+    })
+  }, [inputValue, getMentionDisplayText])
 
   const removeMention = useCallback((id: string, type: 'knowledge' | 'asset') => {
     setMentions(prev => prev.filter(item => !(item.id === id && item.type === type)))
@@ -1906,71 +1940,18 @@ export function AssistantChatPanel() {
             </Autocomplete>
           </div>
 
-          <div style={{ display: 'grid', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <Tooltip content="输入 / 可切换智能体，也可以在输入框里直接用 / 打开命令菜单">
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                  {selectedAgent ? `当前智能体：${selectedAgent.title}` : '当前智能体：未指定'}
-                </span>
-              </Tooltip>
-              {selectedAgent && (
-                <Button size="sm" variant="light" onPress={handleRemoveAgent}>
-                  清除
-                </Button>
-              )}
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <Tooltip content="基于关键词 + RAG 混合检索知识库摘要与精读全文，并在回答中附规范引用">
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>我的知识库检索</span>
-              </Tooltip>
-              <Switch size="sm" isSelected={useKnowledge} onValueChange={setUseKnowledge} isDisabled={knowledgeBusy} />
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-              <Tooltip content="引用资产库中与你问题相关的素材、摘要和标签，作为辅助回答上下文">
-                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>引用我的资产库</span>
-              </Tooltip>
-              <Switch size="sm" isSelected={useAssets} onValueChange={setUseAssets} />
-            </div>
-
-            {getEditor() && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-                <Tooltip content="开启后，AI 自动获取文档结构和内容，可读取和编辑当前文档">
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>可编辑文档内容</span>
-                </Tooltip>
-                <Switch size="sm" isSelected={useDocEditing} onValueChange={setUseDocEditing} />
-              </div>
-            )}
-          </div>
         </div>
 
         {/* 对话区域 */}
-        <div 
-          ref={messagesContainerRef}
-          style={{ 
-            flex: 1, 
-            overflowY: 'auto',
-            padding: 12,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 12,
-          }}
-        >
-          {messages.length === 0 ? (
+        <div ref={messagesContainerRef} className="relative flex-1 overflow-hidden px-4 py-3">
+          <ChatContainerRoot className="relative h-full w-full space-y-0 overflow-y-auto rounded-xl border border-border/60 bg-background/30">
+            <ChatContainerContent className="space-y-8 px-2 py-6">
+              {messages.length === 0 ? (
             <motion.div
               initial={{ opacity: 0, y: 12 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.35, ease: 'easeOut' }}
-              style={{ 
-                flex: 1, 
-                display: 'flex', 
-                alignItems: 'center', 
-                justifyContent: 'center',
-                color: 'var(--text-muted)',
-                fontSize: 13,
-                textAlign: 'center',
-              }}
+              className="flex flex-1 items-center justify-center text-center text-[13px] text-[var(--text-muted)]"
             >
               <div>
                 <p style={{ marginBottom: 8 }}>开始与 AI 助手对话</p>
@@ -1979,9 +1960,9 @@ export function AssistantChatPanel() {
                 </p>
               </div>
             </motion.div>
-          ) : (
-            <AnimatePresence mode="popLayout">
-              {messages.map((message, idx) => (
+              ) : (
+                <AnimatePresence mode="popLayout">
+                  {messages.map((message, idx) => (
                 <motion.div 
                   key={message.id}
                   ref={(el) => {
@@ -1991,20 +1972,11 @@ export function AssistantChatPanel() {
                   initial={{ opacity: 0, y: 16, scale: 0.97 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
-                  style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 6,
-                    padding: 8,
-                    borderRadius: 6,
-                  }}
+                  className={`group mx-auto w-full max-w-3xl px-0 md:px-6 ${message.role === 'assistant' ? 'items-start' : 'items-end'}`}
                 >
+                <Message className={`w-full flex-col gap-2 ${message.role === 'assistant' ? 'items-start' : 'items-end'}`}>
                 {/* 角色标签 */}
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                }}>
+                <div className="flex items-center gap-2">
                   <div style={{
                     fontSize: 10,
                     color: message.role === 'user' ? 'var(--accent-color)' : 'var(--text-muted)',
@@ -2029,13 +2001,26 @@ export function AssistantChatPanel() {
                 </div>
                 
                 {/* 内容 */}
-                <div 
+                <MessageContent 
                   className="markdown-content"
-                  style={{
-                    fontSize: 13,
-                    lineHeight: 1.7,
-                    color: message.role === 'user' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                  }}
+                  style={message.role === 'assistant'
+                    ? {
+                        width: '100%',
+                        fontSize: 13,
+                        lineHeight: 1.7,
+                        color: 'var(--text-secondary)',
+                        background: 'transparent',
+                        padding: 0,
+                      }
+                    : {
+                        maxWidth: '85%',
+                        fontSize: 13,
+                        lineHeight: 1.7,
+                        color: 'var(--text-primary)',
+                        background: 'var(--bg-secondary)',
+                        padding: '10px 14px',
+                        borderRadius: 24,
+                      }}
                 >
                   {message.role === 'assistant' && message.checkpointId && (
                     <div style={{ marginBottom: 6 }}>
@@ -2059,13 +2044,25 @@ export function AssistantChatPanel() {
                     </div>
                   )}
                   {message.role === 'assistant' && message.toolEvents && message.toolEvents.length > 0 && (
-                    <div style={{ display: 'grid', gap: 4, marginBottom: 10, fontSize: 11, color: 'var(--text-muted)' }}>
-                      {message.toolEvents.map(event => (
-                        <div key={event.id} style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                          <span style={{ color: event.status === 'error' ? '#ef4444' : event.status === 'success' ? '#10b981' : '#f59e0b' }}>●</span>
-                          <span>{event.message}</span>
-                        </div>
-                      ))}
+                    <div style={{ marginBottom: 10 }}>
+                      <ChainOfThought>
+                        {message.toolEvents.map(event => (
+                          <ChainOfThoughtStep key={event.id}>
+                            <ChainOfThoughtTrigger
+                              leftIcon={
+                                <span style={{ color: event.status === 'error' ? '#ef4444' : event.status === 'success' ? '#10b981' : '#f59e0b', fontSize: '10px' }}>●</span>
+                              }
+                            >
+                              {event.message}
+                            </ChainOfThoughtTrigger>
+                            <ChainOfThoughtContent>
+                              <ChainOfThoughtItem>
+                                {event.message} - {event.status === 'success' ? '完成' : event.status === 'error' ? '失败' : '执行中'}
+                              </ChainOfThoughtItem>
+                            </ChainOfThoughtContent>
+                          </ChainOfThoughtStep>
+                        ))}
+                      </ChainOfThought>
                     </div>
                   )}
                   {message.role === 'assistant' ? (
@@ -2666,7 +2663,7 @@ export function AssistantChatPanel() {
                   ) : (
                     <span style={{ whiteSpace: 'pre-wrap' }}>{message.content}</span>
                   )}
-                </div>
+                </MessageContent>
 
                 {message.role === 'assistant' && message.citations && message.citations.length > 0 && (
                   <div style={{ display: 'grid', gap: 6, marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
@@ -2686,130 +2683,78 @@ export function AssistantChatPanel() {
                 )}
 
                 {/* 操作按钮 */}
-                <div style={{
-                  display: 'flex',
-                  gap: 6,
-                  marginTop: 2,
-                }}>
-                  <motion.button
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.95 }}
-                    onClick={() => handleCopy(message.content)}
-                    style={{
-                      background: 'var(--bg-secondary)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: 6,
-                      padding: '3px 8px',
-                      fontSize: 11,
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      transition: 'all 0.15s',
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--accent-color)'
-                      e.currentTarget.style.color = 'var(--accent-color)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.borderColor = 'var(--border-color)'
-                      e.currentTarget.style.color = 'var(--text-muted)'
-                    }}
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                    </svg>
-                    复制
-                  </motion.button>
-                  
-                  {message.role === 'assistant' && (
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => handleOpenNote(message.id, message.content)}
-                      style={{
-                        background: 'var(--bg-secondary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: 6,
-                        padding: '3px 8px',
-                        fontSize: 11,
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        transition: 'all 0.15s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = '#f90'
-                        e.currentTarget.style.color = '#f90'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = 'var(--border-color)'
-                        e.currentTarget.style.color = 'var(--text-muted)'
-                      }}
+                <MessageActions
+                  className={message.role === 'assistant'
+                    ? `-ml-2 mt-1 gap-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100${idx === messages.length - 1 ? ' opacity-100' : ''}`
+                    : 'mt-1 gap-0 opacity-0 transition-opacity duration-150 group-hover:opacity-100'}
+                >
+                  <MessageAction tooltip="复制消息">
+                    <UiButton
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => handleCopy(message.content)}
+                      aria-label="复制消息"
                     >
                       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                       </svg>
-                      记笔记
-                    </motion.button>
+                    </UiButton>
+                  </MessageAction>
+
+                  {message.role === 'assistant' && (
+                    <MessageAction tooltip="记到临时便签">
+                      <UiButton
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => handleOpenNote(message.id, message.content)}
+                        aria-label="记笔记"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                        </svg>
+                      </UiButton>
+                    </MessageAction>
                   )}
 
                   {message.role === 'assistant' && (
-                    <motion.button
-                      whileHover={{ scale: 1.05 }}
-                      whileTap={{ scale: 0.95 }}
-                      onClick={() => handleAddToAssets(message)}
-                      style={{
-                        background: 'var(--bg-secondary)',
-                        border: '1px solid var(--border-color)',
-                        borderRadius: 6,
-                        padding: '3px 8px',
-                        fontSize: 11,
-                        color: 'var(--text-muted)',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 4,
-                        transition: 'all 0.15s',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.borderColor = 'var(--accent-color)'
-                        e.currentTarget.style.color = 'var(--accent-color)'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.borderColor = 'var(--border-color)'
-                        e.currentTarget.style.color = 'var(--text-muted)'
-                      }}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                        <path d="M12 5v14" />
-                        <path d="M5 12h14" />
-                      </svg>
-                      添加到资产库
-                    </motion.button>
+                    <MessageAction tooltip="添加到资产库">
+                      <UiButton
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => handleAddToAssets(message)}
+                        aria-label="添加到资产库"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 5v14" />
+                          <path d="M5 12h14" />
+                        </svg>
+                      </UiButton>
+                    </MessageAction>
                   )}
-                </div>
+                </MessageActions>
+                </Message>
                 </motion.div>
-              ))}
-            </AnimatePresence>
-          )}
-          <div ref={messagesEndRef} />
+                  ))}
+                </AnimatePresence>
+              )}
+              <ChatContainerScrollAnchor />
+              <div ref={messagesEndRef} />
+            </ChatContainerContent>
+            <div style={{ position: 'absolute', right: 24, bottom: 24, zIndex: 2 }}>
+              <ScrollButton />
+            </div>
+          </ChatContainerRoot>
         </div>
 
         {/* 输入区域 */}
-        <div 
+        <div
           ref={inputContainerRef}
-          style={{ 
-            padding: '8px 12px 12px',
-            borderTop: '1px solid var(--border-color)',
-            flexShrink: 0,
-            position: 'relative',
-          }}
+          className="relative mx-auto w-full max-w-3xl shrink-0 border-t border-[var(--border-color)] px-3 pb-3 pt-2 md:px-5 md:pb-5"
         >
           {/* 选中文本引用 */}
           <AnimatePresence>
@@ -2877,8 +2822,8 @@ export function AssistantChatPanel() {
               <div style={{
                 position: 'absolute',
                 left: 0,
-                right: 70,
-                bottom: 62,
+                right: 0,
+                bottom: 'calc(100% + 8px)',
                 background: 'var(--bg-primary)',
                 border: '1px solid var(--border-color)',
                 borderRadius: 8,
@@ -2973,26 +2918,23 @@ export function AssistantChatPanel() {
               </div>
             )}
 
-            <div style={{
-              background: 'var(--bg-secondary)',
-              border: '1px solid var(--border-color)',
-              borderRadius: 8,
-              overflow: 'hidden',
-              transition: 'border-color 0.15s',
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.borderColor = 'var(--accent-color)'
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.borderColor = 'var(--border-color)'
-            }}
+            <PromptInput
+              value={inputValue}
+              onValueChange={handleInputValueChange}
+              onSubmit={() => {
+                if (!showSlashMenu) {
+                  void handleSend()
+                }
+              }}
+              isLoading={isLoading}
+              className="border-input bg-popover relative z-10 w-full rounded-3xl border p-0 pt-1 shadow-xs"
             >
-              {/* 智能体标签区域 */}
+              {/* 智能体和引用标签 */}
               <div style={{
                 display: 'flex',
                 flexWrap: 'wrap',
                 gap: 6,
-                padding: selectedAgent || useKnowledge || useAssets || mentions.length > 0 ? '6px 8px 0' : '0',
+                padding: selectedAgent || useKnowledge || useAssets ? '2px 6px 4px' : '0',
               }}>
                 {selectedAgent && (
                   <div style={{
@@ -3001,9 +2943,9 @@ export function AssistantChatPanel() {
                     gap: 4,
                     background: 'rgba(0, 153, 255, 0.1)',
                     border: '1px solid rgba(0, 153, 255, 0.3)',
-                    borderRadius: 4,
-                    padding: '2px 6px 2px 8px',
-                    fontSize: 12,
+                    borderRadius: 999,
+                    padding: '2px 8px',
+                    fontSize: 11,
                     fontWeight: 600,
                     color: '#09f',
                     animation: 'fadeIn 0.2s ease',
@@ -3017,98 +2959,191 @@ export function AssistantChatPanel() {
                         color: '#09f',
                         cursor: 'pointer',
                         padding: 0,
-                        fontSize: 12,
+                        fontSize: 11,
                         lineHeight: 1,
-                        opacity: 0.6,
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        width: 14,
-                        height: 14,
-                        borderRadius: '50%',
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.opacity = '1'
-                        e.currentTarget.style.background = 'rgba(0, 153, 255, 0.2)'
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.opacity = '0.6'
-                        e.currentTarget.style.background = 'transparent'
+                        opacity: 0.7,
                       }}
                     >
                       ✕
                     </button>
                   </div>
                 )}
+
                 {useKnowledge && (
-                  <Chip size="sm" variant="flat" color="secondary">知识库检索</Chip>
-                )}
-                {useAssets && (
-                  <Chip size="sm" variant="flat" color="success">资产库引用</Chip>
-                )}
-                {mentions.map(mention => (
-                  <div
-                    key={`${mention.type}:${mention.id}`}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4,
-                      background: mention.type === 'knowledge' ? 'rgba(168, 85, 247, 0.12)' : 'rgba(16, 185, 129, 0.12)',
-                      border: mention.type === 'knowledge' ? '1px solid rgba(168, 85, 247, 0.25)' : '1px solid rgba(16, 185, 129, 0.25)',
-                      borderRadius: 999,
-                      padding: '2px 8px',
-                      fontSize: 11,
-                      color: 'var(--text-primary)',
-                    }}
-                  >
-                    <span>{mention.type === 'knowledge' ? '@知识' : '@资产'} · {mention.title}</span>
-                    <button
-                      onClick={() => removeMention(mention.id, mention.type)}
-                      style={{
-                        background: 'transparent',
-                        border: 'none',
-                        cursor: 'pointer',
-                        color: 'var(--text-muted)',
-                        padding: 0,
-                        lineHeight: 1,
-                      }}
-                    >
-                      ✕
-                    </button>
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    background: 'rgba(168, 85, 247, 0.12)',
+                    border: '1px solid rgba(168, 85, 247, 0.25)',
+                    borderRadius: 999,
+                    padding: '2px 8px',
+                    fontSize: 11,
+                    color: 'var(--text-primary)',
+                  }}>
+                    <span>知识库检索</span>
                   </div>
-                ))}
+                )}
+
+                {useAssets && (
+                  <div style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    background: 'rgba(16, 185, 129, 0.12)',
+                    border: '1px solid rgba(16, 185, 129, 0.25)',
+                    borderRadius: 999,
+                    padding: '2px 8px',
+                    fontSize: 11,
+                    color: 'var(--text-primary)',
+                  }}>
+                    <span>资产库引用</span>
+                  </div>
+                )}
               </div>
-              
-              {/* 输入框 */}
-              <textarea
-                ref={inputRef}
-                value={inputValue}
-                onChange={handleInputChange}
+
+              <PromptInputTextarea
                 onKeyDown={handleKeyDown}
-                placeholder={selectedAgent ? '继续输入消息，按 / 切换智能体或用@引用来源…' : '输入消息，按 / 使用智能体、知识库、资产库…'}
+                placeholder={selectedAgent ? '继续输入消息，按 / 切换智能体或用 @ 引用来源…' : '输入消息，按 / 使用智能体、知识库、资产库…'}
                 disabled={isLoading}
-                style={{
-                  width: '100%',
-                  minHeight: 48,
-                  maxHeight: 150,
-                  resize: 'none',
-                  background: 'transparent',
-                  border: 'none',
-                  padding: '8px 70px 8px 12px',
-                  fontSize: 13,
-                  lineHeight: 1.5,
-                  color: 'var(--text-primary)',
-                  outline: 'none',
-                }}
+                className="min-h-[44px] max-h-[180px] px-4 pt-3 text-base leading-[1.35] text-[var(--text-primary)]"
               />
-            </div>
+
+              <PromptInputActions className="mt-5 flex w-full items-center justify-between gap-2 px-3 pb-3">
+                <div className="flex items-center gap-2">
+                  <PromptInputAction tooltip={showSlashMenu ? '关闭命令菜单' : '打开命令菜单'}>
+                    <UiButton
+                      type="button"
+                      variant={showSlashMenu ? 'secondary' : 'outline'}
+                      size="icon"
+                      className="rounded-full"
+                      onClick={() => setShowSlashMenu(current => !current)}
+                      aria-label="命令菜单"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M4 6h16" />
+                        <path d="M4 12h16" />
+                        <path d="M4 18h10" />
+                      </svg>
+                    </UiButton>
+                  </PromptInputAction>
+
+                  <PromptInputAction tooltip="切换知识库检索">
+                    <UiButton
+                      type="button"
+                      variant={useKnowledge ? 'secondary' : 'outline'}
+                      size="icon"
+                      className="rounded-full"
+                      onClick={() => setUseKnowledge(current => !current)}
+                      disabled={knowledgeBusy}
+                      aria-label="切换知识库检索"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+                      </svg>
+                    </UiButton>
+                  </PromptInputAction>
+
+                  <PromptInputAction tooltip="切换资产库引用">
+                    <UiButton
+                      type="button"
+                      variant={useAssets ? 'secondary' : 'outline'}
+                      size="icon"
+                      className="rounded-full"
+                      onClick={() => setUseAssets(current => !current)}
+                      aria-label="切换资产库引用"
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <path d="M3 7h18" />
+                        <path d="M3 12h18" />
+                        <path d="M3 17h18" />
+                      </svg>
+                    </UiButton>
+                  </PromptInputAction>
+
+                  {getEditor() && (
+                    <PromptInputAction tooltip="切换文档编辑模式">
+                      <UiButton
+                        type="button"
+                        variant={useDocEditing ? 'secondary' : 'outline'}
+                        size="icon"
+                        className="rounded-full"
+                        onClick={() => setUseDocEditing(current => !current)}
+                        aria-label="切换文档编辑模式"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <path d="M12 20h9" />
+                          <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
+                        </svg>
+                      </UiButton>
+                    </PromptInputAction>
+                  )}
+
+                  <PromptInputAction tooltip={showMentionMenu ? '隐藏提及候选' : '显示提及候选'}>
+                    <UiButton
+                      type="button"
+                      variant={showMentionMenu ? 'secondary' : 'outline'}
+                      size="icon"
+                      className="rounded-full"
+                      onClick={() => {
+                        if (mentionCandidates.length > 0) {
+                          setShowMentionMenu(current => !current)
+                        } else {
+                          focusInput()
+                        }
+                      }}
+                      aria-label="提及候选"
+                    >
+                      <span className="text-[13px] font-semibold">@</span>
+                    </UiButton>
+                  </PromptInputAction>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {isLoading ? (
+                    <PromptInputAction tooltip="停止生成">
+                      <UiButton
+                        type="button"
+                        variant="destructive"
+                        size="icon"
+                        className="rounded-full"
+                        onClick={handleStop}
+                        aria-label="停止生成"
+                      >
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+                          <rect x="6" y="6" width="12" height="12" rx="2" />
+                        </svg>
+                      </UiButton>
+                    </PromptInputAction>
+                  ) : (
+                    <PromptInputAction tooltip="发送消息">
+                      <UiButton
+                        type="button"
+                        variant="default"
+                        size="icon"
+                        className="rounded-full"
+                        onClick={handleSend}
+                        disabled={!inputValue.trim()}
+                        aria-label="发送消息"
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <line x1="22" y1="2" x2="11" y2="13" />
+                          <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                        </svg>
+                      </UiButton>
+                    </PromptInputAction>
+                  )}
+                </div>
+              </PromptInputActions>
+            </PromptInput>
 
             {showMentionMenu && mentionCandidates.length > 0 && (
               <div style={{
                 position: 'absolute',
                 left: 0,
-                right: 70,
-                bottom: 62,
+                right: 0,
+                bottom: 'calc(100% + 8px)',
                 background: 'var(--bg-primary)',
                 border: '1px solid var(--border-color)',
                 borderRadius: 8,
@@ -3160,88 +3195,6 @@ export function AssistantChatPanel() {
                 ))}
               </div>
             )}
-            
-            {/* 发送/停止按钮 */}
-            <div style={{
-              position: 'absolute',
-              right: 8,
-              bottom: 8,
-              display: 'flex',
-              gap: 4,
-            }}>
-              {isLoading ? (
-                // 停止按钮 - 圆形带蓝色旋转边框
-                <button
-                  onClick={handleStop}
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: '50%',
-                    border: 'none',
-                    background: 'var(--bg-secondary)',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    position: 'relative',
-                    outline: '2px solid transparent',
-                    outlineOffset: '2px',
-                    animation: 'spin-border 1s linear infinite',
-                  }}
-                  title="停止生成"
-                >
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style={{ color: '#ef4444' }}>
-                    <rect x="6" y="6" width="12" height="12" rx="2" />
-                  </svg>
-                  {/* 旋转边框层 */}
-                  <div style={{
-                    position: 'absolute',
-                    inset: -2,
-                    borderRadius: '50%',
-                    border: '2px solid transparent',
-                    borderTopColor: '#3b82f6',
-                    borderRightColor: '#3b82f6',
-                    pointerEvents: 'none',
-                    animation: 'spin 0.8s linear infinite',
-                  }} />
-                </button>
-              ) : (
-                // 发送按钮 - 圆形纸飞机图标
-                <button
-                  onClick={handleSend}
-                  disabled={!inputValue.trim()}
-                  style={{
-                    width: 32,
-                    height: 32,
-                    borderRadius: '50%',
-                    border: 'none',
-                    background: inputValue.trim() ? 'var(--accent-color)' : 'var(--bg-secondary)',
-                    cursor: inputValue.trim() ? 'pointer' : 'not-allowed',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    transition: 'all 0.2s ease',
-                    opacity: inputValue.trim() ? 1 : 0.5,
-                  }}
-                  title="发送消息"
-                  onMouseEnter={(e) => {
-                    if (inputValue.trim()) {
-                      e.currentTarget.style.transform = 'scale(1.05)'
-                      e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 153, 255, 0.3)'
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.transform = 'scale(1)'
-                    e.currentTarget.style.boxShadow = 'none'
-                  }}
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={inputValue.trim() ? 'white' : 'var(--text-muted)'} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <line x1="22" y1="2" x2="11" y2="13" />
-                    <polygon points="22 2 15 22 11 13 2 9 22 2" fill={inputValue.trim() ? 'white' : 'none'} stroke={inputValue.trim() ? 'white' : 'var(--text-muted)'} />
-                  </svg>
-                </button>
-              )}
-            </div>
           </div>
 
           {/* 便签列表 */}

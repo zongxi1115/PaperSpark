@@ -1,5 +1,6 @@
 'use client'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
 import {
   useCreateBlockNote,
   FormattingToolbar,
@@ -46,6 +47,7 @@ import { CanvasBlockSpec } from './CanvasBlock'
 import { QuoteToAssistantButton } from './QuoteToAssistantButton'
 import { CommentToolbarButton } from './CommentToolbarButton'
 import { useIsMobile } from '@/lib/useIsMobile'
+import useClickOutside from '@/hooks/useClickOutside'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -66,6 +68,7 @@ interface EditorPageProps {
 
 const CONTEXT_WINDOW = 1500 // 上下文窗口大小
 const AUTO_COMPLETE_DELAY = 5000 // 5秒无输入后触发补全
+const AUTHOR_CARD_LAYOUT_ID = 'editor-author-card'
 
 type SlashMenuItem = DefaultReactSuggestionItem & {
   icon?: ReactNode
@@ -168,6 +171,12 @@ function extractTitle(content: Block[], articleTitle?: string): string {
 function getBlockPlainText(block: Block): string {
   const b = block as { content?: { type: string; text: string }[] }
   return b.content?.filter(c => c.type === 'text').map(c => c.text).join('') ?? ''
+}
+
+function getAuthorChipLabel(authors: ArticleAuthor[]): string {
+  if (authors.length === 0) return '添加作者'
+  if (authors.length <= 2) return authors.map(author => author.name).join(', ')
+  return `${authors[0]?.name}、${authors[1]?.name} 等 ${authors.length} 位作者`
 }
 
 function sanitizeInlineContent(content: unknown): unknown[] {
@@ -408,11 +417,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const [articleDate, setArticleDate] = useState(() => new Date().toISOString().split('T')[0])
 
   // 作者编辑弹窗
-  const { isOpen: isAuthorModalOpen, onOpen: onAuthorModalOpen, onClose: onAuthorModalClose } = useDisclosure()
   const { isOpen: isLatexModalOpen, onOpen: onLatexModalOpen, onClose: onLatexModalClose } = useDisclosure()
   const [editingAuthor, setEditingAuthor] = useState<ArticleAuthor | null>(null)
   const [authorForm, setAuthorForm] = useState({ name: '', affiliation: '', email: '' })
+  const [isAuthorPopoverOpen, setIsAuthorPopoverOpen] = useState(false)
   const [latexLanguage, setLatexLanguage] = useState<Exclude<LatexExportLanguage, 'auto'>>('zh')
+  const authorPopoverRef = useRef<HTMLDivElement>(null)
 
   // 当前主题配置，动态更新
   const activeThemeConfig = getThemeById(settings.editorThemeId ?? 'default')
@@ -808,6 +818,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     if (!doc) return
     const updated: AppDocument = {
       ...doc,
+      title: articleTitle.trim() || extractTitle(editor.document as Block[], articleTitle),
       articleTitle,
       articleAuthors,
       articleAbstract,
@@ -817,7 +828,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     }
     setDoc(updated)
     saveDocument(updated)
-  }, [doc, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate])
+  }, [doc, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate, editor])
 
   // 版本控制：保存版本快照
   const handleSaveVersion = useCallback(async (title: string) => {
@@ -982,14 +993,14 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const handleAddAuthor = useCallback(() => {
     setEditingAuthor(null)
     setAuthorForm({ name: '', affiliation: '', email: '' })
-    onAuthorModalOpen()
-  }, [onAuthorModalOpen])
+    setIsAuthorPopoverOpen(true)
+  }, [])
 
   const handleEditAuthor = useCallback((author: ArticleAuthor) => {
     setEditingAuthor(author)
     setAuthorForm({ name: author.name, affiliation: author.affiliation, email: author.email })
-    onAuthorModalOpen()
-  }, [onAuthorModalOpen])
+    setIsAuthorPopoverOpen(true)
+  }, [])
 
   const handleSaveAuthor = useCallback(() => {
     if (!authorForm.name.trim()) {
@@ -1012,15 +1023,32 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       }
       setArticleAuthors(prev => [...prev, newAuthor])
     }
-    onAuthorModalClose()
+    setIsAuthorPopoverOpen(false)
     // 延迟保存，等待状态更新
     setTimeout(() => saveArticleMetadata(), 100)
-  }, [authorForm, editingAuthor, onAuthorModalClose, saveArticleMetadata])
+  }, [authorForm, editingAuthor, saveArticleMetadata])
 
   const handleDeleteAuthor = useCallback((authorId: string) => {
     setArticleAuthors(prev => prev.filter(a => a.id !== authorId))
     setTimeout(() => saveArticleMetadata(), 100)
   }, [saveArticleMetadata])
+
+  useClickOutside(authorPopoverRef, () => {
+    setIsAuthorPopoverOpen(false)
+  })
+
+  useEffect(() => {
+    if (!isAuthorPopoverOpen) return
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsAuthorPopoverOpen(false)
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [isAuthorPopoverOpen])
 
   // 重新扫描文档中的引用，按出现顺序重新编号
   const reindexCitations = useCallback(() => {
@@ -1511,15 +1539,22 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                 type="text"
                 value={articleTitle}
                 onChange={(e) => {
-                  setArticleTitle(e.target.value)
-                  // 防抖保存
-                  if (doc) {
-                    const timeoutId = setTimeout(() => {
-                      const updated = { ...doc, articleTitle: e.target.value, updatedAt: new Date().toISOString() }
-                      saveDocument(updated)
-                    }, 500)
-                    return () => clearTimeout(timeoutId)
+                  const nextTitle = e.target.value
+                  setArticleTitle(nextTitle)
+                  if (!doc) return
+
+                  const updated: AppDocument = {
+                    ...doc,
+                    title: nextTitle.trim() || extractTitle(editor.document as Block[], nextTitle),
+                    articleTitle: nextTitle,
+                    articleAuthors,
+                    articleAbstract,
+                    articleKeywords,
+                    articleDate,
+                    updatedAt: new Date().toISOString(),
                   }
+                  setDoc(updated)
+                  saveDocument(updated)
                 }}
                 placeholder="点击输入文章标题"
                 className={isMobile ? 'editor-mobile-title' : ''}
@@ -1577,45 +1612,185 @@ export function EditorPageContent({ docId }: EditorPageProps) {
               </div>
 
               {/* 作者 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div ref={authorPopoverRef} style={{ display: 'flex', alignItems: 'center', gap: 6, position: 'relative' }}>
                 <UserIcon />
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
-                  {articleAuthors.length === 0 ? (
-                    <span
-                      onClick={handleAddAuthor}
-                      style={{ cursor: 'pointer', color: 'var(--accent-color)' }}
-                    >
-                      点击添加作者
+                {!isAuthorPopoverOpen && (
+                  <motion.button
+                    layout
+                    layoutId={AUTHOR_CARD_LAYOUT_ID}
+                    onClick={articleAuthors.length === 0 ? handleAddAuthor : () => setIsAuthorPopoverOpen(true)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      maxWidth: 360,
+                      cursor: 'pointer',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-secondary)',
+                      color: articleAuthors.length === 0 ? 'var(--accent-color)' : 'var(--text-primary)',
+                      borderRadius: 999,
+                      padding: '6px 12px',
+                      fontSize: 13,
+                      lineHeight: 1.2,
+                      boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                    }}
+                    title={articleAuthors.length > 0 ? '点击编辑作者' : '点击添加作者'}
+                  >
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {getAuthorChipLabel(articleAuthors)}
                     </span>
-                  ) : (
-                    <>
-                      {articleAuthors.map((author, index) => (
-                        <span key={author.id}>
-                          <span
-                            onClick={() => handleEditAuthor(author)}
-                            style={{ cursor: 'pointer' }}
-                            title={`${author.affiliation}${author.email ? `\n${author.email}` : ''}`}
-                          >
-                            {author.name}
-                          </span>
-                          {index < articleAuthors.length - 1 && <span>, </span>}
-                        </span>
-                      ))}
-                      <span
-                        onClick={handleAddAuthor}
+                    <span style={{ color: 'var(--text-muted)', fontSize: 12, flexShrink: 0 }}>
+                      {articleAuthors.length > 0 ? '编辑' : '+'}
+                    </span>
+                  </motion.button>
+                )}
+
+                <AnimatePresence initial={false}>
+                  {isAuthorPopoverOpen && (
+                    <motion.div
+                      layout
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: 1 }}
+                      exit={{ opacity: 0 }}
+                      transition={{ duration: 0.18, ease: 'linear' }}
+                      style={{
+                        position: 'absolute',
+                        right: 0,
+                        top: 'calc(100% + 12px)',
+                        zIndex: 1100,
+                        width: 320,
+                        overflow: 'hidden',
+                        borderRadius: 16,
+                        border: '1px solid var(--border-color)',
+                        background: 'var(--bg-primary)',
+                        boxShadow: '0 12px 32px rgba(0,0,0,0.12)',
+                        transformOrigin: 'top right',
+                      }}
+                    >
+                      <motion.div
+                        layout
+                        layoutId={AUTHOR_CARD_LAYOUT_ID}
+                        transition={{ duration: 0.18, ease: 'linear' }}
                         style={{
-                          cursor: 'pointer',
-                          color: 'var(--accent-color)',
-                          marginLeft: 4,
-                          fontSize: 12,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 12,
+                          padding: 14,
+                          borderBottom: '1px solid var(--border-color)',
+                          color: 'var(--text-primary)',
+                          background: 'var(--bg-secondary)',
                         }}
-                        title="添加作者"
                       >
-                        +
-                      </span>
-                    </>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {editingAuthor ? editingAuthor.name : getAuthorChipLabel(articleAuthors)}
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>
+                            {editingAuthor ? '编辑作者信息' : articleAuthors.length > 0 ? '管理作者列表' : '添加论文作者'}
+                          </div>
+                        </div>
+                        <Button variant="light" size="sm" isIconOnly onPress={() => setIsAuthorPopoverOpen(false)}>
+                          ×
+                        </Button>
+                      </motion.div>
+                      <motion.div
+                        layout
+                        transition={{ duration: 0.18, ease: 'linear' }}
+                        style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 14 }}
+                      >
+                        {articleAuthors.length > 0 && (
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                            {articleAuthors.map((author) => {
+                              const isActive = editingAuthor?.id === author.id
+                              return (
+                                <button
+                                  key={author.id}
+                                  type="button"
+                                  onClick={() => handleEditAuthor(author)}
+                                  style={{
+                                    border: `1px solid ${isActive ? 'var(--accent-color)' : 'var(--border-color)'}`,
+                                    background: isActive ? 'var(--accent-light)' : 'var(--bg-secondary)',
+                                    color: 'var(--text-primary)',
+                                    borderRadius: 999,
+                                    padding: '4px 10px',
+                                    fontSize: 12,
+                                    cursor: 'pointer',
+                                  }}
+                                  title={`${author.affiliation}${author.email ? `\n${author.email}` : ''}`}
+                                >
+                                  {author.name}
+                                </button>
+                              )
+                            })}
+                            <button
+                              type="button"
+                              onClick={handleAddAuthor}
+                              style={{
+                                border: '1px dashed var(--border-color)',
+                                background: 'transparent',
+                                color: 'var(--accent-color)',
+                                borderRadius: 999,
+                                padding: '4px 10px',
+                                fontSize: 12,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              + 新增作者
+                            </button>
+                          </div>
+                        )}
+                        <Input
+                          label="姓名"
+                          placeholder="作者姓名"
+                          value={authorForm.name}
+                          onValueChange={(v) => setAuthorForm(prev => ({ ...prev, name: v }))}
+                          size="sm"
+                          variant="bordered"
+                        />
+                        <Input
+                          label="单位"
+                          placeholder="所属机构/学校"
+                          value={authorForm.affiliation}
+                          onValueChange={(v) => setAuthorForm(prev => ({ ...prev, affiliation: v }))}
+                          size="sm"
+                          variant="bordered"
+                        />
+                        <Input
+                          label="邮箱"
+                          type="email"
+                          placeholder="example@university.edu"
+                          value={authorForm.email}
+                          onValueChange={(v) => setAuthorForm(prev => ({ ...prev, email: v }))}
+                          size="sm"
+                          variant="bordered"
+                        />
+                      </motion.div>
+                      <motion.div
+                        layout="position"
+                        transition={{ duration: 0.18, ease: 'linear' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 14, borderTop: '1px solid var(--border-color)' }}
+                      >
+                        {editingAuthor && (
+                          <Button
+                            color="danger"
+                            variant="light"
+                            size="sm"
+                            onPress={() => {
+                              handleDeleteAuthor(editingAuthor.id)
+                              setIsAuthorPopoverOpen(false)
+                            }}
+                          >
+                            删除
+                          </Button>
+                        )}
+                        <div style={{ flex: 1 }} />
+                        <Button variant="light" size="sm" onPress={() => setIsAuthorPopoverOpen(false)}>取消</Button>
+                        <Button color="primary" size="sm" onPress={handleSaveAuthor}>保存</Button>
+                      </motion.div>
+                    </motion.div>
                   )}
-                </div>
+                </AnimatePresence>
               </div>
             </div>
 
@@ -1935,57 +2110,6 @@ export function EditorPageContent({ docId }: EditorPageProps) {
 
       {/* Right Icon Sidebar - Fixed */}
       <RightSidebar documentId={docId} />
-
-      {/* 作者编辑弹窗 */}
-      <Modal isOpen={isAuthorModalOpen} onClose={onAuthorModalClose} size="sm">
-        <ModalContent>
-          <ModalHeader>{editingAuthor ? '编辑作者' : '添加作者'}</ModalHeader>
-          <ModalBody>
-            <Input
-              label="姓名"
-              placeholder="作者姓名"
-              value={authorForm.name}
-              onValueChange={(v) => setAuthorForm(prev => ({ ...prev, name: v }))}
-              size="sm"
-              variant="bordered"
-            />
-            <Input
-              label="单位"
-              placeholder="所属机构/学校"
-              value={authorForm.affiliation}
-              onValueChange={(v) => setAuthorForm(prev => ({ ...prev, affiliation: v }))}
-              size="sm"
-              variant="bordered"
-            />
-            <Input
-              label="邮箱"
-              type="email"
-              placeholder="example@university.edu"
-              value={authorForm.email}
-              onValueChange={(v) => setAuthorForm(prev => ({ ...prev, email: v }))}
-              size="sm"
-              variant="bordered"
-            />
-          </ModalBody>
-          <ModalFooter>
-            {editingAuthor && (
-              <Button
-                color="danger"
-                variant="light"
-                onPress={() => {
-                  handleDeleteAuthor(editingAuthor.id)
-                  onAuthorModalClose()
-                }}
-              >
-                删除
-              </Button>
-            )}
-            <div style={{ flex: 1 }} />
-            <Button variant="light" onPress={onAuthorModalClose}>取消</Button>
-            <Button color="primary" onPress={handleSaveAuthor}>保存</Button>
-          </ModalFooter>
-        </ModalContent>
-      </Modal>
 
       {/* LaTeX 导出语言选择弹窗 */}
       <Modal isOpen={isLatexModalOpen} onClose={onLatexModalClose} size="sm">

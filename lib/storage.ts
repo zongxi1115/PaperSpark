@@ -24,6 +24,7 @@ export function getDocuments(): AppDocument[] {
 export function saveDocuments(docs: AppDocument[]): void {
   if (!isBrowser()) return
   setJSON(DOCUMENTS_KEY, docs)
+  emitStorageEvent('documents-changed')
 }
 
 export function getDocument(id: string): AppDocument | null {
@@ -56,7 +57,12 @@ export function renameDocument(id: string, newTitle: string): void {
   const docs = getDocuments()
   const idx = docs.findIndex(d => d.id === id)
   if (idx >= 0) {
-    docs[idx] = { ...docs[idx], title: newTitle, updatedAt: new Date().toISOString() }
+    docs[idx] = {
+      ...docs[idx],
+      title: newTitle,
+      articleTitle: newTitle,
+      updatedAt: new Date().toISOString(),
+    }
     saveDocuments(docs)
   }
 }

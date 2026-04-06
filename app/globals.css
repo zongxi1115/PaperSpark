@@ -131,6 +131,15 @@ body {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
 
+/* Hide scrollbar utility */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
 /* BlockNote overrides */
 .bn-editor { padding: 0 !important; }
 .bn-container { min-height: 300px; }

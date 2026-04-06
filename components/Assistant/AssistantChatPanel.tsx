@@ -5,6 +5,14 @@ import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Button as UiButton } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+import {
+  Command,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+} from '@/components/ui/command'
 import { ChatContainerRoot, ChatContainerContent, ChatContainerScrollAnchor } from '@/components/prompt-kit/chat-container'
 import { Message, MessageAction, MessageActions, MessageContent } from '@/components/prompt-kit/message'
 import { PromptInput, PromptInputAction, PromptInputActions, PromptInputTextarea } from '@/components/prompt-kit/prompt-input'
@@ -78,6 +86,11 @@ import {
   ChainOfThoughtContent,
   ChainOfThoughtStep,
 } from '@/components/ui/chain-of-thought'
+import {
+  Citation,
+  CitationTrigger,
+  CitationContent,
+} from '@/components/ui/citation'
 
 const ASSISTANT_CHECKPOINTS_KEY = 'assistant_doc_checkpoints'
 
@@ -112,6 +125,66 @@ function saveAssistantCheckpoints(checkpoints: AssistantDocCheckpoint[]): void {
 
 function getAssistantCheckpointById(id: string): AssistantDocCheckpoint | null {
   return getAssistantCheckpoints().find(item => item.id === id) ?? null
+}
+
+type StreamingToken = {
+  value: string
+  isWhitespace: boolean
+}
+
+function tokenizeStreamingText(input: string): StreamingToken[] {
+  if (!input) return []
+
+  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
+    try {
+      const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' })
+      const tokens: StreamingToken[] = []
+      for (const segment of segmenter.segment(input)) {
+        tokens.push({
+          value: segment.segment,
+          isWhitespace: /^\s+$/.test(segment.segment),
+        })
+      }
+      return tokens
+    } catch {
+      // fall through to regex tokenizer
+    }
+  }
+
+  return (
+    input.match(/\s+|[A-Za-z0-9_]+|[\u4e00-\u9fff]|[^\sA-Za-z0-9_\u4e00-\u9fff]/g)?.map(part => ({
+      value: part,
+      isWhitespace: /^\s+$/.test(part),
+    })) ?? []
+  )
+}
+
+function StreamingTokenizedContent({ text }: { text: string }) {
+  const tokens = useMemo(() => tokenizeStreamingText(text), [text])
+
+  if (!text) return null
+
+  return (
+    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+      {tokens.map((token, index) => {
+        if (token.isWhitespace) {
+          return <span key={`ws-${index}`}>{token.value}</span>
+        }
+
+        return (
+          <motion.span
+            key={`tk-${index}`}
+            initial={{ opacity: 0, y: 2, filter: 'blur(8px)' }}
+            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+            style={{ display: 'inline-block', willChange: 'opacity, transform, filter' }}
+          >
+            {token.value}
+          </motion.span>
+        )
+      })}
+    </div>
+  )
 }
 
 export function AssistantChatPanel() {
@@ -199,11 +272,13 @@ export function AssistantChatPanel() {
   //   messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   // }, [currentConversation?.messages])
 
+  const [isComposing, setIsComposing] = useState(false)
+
   const handleInputValueChange = useCallback((nextValue: string) => {
     const normalizedValue = nextValue.trim()
     const isSlashTrigger = normalizedValue === '/' || normalizedValue === '／' || normalizedValue === '、'
 
-    if (!showSlashMenu && isSlashTrigger && normalizedValue.length === 1) {
+    if (!showSlashMenu && isSlashTrigger && normalizedValue.length === 1 && !isComposing) {
       setShowSlashMenu(true)
       setInputValue('')
       return
@@ -223,13 +298,38 @@ export function AssistantChatPanel() {
     }
 
     setInputValue(nextValue)
-  }, [showSlashMenu])
+  }, [showSlashMenu, isComposing])
+
+  // 处理输入法状态
+  const handleCompositionStart = useCallback(() => {
+    setIsComposing(true)
+  }, [])
+
+  const handleCompositionEnd = useCallback((e: React.CompositionEvent<HTMLTextAreaElement>) => {
+    setIsComposing(false)
+    // 中文输入法输入完成后检查是否为 / 触发
+    const value = e.data || ''
+    if (value === '/' || value === '／' || value === '、') {
+      if (!showSlashMenu && inputValue.trim().length === 0) {
+        setShowSlashMenu(true)
+        setInputValue('')
+        return
+      }
+    }
+    // 也检查当前输入框的值
+    const textarea = e.currentTarget
+    if (textarea.value.trim() === '/' && !showSlashMenu) {
+      setShowSlashMenu(true)
+      setInputValue('')
+    }
+  }, [showSlashMenu, inputValue])
 
   // 处理输入框按键
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    const isSlashTrigger = e.key === '/' || e.key === '／' || e.key === '、'
+    // 使用 e.key 和 e.which 双重检测，兼容中文输入法
+    const isSlashKey = e.key === '/' || e.key === '／' || e.key === '、' || e.which === 191 || e.keyCode === 191
 
-    if (isSlashTrigger && !showSlashMenu && inputValue.trim().length === 0) {
+    if (isSlashKey && !showSlashMenu && inputValue.trim().length === 0 && !isComposing) {
       e.preventDefault()
       setShowSlashMenu(true)
       return
@@ -1100,7 +1200,69 @@ export function AssistantChatPanel() {
     )
   }
 
-  // 复制内容
+  // 解析消息内容中的 <cite:N> 标记并渲染为 Citation 组件
+  const renderMessageWithCitations = useCallback((content: string, citations: AssistantCitation[] | undefined) => {
+    if (!citations || citations.length === 0) {
+      return content
+    }
+
+    const citeRegex = /<cite:(\d+)>/g
+    const parts: React.ReactNode[] = []
+    let lastIndex = 0
+    let match
+    let citeIndex = 0
+
+    while ((match = citeRegex.exec(content)) !== null) {
+      // Add text before the cite tag
+      if (match.index > lastIndex) {
+        parts.push(content.slice(lastIndex, match.index))
+      }
+
+      const citeNum = parseInt(match[1], 10)
+      const citation = citations[citeNum - 1]
+
+      if (citation) {
+        parts.push(
+          <Citation
+            key={`cite-${citeIndex++}`}
+            title={citation.title}
+            sourceKind={citation.sourceKind}
+            pageNum={citation.pageNum}
+            year={citation.year}
+            journal={citation.journal}
+            authors={citation.authors}
+            excerpt={citation.excerpt}
+            index={citeNum}
+          >
+            <CitationTrigger />
+            <CitationContent />
+          </Citation>
+        )
+      } else {
+        // If citation not found, render a fallback badge
+        parts.push(
+          <span key={`cite-fallback-${citeIndex++}`} className="inline-flex h-5 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-medium text-muted-foreground tabular-nums">
+            {citeNum}
+          </span>
+        )
+      }
+
+      lastIndex = match.index + match[0].length
+    }
+
+    // Add remaining text
+    if (lastIndex < content.length) {
+      parts.push(content.slice(lastIndex))
+    }
+
+    return parts.length > 0 ? parts : content
+  }, [])
+
+  // 从内容中移除 <cite:N> 标记（用于 ReactMarkdown 渲染）
+  const stripCitationsFromContent = useCallback((content: string) => {
+    return content.replace(/<cite:\d+>/g, '')
+  }, [])
+
   const handleCopy = async (content: string) => {
     try {
       await navigator.clipboard.writeText(content)
@@ -2067,10 +2229,14 @@ export function AssistantChatPanel() {
                   )}
                   {message.role === 'assistant' ? (
                     <>
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          code({ node, className, children, ...props }: any) {
+                      {idx === messages.length - 1 && isLoading ? (
+                        <StreamingTokenizedContent text={removeToolCallsFromContent(stripCitationsFromContent(message.content))} />
+                      ) : (
+                        <>
+                          <ReactMarkdown
+                            remarkPlugins={[remarkGfm]}
+                            components={{
+                            code({ node, className, children, ...props }: any) {
                             const codeContent = String(children).replace(/\n$/, '')
                             const isBlock = node?.position?.start?.line !== node?.position?.end?.line || codeContent.includes('\n')
                             const lang = /language-(\w+)/.exec(className || '')?.[1]
@@ -2460,10 +2626,33 @@ export function AssistantChatPanel() {
                               </div>
                             )
                           },
-                        }}
-                      >
-                        {removeToolCallsFromContent(message.content)}
-                      </ReactMarkdown>
+                          }}
+                        >
+                          {removeToolCallsFromContent(stripCitationsFromContent(message.content))}
+                        </ReactMarkdown>
+                        {/* 行内引用徽章 */}
+                        {message.citations && message.citations.length > 0 && (
+                          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                            {message.citations.map((citation, i) => (
+                              <Citation
+                                key={citation.id}
+                                title={citation.title}
+                                sourceKind={citation.sourceKind}
+                                pageNum={citation.pageNum}
+                                year={citation.year}
+                                journal={citation.journal}
+                                authors={citation.authors}
+                                excerpt={citation.excerpt}
+                                index={i + 1}
+                              >
+                                <CitationTrigger />
+                                <CitationContent />
+                              </Citation>
+                            ))}
+                          </div>
+                        )}
+                        </>
+                      )}
                       {/* Render simplified tool calls (::insert, ::delete, ::update) - 过滤掉工具调用格式 */}
                       {(() => {
                         const isStreamingMessage = idx === messages.length - 1 && isLoading
@@ -2665,23 +2854,6 @@ export function AssistantChatPanel() {
                   )}
                 </MessageContent>
 
-                {message.role === 'assistant' && message.citations && message.citations.length > 0 && (
-                  <div style={{ display: 'grid', gap: 6, marginTop: 4, fontSize: 11, color: 'var(--text-muted)' }}>
-                    {message.citations.map(citation => (
-                      <div key={citation.id} style={{ lineHeight: 1.6 }}>
-                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{citation.id}</span>
-                        {' · '}
-                        <span>{citation.title}</span>
-                        {citation.sourceKind === 'fulltext'
-                          ? ` · 精读RAG${citation.pageNum ? ` · 第${citation.pageNum}页` : ''}`
-                          : citation.sourceKind === 'asset'
-                            ? ' · 资产库全文'
-                            : ' · 概要'}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
                 {/* 操作按钮 */}
                 <MessageActions
                   className={message.role === 'assistant'
@@ -2819,103 +2991,29 @@ export function AssistantChatPanel() {
             position: 'relative',
           }}>
             {showSlashMenu && (
-              <div style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 'calc(100% + 8px)',
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 8,
-                boxShadow: '0 12px 24px rgba(0, 0, 0, 0.12)',
-                padding: 6,
-                display: 'grid',
-                gap: 6,
-                zIndex: 30,
-              }}>
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '2px 6px' }}>快捷引用</div>
-                <button
-                  type="button"
-                  onClick={() => handleSlashAction('command-knowledge')}
-                  style={{
-                    textAlign: 'left',
-                    padding: '8px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    fontSize: 12,
-                    color: 'var(--text-primary)',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-secondary)' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  {useKnowledge ? '关闭我的知识库检索' : '引用我的知识库'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleSlashAction('command-assets')}
-                  style={{
-                    textAlign: 'left',
-                    padding: '8px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    fontSize: 12,
-                    color: 'var(--text-primary)',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-secondary)' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  {useAssets ? '关闭我的资产库引用' : '引用我的资产库'}
-                </button>
-
-                <div style={{ fontSize: 11, color: 'var(--text-muted)', padding: '2px 6px', borderTop: '1px solid var(--border-color)', marginTop: 2 }}>使用智能体</div>
-                <button
-                  type="button"
-                  onClick={() => handleSlashAction('agent:none')}
-                  style={{
-                    textAlign: 'left',
-                    padding: '8px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
-                    fontSize: 12,
-                    color: 'var(--text-primary)',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-secondary)' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  不使用智能体
-                </button>
-
-                {agents.map(agent => (
-                  <button
-                    key={agent.id}
-                    type="button"
-                    onClick={() => handleSlashAction(`agent:${agent.id}`)}
-                    style={{
-                      textAlign: 'left',
-                      padding: '8px 10px',
-                      borderRadius: 6,
-                      border: 'none',
-                      background: 'transparent',
-                      cursor: 'pointer',
-                      fontSize: 12,
-                      color: 'var(--text-primary)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-secondary)' }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                  >
-                    {agent.title}
-                  </button>
-                ))}
-              </div>
+              <Command className="absolute left-0 right-0 bottom-[calc(100%+8px)] z-30 rounded border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg" style={{ padding: 0 }}>
+                <CommandList>
+                  <CommandGroup heading="快捷引用">
+                    <CommandItem onSelect={() => handleSlashAction('command-knowledge')}>
+                      {useKnowledge ? '关闭我的知识库检索' : '引用我的知识库'}
+                    </CommandItem>
+                    <CommandItem onSelect={() => handleSlashAction('command-assets')}>
+                      {useAssets ? '关闭我的资产库引用' : '引用我的资产库'}
+                    </CommandItem>
+                  </CommandGroup>
+                  <CommandSeparator />
+                  <CommandGroup heading="使用智能体">
+                    <CommandItem onSelect={() => handleSlashAction('agent:none')}>
+                      不使用智能体
+                    </CommandItem>
+                    {agents.map(agent => (
+                      <CommandItem key={agent.id} onSelect={() => handleSlashAction(`agent:${agent.id}`)}>
+                        {agent.title}
+                      </CommandItem>
+                    ))}
+                  </CommandGroup>
+                </CommandList>
+              </Command>
             )}
 
             <PromptInput
@@ -2934,7 +3032,7 @@ export function AssistantChatPanel() {
                 display: 'flex',
                 flexWrap: 'wrap',
                 gap: 6,
-                padding: selectedAgent || useKnowledge || useAssets ? '2px 6px 4px' : '0',
+                padding: selectedAgent || useKnowledge ? '2px 6px 4px' : '0',
               }}>
                 {selectedAgent && (
                   <div style={{
@@ -2984,33 +3082,19 @@ export function AssistantChatPanel() {
                     <span>知识库检索</span>
                   </div>
                 )}
-
-                {useAssets && (
-                  <div style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    background: 'rgba(16, 185, 129, 0.12)',
-                    border: '1px solid rgba(16, 185, 129, 0.25)',
-                    borderRadius: 999,
-                    padding: '2px 8px',
-                    fontSize: 11,
-                    color: 'var(--text-primary)',
-                  }}>
-                    <span>资产库引用</span>
-                  </div>
-                )}
               </div>
 
               <PromptInputTextarea
                 onKeyDown={handleKeyDown}
+                onCompositionStart={handleCompositionStart}
+                onCompositionEnd={handleCompositionEnd}
                 placeholder={selectedAgent ? '继续输入消息，按 / 切换智能体或用 @ 引用来源…' : '输入消息，按 / 使用智能体、知识库、资产库…'}
                 disabled={isLoading}
                 className="min-h-[44px] max-h-[180px] px-4 pt-3 text-base leading-[1.35] text-[var(--text-primary)]"
               />
 
               <PromptInputActions className="mt-5 flex w-full items-center justify-between gap-2 px-3 pb-3">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-nowrap overflow-x-auto scrollbar-hide">
                   <PromptInputAction tooltip={showSlashMenu ? '关闭命令菜单' : '打开命令菜单'}>
                     <UiButton
                       type="button"
@@ -3032,16 +3116,38 @@ export function AssistantChatPanel() {
                     <UiButton
                       type="button"
                       variant={useKnowledge ? 'secondary' : 'outline'}
-                      size="icon"
-                      className="rounded-full"
+                      size={useKnowledge ? 'default' : 'icon'}
+                      className={cn("rounded-full transition-all duration-200", useKnowledge && "gap-1.5 px-3")}
                       onClick={() => setUseKnowledge(current => !current)}
                       disabled={knowledgeBusy}
                       aria-label="切换知识库检索"
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <motion.svg
+                        layout
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+                      >
                         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
                         <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
-                      </svg>
+                      </motion.svg>
+                      <AnimatePresence>
+                        {useKnowledge && (
+                          <motion.span
+                            initial={{ width: 0, opacity: 0 }}
+                            animate={{ width: 'auto', opacity: 1 }}
+                            exit={{ width: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="overflow-hidden whitespace-nowrap"
+                          >
+                            知识库检索
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
                     </UiButton>
                   </PromptInputAction>
 
@@ -3049,16 +3155,45 @@ export function AssistantChatPanel() {
                     <UiButton
                       type="button"
                       variant={useAssets ? 'secondary' : 'outline'}
-                      size="icon"
-                      className="rounded-full"
+                      size={useAssets ? 'default' : 'icon'}
+                      className={cn("rounded-full transition-all duration-200", useAssets && "gap-1.5 px-3")}
                       onClick={() => setUseAssets(current => !current)}
                       aria-label="切换资产库引用"
                     >
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <motion.svg
+                        layout
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+                      >
                         <path d="M3 7h18" />
                         <path d="M3 12h18" />
                         <path d="M3 17h18" />
-                      </svg>
+                      </motion.svg>
+                      <AnimatePresence>
+                        {useAssets && (
+                          <motion.span
+                            initial={{ width: 0, opacity: 0 }}
+                            animate={{ width: 'auto', opacity: 1 }}
+                            exit={{ width: 0, opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="overflow-hidden whitespace-nowrap"
+                            style={{ color: '#10b981' }}
+                          >
+                            资产库引用
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                      {useAssets && (
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ opacity: 0.5 }}>
+                          <line x1="18" y1="6" x2="6" y2="18" />
+                          <line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      )}
                     </UiButton>
                   </PromptInputAction>
 
@@ -3067,15 +3202,37 @@ export function AssistantChatPanel() {
                       <UiButton
                         type="button"
                         variant={useDocEditing ? 'secondary' : 'outline'}
-                        size="icon"
-                        className="rounded-full"
+                        size={useDocEditing ? 'default' : 'icon'}
+                        className={cn("rounded-full transition-all duration-200", useDocEditing && "gap-1.5 px-3")}
                         onClick={() => setUseDocEditing(current => !current)}
                         aria-label="切换文档编辑模式"
                       >
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <motion.svg
+                          layout
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          transition={{ duration: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+                        >
                           <path d="M12 20h9" />
                           <path d="M16.5 3.5a2.12 2.12 0 1 1 3 3L7 19l-4 1 1-4Z" />
-                        </svg>
+                        </motion.svg>
+                        <AnimatePresence>
+                          {useDocEditing && (
+                            <motion.span
+                              initial={{ width: 0, opacity: 0 }}
+                              animate={{ width: 'auto', opacity: 1 }}
+                              exit={{ width: 0, opacity: 0 }}
+                              transition={{ duration: 0.2 }}
+                              className="overflow-hidden whitespace-nowrap"
+                            >
+                              文档编辑
+                            </motion.span>
+                          )}
+                        </AnimatePresence>
                       </UiButton>
                     </PromptInputAction>
                   )}
@@ -3139,61 +3296,22 @@ export function AssistantChatPanel() {
             </PromptInput>
 
             {showMentionMenu && mentionCandidates.length > 0 && (
-              <div style={{
-                position: 'absolute',
-                left: 0,
-                right: 0,
-                bottom: 'calc(100% + 8px)',
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border-color)',
-                borderRadius: 8,
-                boxShadow: '0 12px 24px rgba(0, 0, 0, 0.12)',
-                padding: 6,
-                display: 'grid',
-                gap: 4,
-                zIndex: 20,
-                maxHeight: 280,
-                overflowY: 'auto',
-              }}>
-                {mentionCandidates.map(candidate => (
-                  <button
-                    key={`${candidate.type}:${candidate.id}`}
-                    type="button"
-                    onClick={() => handleMentionSelect(candidate)}
-                    style={{
-                      textAlign: 'left',
-                      padding: '8px 10px',
-                      borderRadius: 6,
-                      border: 'none',
-                      background: 'transparent',
-                      cursor: 'pointer',
-                      display: 'grid',
-                      gap: 2,
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = 'var(--bg-secondary)'
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = 'transparent'
-                    }}
-                  >
-                    <span style={{ fontSize: 12, color: 'var(--text-primary)' }}>
-                      {candidate.title}
-                    </span>
-                    <span style={{
-                      fontSize: 11,
-                      color: 'var(--text-muted)',
-                      display: '-webkit-box',
-                      WebkitLineClamp: 3,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                    }}>
-                      {candidate.type === 'knowledge' ? '知识库' : '资产库'} · {candidate.subtitle}
-                    </span>
-                  </button>
-                ))}
-              </div>
+              <Command className="absolute left-0 right-0 bottom-[calc(100%+8px)] z-20 rounded-lg border border-[var(--border-color)] bg-[var(--bg-primary)] shadow-lg" style={{ padding: 0, maxHeight: 280 }}>
+                <CommandList>
+                  {mentionCandidates.map(candidate => (
+                    <CommandItem key={`${candidate.type}:${candidate.id}`} onSelect={() => handleMentionSelect(candidate)}>
+                      <div className="grid gap-0.5">
+                        <span className="text-sm text-[var(--text-primary)]">
+                          {candidate.title}
+                        </span>
+                        <span className="text-xs text-[var(--text-muted)] line-clamp-2">
+                          {candidate.type === 'knowledge' ? '知识库' : '资产库'} · {candidate.subtitle}
+                        </span>
+                      </div>
+                    </CommandItem>
+                  ))}
+                </CommandList>
+              </Command>
             )}
           </div>
 

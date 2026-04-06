@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type React from 'react'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { addToast } from '@heroui/react'
+import { cn } from '@/lib/utils'
 import {
   addKnowledgeItem,
   generateId,
@@ -27,6 +28,7 @@ import type {
 import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
 import { AnimatedShinyText } from '@/components/ui/AnimatedShinyText'
 import { OdometerNumber } from './OdometerNumber'
+import { AnimatedStepper, CompactProgressStrip, type Step as StepperStep } from '@/components/ui/animated-stepper'
 
 type AnswerState = Record<string, { value: string; customText: string }>
 
@@ -479,12 +481,12 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
 
         {results && (
           <section className="grid gap-4">
-            <div className="flex flex-col gap-4 rounded-xl border border-blue-100 bg-blue-50/30 p-6 shadow-[inset_0_0.5px_0_rgba(255,255,255,0.5)]">
-              <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-blue-600">
+            <div className="flex flex-col gap-4 rounded-xl border border-blue-100 bg-blue-50/30 p-6 shadow-[inset_0_0.5px_0_rgba(255,255,255,0.5)] dark:border-blue-900 dark:bg-blue-950/30 dark:shadow-[inset_0_0.5px_0_rgba(255,255,255,0.05)]">
+              <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-blue-600 dark:text-blue-400">
                 <InsightIcon />
                 <span>检索结论</span>
               </div>
-              <p className="leading-relaxed text-gray-800">{results.summary}</p>
+              <p className="leading-relaxed text-gray-800 dark:text-gray-200">{results.summary}</p>
               <div className="mt-2 flex flex-wrap gap-2">
                 <MetricPill label="候选文献" value={String(results.totalCandidates)} />
                 <MetricPill label="去重" value={String(results.duplicatesRemoved)} />
@@ -494,7 +496,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
             </div>
 
             {results.papers.length === 0 && (
-              <div className="rounded-xl border border-gray-200 bg-white p-5 text-sm leading-relaxed text-gray-600 shadow-sm">
+              <div className="rounded-xl border border-gray-200 bg-white p-5 text-sm leading-relaxed text-gray-600 shadow-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300">
                 当前仍未形成可推荐文献列表。你可以进一步补充研究对象、方法、应用场景或时间窗口，让下一轮检索更聚焦。
               </div>
             )}
@@ -517,7 +519,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
         )}
 
         {error && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-relaxed text-red-600">
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm leading-relaxed text-red-600 dark:border-red-800 dark:bg-red-950/50 dark:text-red-400">
             {error}
           </div>
         )}
@@ -526,7 +528,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
   )
 
   const composer = (
-    <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white to-transparent ${isFullscreenLayout ? 'px-6 pb-6 pt-20' : 'px-4 pb-4 pt-16'} pointer-events-none`}>
+    <div className={`absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white to-transparent dark:from-gray-950 dark:via-gray-950 ${isFullscreenLayout ? 'px-6 pb-6 pt-20' : 'px-4 pb-4 pt-16'} pointer-events-none`}>
       <div className={`relative mx-auto w-full ${isFullscreenLayout ? 'max-w-3xl' : 'max-w-full'} pointer-events-auto`}>
         <AnimatePresence>
           {questions.length > 0 && (
@@ -555,7 +557,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
             if (isLoading) return
             void startSearch()
           }}
-          className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-[0_2px_10px_rgb(0,0,0,0.04)] transition-shadow focus-within:border-gray-300 focus-within:shadow-[0_4px_20px_rgb(0,0,0,0.08)]"
+          className="flex items-center gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-[0_2px_10px_rgb(0,0,0,0.04)] transition-shadow focus-within:border-gray-300 focus-within:shadow-[0_4px_20px_rgb(0,0,0,0.08)] dark:border-gray-700 dark:bg-gray-900 dark:shadow-[0_2px_10px_rgb(0,0,0,0.2)] dark:focus-within:border-gray-600 dark:focus-within:shadow-[0_4px_20px_rgb(0,0,0,0.3)]"
         >
           <div className="flex flex-1 items-center px-4">
             <input
@@ -564,7 +566,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
               onChange={event => setInputValue(event.target.value)}
               onKeyDown={handleComposerKeyDown}
               placeholder={questions.length > 0 ? '补充限定条件...' : '输入研究问题，如：RAG 评测框架相关论文'}
-              className="w-full border-none bg-transparent text-[15px] text-gray-900 outline-none placeholder:text-gray-400"
+              className="w-full border-none bg-transparent text-[15px] text-gray-900 outline-none placeholder:text-gray-400 dark:text-white dark:placeholder:text-gray-500"
             />
           </div>
 
@@ -575,7 +577,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
                 exit={{ opacity: 0, y: -5 }}
-                className="text-xs font-medium text-gray-400"
+                className="text-xs font-medium text-gray-400 dark:text-gray-500"
               >
                 {questions.length > 0 ? '等待补充说明' : isLoading ? '正在检索中...' : '等待输入'}
               </motion.span>
@@ -586,7 +588,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
                 <button
                   type="button"
                   onClick={stopSearch}
-                  className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-100 text-gray-600 transition-colors hover:bg-gray-200"
+                  className="flex h-8 w-8 items-center justify-center rounded-xl bg-gray-100 text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
                   aria-label="停止检索"
                 >
                   <StopIcon />
@@ -595,7 +597,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
                   <button
                     type="button"
                     onClick={() => void interruptAndRestart()}
-                    className="rounded-xl bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200"
+                    className="rounded-xl bg-gray-100 px-3 py-2 text-xs font-medium text-gray-600 transition-colors hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
                   >
                     打断并重检
                   </button>
@@ -605,7 +607,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
               <button
                 type="submit"
                 disabled={!inputValue.trim() || (questions.length > 0 && !allQuestionsAnswered)}
-                className="flex items-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+                className="flex items-center gap-2 rounded-xl bg-black px-4 py-2 text-sm font-medium text-white transition-all duration-200 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-black dark:hover:bg-gray-200"
               >
                 发送
                 <SendIcon />
@@ -618,21 +620,18 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
   )
 
   const compactHeader = (
-    <div className="shrink-0 border-b border-gray-200 bg-white p-4">
+    <div className="shrink-0 border-b border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-base font-bold tracking-tight text-black">论文智能检索</h1>
+          <h1 className="text-base font-bold tracking-tight text-black dark:text-white">论文智能检索</h1>
         </div>
-        <div className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-600 shadow-sm">
-          <span className={`h-1.5 w-1.5 rounded-full ${isLoading ? 'bg-blue-500' : results ? 'bg-green-500' : 'bg-gray-400'}`} />
-          {modelLabel || '未配置大模型'}
-        </div>
+        <ModelBadge modelLabel={modelLabel} isLoading={isLoading} hasResults={!!results} />
       </div>
 
       <div className="mt-4 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">检索进度</span>
-          <span className="text-xs text-gray-500">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400 dark:text-gray-500">检索进度</span>
+          <span className="text-xs text-gray-500 dark:text-gray-400">
             {questions.length > 0
               ? '等待补充条件'
               : activeStep
@@ -653,17 +652,14 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
   )
 
   const fullscreenSidebar = (
-    <aside className="flex w-64 shrink-0 flex-col gap-8 border-r border-gray-200 bg-gray-50/50 p-6">
+    <aside className="flex w-64 shrink-0 flex-col gap-8 border-r border-gray-200 bg-gray-50/50 p-6 dark:border-gray-800 dark:bg-gray-900/50">
       <div className="flex flex-col gap-2">
-        <h1 className="text-lg font-bold tracking-tight text-black">论文智能检索</h1>
-        <div className="mt-2 inline-flex w-fit items-center gap-1.5 rounded-md border border-gray-200 bg-white px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-gray-600 shadow-sm">
-          <span className={`h-1.5 w-1.5 rounded-full ${isLoading ? 'bg-blue-500' : results ? 'bg-green-500' : 'bg-gray-400'}`} />
-          {modelLabel || '未配置大模型'}
-        </div>
+        <h1 className="text-lg font-bold tracking-tight text-black dark:text-white">论文智能检索</h1>
+        <ModelBadge modelLabel={modelLabel} isLoading={isLoading} hasResults={!!results} />
       </div>
 
       <div className="flex flex-col gap-4">
-        <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-400">检索进度</h2>
+        <h2 className="text-xs font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">检索进度</h2>
         <StepProgressRail steps={steps} reduceMotion={reduceMotion} />
         <div className="flex flex-wrap gap-2">
           <MetricPill label="完成" value={`${completedStepCount}/${steps.length}`} />
@@ -676,7 +672,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
 
   if (isFullscreenLayout) {
     return (
-      <div className="flex h-full bg-white text-black font-sans selection:bg-purple-200 selection:text-purple-900">
+      <div className="flex h-full bg-white text-black font-sans selection:bg-purple-200 selection:text-purple-900 dark:bg-gray-950 dark:text-white dark:selection:bg-purple-900 dark:selection:text-purple-100">
         {fullscreenSidebar}
         <main className="relative flex min-w-0 flex-1 overflow-hidden">
           {feed}
@@ -687,7 +683,7 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
   }
 
   return (
-    <div className="relative flex h-full flex-col bg-white text-black font-sans selection:bg-purple-200 selection:text-purple-900">
+    <div className="relative flex h-full flex-col bg-white text-black font-sans selection:bg-purple-200 selection:text-purple-900 dark:bg-gray-950 dark:text-white dark:selection:bg-purple-900 dark:selection:text-purple-100">
       {compactHeader}
       {feed}
       {composer}
@@ -697,128 +693,39 @@ export function LiteratureSearchPanel({ layoutMode = 'sidebar' }: LiteratureSear
 
 function StepProgressRail({
   steps,
-  reduceMotion,
 }: {
   steps: LiteratureSearchStep[]
-  reduceMotion: boolean | null
+  reduceMotion?: boolean | null
 }) {
-  return (
-    <div className="relative flex flex-col gap-3">
-      <div className="absolute bottom-2 left-[7px] top-2 w-px bg-gray-200" />
-      {steps.map(step => {
-        const isCompleted = step.status === 'completed'
-        const isInProgress = step.status === 'in_progress'
-        const isError = step.status === 'error'
+  const stepperSteps: StepperStep[] = steps.map(step => ({
+    id: step.id,
+    label: step.label,
+    status: step.status,
+  }))
 
-        return (
-          <div key={step.id} className="relative z-10 flex items-center gap-3">
-            <div
-              className={[
-                'flex h-3.5 w-3.5 items-center justify-center rounded-full border-2 bg-white transition-colors duration-300',
-                isCompleted ? 'border-black bg-black' : '',
-                isInProgress ? 'border-blue-500' : '',
-                !isCompleted && !isInProgress && !isError ? 'border-gray-200' : '',
-                isError ? 'border-red-400' : '',
-              ].join(' ')}
-            >
-              {isCompleted ? (
-                <CheckIcon size={8} className="text-white" />
-              ) : isInProgress ? (
-                <motion.span
-                  className="h-2 w-2 rounded-full border-2 border-blue-500 border-t-transparent"
-                  animate={!reduceMotion ? { rotate: 360 } : undefined}
-                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-                />
-              ) : (
-                <span className={`h-1.5 w-1.5 rounded-full ${isError ? 'bg-red-400' : 'bg-transparent'}`} />
-              )}
-            </div>
-            <span
-              className={[
-                'text-sm transition-colors duration-300',
-                isCompleted ? 'text-black' : '',
-                isInProgress ? 'font-medium text-blue-600' : '',
-                !isCompleted && !isInProgress && !isError ? 'text-gray-400' : '',
-                isError ? 'text-red-500' : '',
-              ].join(' ')}
-            >
-              {step.label}
-            </span>
-          </div>
-        )
-      })}
-    </div>
+  return (
+    <AnimatedStepper
+      steps={stepperSteps}
+      variant="vertical"
+      showProgressLine={true}
+    />
   )
 }
 
 function HorizontalProgressStrip({
   steps,
-  reduceMotion,
 }: {
   steps: LiteratureSearchStep[]
-  reduceMotion: boolean | null
+  reduceMotion?: boolean | null
 }) {
+  const stepperSteps: StepperStep[] = steps.map(step => ({
+    id: step.id,
+    label: step.label,
+    status: step.status,
+  }))
+
   return (
-    <div className="flex flex-col gap-2">
-      <div className="flex items-center justify-between gap-2">
-        {steps.map(step => {
-          const isCompleted = step.status === 'completed'
-          const isInProgress = step.status === 'in_progress'
-          const isError = step.status === 'error'
-
-          return (
-            <div
-              key={step.id}
-              className={[
-                'flex min-w-0 flex-1 items-center gap-1.5 text-[10px] font-semibold',
-                isCompleted ? 'text-black' : '',
-                isInProgress ? 'text-blue-600' : '',
-                isError ? 'text-red-500' : '',
-                !isCompleted && !isInProgress && !isError ? 'text-gray-400' : '',
-              ].join(' ')}
-            >
-              {isCompleted ? (
-                <CheckIcon size={9} />
-              ) : isInProgress ? (
-                <motion.span
-                  className="h-1.5 w-1.5 rounded-full bg-blue-500"
-                  animate={!reduceMotion ? { opacity: [0.4, 1, 0.4] } : undefined}
-                  transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
-                />
-              ) : (
-                <span className={`h-1.5 w-1.5 rounded-full ${isError ? 'bg-red-400' : 'bg-gray-300'}`} />
-              )}
-              <span className="truncate">{step.label}</span>
-            </div>
-          )
-        })}
-      </div>
-
-      <div className="flex h-1.5 overflow-hidden rounded-full bg-gray-200">
-        {steps.map((step, index) => {
-          const isCompleted = step.status === 'completed'
-          const isInProgress = step.status === 'in_progress'
-          const isError = step.status === 'error'
-          return (
-            <motion.div
-              key={step.id}
-              initial={false}
-              animate={{
-                backgroundColor: isCompleted
-                  ? '#111827'
-                  : isInProgress
-                    ? '#2563eb'
-                    : isError
-                      ? '#ef4444'
-                      : 'transparent',
-              }}
-              transition={{ duration: 0.25 }}
-              className={index < steps.length - 1 ? 'h-full flex-1 border-r border-gray-200/60' : 'h-full flex-1'}
-            />
-          )
-        })}
-      </div>
-    </div>
+    <CompactProgressStrip steps={stepperSteps} />
   )
 }
 
@@ -917,198 +824,377 @@ function ProcessLogCard({
   isLoading: boolean
   reduceMotion: boolean | null
 }) {
-  const toolItems = toolCalls.map(call => ({
-    id: `tool-${call.id}`,
-    stage: '工具调用',
-    text: '',
-    label: formatToolLabel(call.name),
-    details: parseToolInputSummary(call.name, call.inputSummary),
-    resultCount: call.resultCount,
-    status: call.status,
-    note: call.note,
-    isLatest: false,
-    type: 'tool' as const,
-  }))
+  // Build unified timeline - merge all events in their natural order
+  type TimelineItem =
+    | { type: 'thought'; data: ThoughtBubble }
+    | { type: 'tool'; data: ToolCallEvent }
+    | { type: 'queryGroup'; data: QueryExpansionGroup }
 
-  const thoughtItems = thinking.map((bubble, index) => ({
-    id: bubble.id,
-    stage: steps.find(step => step.id === bubble.stage)?.label || bubble.stage,
-    text: bubble.text,
-    details: [] as string[],
-    isLatest: index === thinking.length - 1,
-    type: 'thought' as const,
-  }))
+  const timeline = useMemo(() => {
+    const items: TimelineItem[] = []
+    
+    // Add all items in their natural order (oldest first, newest last)
+    // Thoughts are added first, then we interleave tool calls
+    for (const thought of thinking) {
+      items.push({ type: 'thought', data: thought })
+    }
+    for (const tool of toolCalls) {
+      items.push({ type: 'tool', data: tool })
+    }
+    for (const group of queryGroups) {
+      items.push({ type: 'queryGroup', data: group })
+    }
 
-  const items = [...thoughtItems, ...toolItems]
-  const processEventCount = items.length + queryGroups.length + (results ? 1 : 0)
+    return items
+  }, [thinking, toolCalls, queryGroups])
+
+  const runningTools = toolCalls.filter(call => call.status === 'running')
+  const processEventCount = timeline.length + (results ? 1 : 0)
+
+  // Get icon for timeline item type
+  const getTimelineIcon = (item: TimelineItem) => {
+    switch (item.type) {
+      case 'thought':
+        return <BrainIcon />
+      case 'tool':
+        return <ToolTypeIcon type={item.data.name} />
+      case 'queryGroup':
+        return <BranchIcon />
+    }
+  }
+
+  // Get label for timeline item
+  const getTimelineLabel = (item: TimelineItem) => {
+    switch (item.type) {
+      case 'thought': {
+        const stageLabel = steps.find(s => s.id === item.data.stage)?.label || item.data.stage
+        return `💭 ${stageLabel}`
+      }
+      case 'tool':
+        return `⚙️ ${TOOL_DISPLAY_NAMES[item.data.name]}`
+      case 'queryGroup':
+        return `🔍 ${item.data.label}`
+    }
+  }
 
   return (
-    <div className="flex flex-col gap-4 font-sans text-sm">
-      <div className="mb-1 flex items-center justify-between px-1">
-        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-          Process 日志
-        </span>
-        <span className="text-[10px] font-bold uppercase tracking-widest text-gray-400">
-          {processEventCount} 条记录
-        </span>
+    <div className="flex flex-col gap-5 font-sans text-sm">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <motion.div
+            className="flex h-6 w-6 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 text-white"
+            animate={isLoading && !reduceMotion ? { scale: [1, 1.05, 1] } : undefined}
+            transition={{ duration: 1.5, repeat: Infinity, ease: "easeInOut" }}
+          >
+            <FlowIcon />
+          </motion.div>
+          <span className="text-sm font-semibold text-gray-900 dark:text-gray-100">智能检索</span>
+        </div>
+        {processEventCount > 0 && (
+          <span className="rounded-full bg-gray-100 px-2.5 py-1 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+            {processEventCount} 事件
+          </span>
+        )}
       </div>
 
-      {queryGroups.length > 0 && (
-        <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
-          <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-gray-400">
-            <BranchIcon />
-            <span>检索计划</span>
+      {/* Animated Stepper - Top Progress */}
+      <div className="rounded-xl border border-gray-100 bg-gradient-to-b from-gray-50/50 to-white p-4 dark:border-gray-800 dark:from-gray-900/50 dark:to-gray-900">
+        <AnimatedStepper
+          steps={steps.map(s => ({ id: s.id, label: s.label, status: s.status }))}
+          variant="horizontal"
+          showProgressLine={true}
+        />
+      </div>
+
+      {/* Unified Timeline - Using ChainOfThought */}
+      {timeline.length > 0 && (
+        <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+          <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+            <ThinkingIcon />
+            <span>推理过程</span>
+            {runningTools.length > 0 && (
+              <motion.span
+                className="ml-auto flex items-center gap-1 text-blue-500"
+                animate={!reduceMotion ? { opacity: [0.5, 1, 0.5] } : undefined}
+                transition={{ duration: 1.2, repeat: Infinity }}
+              >
+                <LoadingSpinnerIcon />
+                <span className="text-[10px]">执行中</span>
+              </motion.span>
+            )}
           </div>
+          
           <div className="flex flex-col gap-3">
-            {queryGroups.map(group => (
-              <div key={group.id} className="rounded-xl border border-gray-200 bg-white p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold text-black">{group.label}</span>
-                  <span className="text-[11px] text-gray-500">{group.focus}</span>
-                </div>
-                <div className="mt-2 rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 font-mono text-xs leading-relaxed text-gray-700">
-                  {group.query}
-                </div>
-                <div className="mt-3 flex flex-col gap-2">
-                  <KeywordStrip label="扩展词" items={group.synonyms} tone="neutral" />
-                  <KeywordStrip label="相关概念" items={group.relatedConcepts} tone="accent" />
-                  <KeywordStrip label="多语关键词" items={group.multilingualKeywords} tone="neutral" />
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="relative flex flex-col pl-2">
-        <div className="absolute bottom-2 left-[7px] top-2 w-[1px] bg-gray-100" />
-
-        <AnimatePresence mode="popLayout" initial={false}>
-          {items.map(item => (
-            <motion.div
-              key={item.id}
-              layout
-              initial={reduceMotion ? false : { opacity: 0, y: 10 }}
-              animate={reduceMotion ? undefined : { opacity: 1, y: 0 }}
-              exit={reduceMotion ? undefined : { opacity: 0, scale: 0.95 }}
-              transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-              className="relative flex gap-4 pb-6 last:pb-0"
-            >
-              <div className={[
-                'relative z-10 mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border bg-white',
-                item.isLatest ? 'border-blue-500 text-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.3)]' : 'border-gray-200 text-gray-400',
-              ].join(' ')}>
-                {item.type === 'tool' ? <TerminalIcon /> : <InfoDotIcon />}
-              </div>
-
-              <div className="flex min-w-0 flex-col gap-1.5">
-                <div className="flex items-center gap-2">
-                  <span className={[
-                    'text-[10px] font-bold uppercase tracking-wider',
-                    item.isLatest ? 'text-blue-500' : 'text-gray-400',
-                  ].join(' ')}>
-                    {item.stage}
-                  </span>
-                  {item.type === 'tool' && (
-                    <>
-                      <span className={[
-                        'rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-tighter',
-                        item.status === 'running'
-                          ? 'bg-blue-50 text-blue-600'
-                          : item.status === 'error'
-                            ? 'bg-red-50 text-red-500'
-                            : 'bg-gray-100 text-gray-600',
-                      ].join(' ')}>
-                        {item.status === 'running' ? '执行中' : item.status === 'error' ? '失败' : '完成'}
-                      </span>
-                      {typeof item.resultCount === 'number' && (
-                        <span className="inline-flex items-center gap-1 rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] font-medium text-gray-600">
-                          <span>召回</span>
-                          <OdometerNumber value={item.resultCount} className="font-semibold text-gray-900" />
-                        </span>
-                      )}
-                    </>
-                  )}
-                </div>
-
-                <div className={[
-                  'break-words text-sm leading-relaxed',
-                  item.isLatest ? 'font-medium text-black' : 'text-gray-500',
-                  item.type === 'tool' ? 'rounded border border-gray-100 bg-gray-50 p-2 font-mono text-xs' : '',
-                ].join(' ')}>
-                  {item.type === 'tool' ? (
-                    <div className="flex flex-col gap-1.5">
-                      <div className="font-semibold text-gray-800">{item.label}</div>
-                      {item.details && item.details.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {item.details.map(detail => (
-                            <span
-                              key={detail}
-                              className="rounded-full border border-gray-200 bg-white px-2 py-0.5 text-[10px] leading-5 text-gray-600"
-                            >
-                              {detail}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {item.note && (
-                        <div className="text-[11px] leading-relaxed text-gray-500">{item.note}</div>
+            {timeline.map((item, index) => {
+              const isLatest = index === timeline.length - 1 && isLoading
+              
+              return (
+                <motion.div
+                  key={item.type === 'thought' ? item.data.id : item.type === 'tool' ? item.data.id : item.data.id}
+                  initial={reduceMotion ? false : { opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: index * 0.03 }}
+                  className="flex gap-3"
+                >
+                  {/* Timeline connector */}
+                  <div className="flex flex-col items-center">
+                    <div className={cn(
+                      "flex h-6 w-6 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                      item.type === 'thought' && "border-purple-200 bg-purple-50 text-purple-500 dark:border-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+                      item.type === 'tool' && (
+                        item.data.status === 'running' 
+                          ? "border-blue-300 bg-blue-50 text-blue-500 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-400"
+                          : item.data.status === 'error'
+                            ? "border-red-300 bg-red-50 text-red-500 dark:border-red-700 dark:bg-red-900/30 dark:text-red-400"
+                            : "border-green-200 bg-green-50 text-green-500 dark:border-green-800 dark:bg-green-900/30 dark:text-green-400"
+                      ),
+                      item.type === 'queryGroup' && "border-indigo-200 bg-indigo-50 text-indigo-500 dark:border-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400"
+                    )}>
+                      {item.type === 'tool' && item.data.status === 'running' ? (
+                        <motion.span
+                          animate={!reduceMotion ? { rotate: 360 } : undefined}
+                          transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        >
+                          <LoadingSpinnerIcon />
+                        </motion.span>
+                      ) : (
+                        getTimelineIcon(item)
                       )}
                     </div>
-                  ) : (
-                    item.text
-                  )}
-                  {item.isLatest && item.type === 'thought' && isLoading && (
-                    <AnimatedShinyText shimmerWidth={180} style={{ fontSize: 12, marginLeft: 4 }}>
-                      …
-                    </AnimatedShinyText>
-                  )}
-                </div>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-
-      {isLoading && (
-        <div className="flex items-center gap-2 pl-1">
-          <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
-          <AnimatedShinyText shimmerWidth={220} style={{ fontSize: 12 }}>
-            处理中...
-          </AnimatedShinyText>
+                    {index < timeline.length - 1 && (
+                      <div className="w-0.5 flex-1 bg-gradient-to-b from-gray-200 to-gray-100 dark:from-gray-700 dark:to-gray-800" />
+                    )}
+                  </div>
+                  
+                  {/* Content */}
+                  <div className="min-w-0 flex-1 pb-4">
+                    <div className="mb-1 flex items-center gap-2">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                        {getTimelineLabel(item)}
+                      </span>
+                      {item.type === 'tool' && item.data.resultCount !== undefined && (
+                        <span className="rounded-full bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                          {item.data.resultCount} 条
+                        </span>
+                      )}
+                    </div>
+                    
+                    {item.type === 'thought' && (
+                      <div className={cn(
+                        "rounded-lg border px-3 py-2 text-sm leading-relaxed",
+                        isLatest
+                          ? "border-blue-100 bg-blue-50/50 text-gray-800 dark:border-blue-900 dark:bg-blue-900/20 dark:text-gray-200"
+                          : "border-gray-100 bg-gray-50/50 text-gray-600 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-300"
+                      )}>
+                        {item.data.text}
+                        {isLatest && (
+                          <AnimatedShinyText shimmerWidth={120} className="ml-1 inline">
+                            …
+                          </AnimatedShinyText>
+                        )}
+                      </div>
+                    )}
+                    
+                    {item.type === 'tool' && (
+                      <div className={cn(
+                        "rounded-lg border px-3 py-2 text-sm",
+                        item.data.status === 'running'
+                          ? "border-blue-100 bg-blue-50/30 dark:border-blue-900 dark:bg-blue-900/20"
+                          : item.data.status === 'error'
+                            ? "border-red-100 bg-red-50/30 dark:border-red-900 dark:bg-red-900/20"
+                            : "border-gray-100 bg-gray-50/30 dark:border-gray-800 dark:bg-gray-800/30"
+                      )}>
+                        <span className="font-mono text-xs text-gray-600 dark:text-gray-400">
+                          {item.data.inputSummary}
+                        </span>
+                        {item.data.note && (
+                          <p className="mt-1 text-xs text-gray-500 dark:text-gray-500">
+                            {item.data.note}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    
+                    {item.type === 'queryGroup' && (
+                      <div className="rounded-lg border border-gray-100 bg-gray-50/30 p-3 dark:border-gray-800 dark:bg-gray-800/30">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{item.data.focus}</span>
+                        </div>
+                        <div className="mt-2 rounded border border-gray-100 bg-white px-2 py-1.5 font-mono text-xs text-gray-600 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-400">
+                          {item.data.query}
+                        </div>
+                        <div className="mt-2 flex flex-wrap gap-1">
+                          {item.data.synonyms.slice(0, 4).map(syn => (
+                            <span key={syn} className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] text-gray-600 dark:bg-gray-800 dark:text-gray-400">
+                              {syn}
+                            </span>
+                          ))}
+                          {item.data.synonyms.length > 4 && (
+                            <span className="text-[10px] text-gray-400">+{item.data.synonyms.length - 4}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )
+            })}
+          </div>
         </div>
       )}
 
+      {/* Loading indicator */}
+      {isLoading && timeline.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          className="flex items-center justify-center gap-3 rounded-xl border border-blue-100 bg-blue-50/30 p-4 dark:border-blue-900 dark:bg-blue-900/20"
+        >
+          <motion.div
+            animate={!reduceMotion ? { rotate: 360 } : undefined}
+            transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+            className="text-blue-500"
+          >
+            <LoadingSpinnerIcon />
+          </motion.div>
+          <AnimatedShinyText shimmerWidth={180} className="text-sm text-blue-600 dark:text-blue-400">
+            正在初始化检索流程...
+          </AnimatedShinyText>
+        </motion.div>
+      )}
+
+      {/* Results Summary */}
       {results && (
-        <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
-          <div className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-gray-400">
+        <motion.div
+          initial={reduceMotion ? false : { opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="rounded-xl border border-green-100 bg-gradient-to-br from-green-50/50 to-white p-4 shadow-sm dark:border-green-900 dark:from-green-900/20 dark:to-gray-900"
+        >
+          <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-green-600 dark:text-green-400">
             <InsightIcon />
-            <span>结果检阅</span>
+            <span>检索完成</span>
           </div>
           <div className="flex flex-wrap gap-2">
             <MetricPill label="召回候选" value={results.totalCandidates} />
-            <MetricPill label="去重后" value={results.duplicatesRemoved} />
+            <MetricPill label="去重" value={results.duplicatesRemoved} />
             <MetricPill label="最终推荐" value={results.papers.length} tone="accent" />
-            {results.retryCount > 0 && <MetricPill label="结果检阅重检" value={results.retryCount} tone="accent" />}
+            {results.retryCount > 0 && (
+              <MetricPill label="自动重检" value={results.retryCount} tone="accent" />
+            )}
           </div>
-          {(results.retryCount > 0 || results.reviewNotes.length > 0) && (
+          {results.reviewNotes.length > 0 && (
             <div className="mt-3 flex flex-col gap-2">
-              {results.retryCount > 0 && (
-                <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm leading-relaxed text-gray-600">
-                  基于当前结果质量自动追加的补充检索。
-                </div>
-              )}
               {results.reviewNotes.map(note => (
-                <div key={note} className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm leading-relaxed text-gray-600">
+                <div
+                  key={note}
+                  className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm leading-relaxed text-gray-600 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-300"
+                >
                   {note}
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </motion.div>
       )}
     </div>
   )
+}
+
+/* Tool Call Item Component */
+function ToolCallItem({
+  call,
+  isLatest,
+  reduceMotion,
+}: {
+  call: ToolCallEvent
+  isLatest: boolean
+  reduceMotion: boolean | null
+}) {
+  const isRunning = call.status === 'running'
+  const isError = call.status === 'error'
+  const details = parseToolInputSummary(call.name, call.inputSummary)
+
+  return (
+    <motion.div
+      layout
+      initial={reduceMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn(
+        "rounded-lg border p-3 transition-all",
+        isRunning && "border-blue-200 bg-blue-50/50",
+        isError && "border-red-200 bg-red-50/50",
+        !isRunning && !isError && "border-gray-100 bg-gray-50/30"
+      )}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <motion.span
+            className={cn(
+              "flex h-5 w-5 items-center justify-center rounded-md",
+              isRunning && "bg-blue-100 text-blue-600",
+              isError && "bg-red-100 text-red-500",
+              !isRunning && !isError && "bg-gray-100 text-gray-500"
+            )}
+            animate={isRunning && !reduceMotion ? { scale: [1, 1.1, 1] } : undefined}
+            transition={{ duration: 1, repeat: Infinity }}
+          >
+            <ToolTypeIcon type={call.name} />
+          </motion.span>
+          <span className="text-sm font-medium text-gray-800">
+            {formatToolLabel(call.name)}
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          {typeof call.resultCount === 'number' && (
+            <span className="rounded-full bg-white px-2 py-0.5 text-xs font-medium text-gray-700 shadow-sm">
+              <OdometerNumber value={call.resultCount} /> 条
+            </span>
+          )}
+          <span
+            className={cn(
+              "rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
+              isRunning && "bg-blue-100 text-blue-600",
+              isError && "bg-red-100 text-red-500",
+              !isRunning && !isError && "bg-green-100 text-green-600"
+            )}
+          >
+            {isRunning ? '执行中' : isError ? '失败' : '完成'}
+          </span>
+        </div>
+      </div>
+      
+      {details.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          {details.map(detail => (
+            <span
+              key={detail}
+              className="rounded-full bg-white px-2 py-0.5 text-[10px] text-gray-500 shadow-sm"
+            >
+              {detail}
+            </span>
+          ))}
+        </div>
+      )}
+      
+      {call.note && (
+        <div className="mt-2 text-xs text-gray-500">{call.note}</div>
+      )}
+    </motion.div>
+  )
+}
+
+/* Tool Type Icon */
+function ToolTypeIcon({ type }: { type: ToolCallEvent['name'] }) {
+  const iconMap: Record<ToolCallEvent['name'], React.ReactNode> = {
+    searchWorks: <SearchLensIcon />,
+    getConceptTree: <BranchIcon />,
+    getRelatedWorks: <LinkIcon />,
+    filterWorks: <FilterIcon />,
+    getAuthorWorks: <UserIcon />,
+    rankAndDeduplicate: <RankIcon />,
+  }
+  return <>{iconMap[type] || <TerminalIcon />}</>
 }
 
 function KeywordStrip({
@@ -1163,20 +1249,96 @@ function EmptySearchState({ onPickPrompt }: { onPickPrompt: (value: string) => v
   )
 }
 
+// Tool display names for UI
+const TOOL_DISPLAY_NAMES: Record<string, string> = {
+  searchWorks: '文献检索',
+  getConceptTree: '概念关系',
+  getRelatedWorks: '相关文献',
+  filterWorks: '过滤筛选',
+  getAuthorWorks: '作者论文',
+  rankAndDeduplicate: '排序去重',
+}
+
+function ModelBadge({
+  modelLabel,
+  isLoading,
+  hasResults,
+}: {
+  modelLabel: string | null
+  isLoading: boolean
+  hasResults: boolean
+}) {
+  // Parse provider and model from label like "OpenAI / GPT-4"
+  const [provider, model] = (modelLabel || '').split(' / ')
+  
+  return (
+    <div className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-gray-200/80 bg-gradient-to-r from-white to-gray-50/80 px-2.5 py-1.5 shadow-sm transition-all dark:border-gray-700 dark:from-gray-800 dark:to-gray-800/80">
+      {/* Status indicator */}
+      <span className="relative flex h-2 w-2">
+        <span className={cn(
+          "absolute inline-flex h-full w-full rounded-full opacity-75",
+          isLoading && "animate-ping bg-blue-400",
+          hasResults && !isLoading && "bg-green-400",
+          !isLoading && !hasResults && "bg-gray-300"
+        )} />
+        <span className={cn(
+          "relative inline-flex h-2 w-2 rounded-full",
+          isLoading ? "bg-blue-500" : hasResults ? "bg-green-500" : "bg-gray-400"
+        )} />
+      </span>
+      
+      {modelLabel ? (
+        <div className="flex items-center gap-1.5">
+          {provider && (
+            <span className="text-[10px] font-semibold text-gray-500 dark:text-gray-400">
+              {provider}
+            </span>
+          )}
+          {provider && model && (
+            <span className="text-gray-300 dark:text-gray-600">/</span>
+          )}
+          {model && (
+            <span className="rounded bg-gradient-to-r from-blue-50 to-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-600 dark:from-blue-900/30 dark:to-indigo-900/30 dark:text-indigo-400">
+              {model}
+            </span>
+          )}
+        </div>
+      ) : (
+        <span className="text-[10px] font-medium text-gray-400 dark:text-gray-500">
+          未配置模型
+        </span>
+      )}
+    </div>
+  )
+}
+
 function MetricPill({ label, value, tone = 'neutral' }: { label: string; value: string | number; tone?: 'neutral' | 'accent' }) {
   const numeric = isNumericLikeValue(value)
   return (
     <div
-      className={[
-        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium shadow-[inset_0_0.5px_0_rgba(0,0,0,0.05)]',
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium shadow-[inset_0_0.5px_0_rgba(0,0,0,0.05)] dark:shadow-[inset_0_0.5px_0_rgba(255,255,255,0.05)]',
         tone === 'accent'
-          ? 'border-blue-200 bg-white text-blue-700'
-          : 'border-gray-200 bg-white text-gray-600',
-      ].join(' ')}
+          ? 'border-blue-200 bg-white text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300'
+          : 'border-gray-200 bg-white text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300',
+      )}
     >
-      <span className={tone === 'accent' ? 'text-blue-600' : 'text-gray-500'}>{label}</span>
-      <span className={`h-3 w-px ${tone === 'accent' ? 'bg-blue-100' : 'bg-gray-200'}`} />
-      <strong className={tone === 'accent' ? 'text-blue-700' : 'text-gray-900'}>
+      <span className={cn(
+        tone === 'accent' 
+          ? 'text-blue-600 dark:text-blue-400' 
+          : 'text-gray-500 dark:text-gray-400'
+      )}>{label}</span>
+      <span className={cn(
+        'h-3 w-px',
+        tone === 'accent' 
+          ? 'bg-blue-100 dark:bg-blue-800' 
+          : 'bg-gray-200 dark:bg-gray-600'
+      )} />
+      <strong className={cn(
+        tone === 'accent' 
+          ? 'text-blue-700 dark:text-blue-300' 
+          : 'text-gray-900 dark:text-white'
+      )}>
         {numeric ? <OdometerNumber value={value} /> : value}
       </strong>
     </div>
@@ -1186,10 +1348,12 @@ function MetricPill({ label, value, tone = 'neutral' }: { label: string; value: 
 function PaperBadge({ children, tone }: { children: React.ReactNode; tone: 'success' | 'neutral' }) {
   return (
     <span
-      className={[
+      className={cn(
         'inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium',
-        tone === 'success' ? 'border-green-200 bg-green-50 text-green-700' : 'border-transparent bg-gray-100 text-gray-800',
-      ].join(' ')}
+        tone === 'success' 
+          ? 'border-green-200 bg-green-50 text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-400' 
+          : 'border-transparent bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200',
+      )}
     >
       {children}
     </span>
@@ -1210,17 +1374,17 @@ function PaperCard({
   const targetUrl = paper.url || `https://openalex.org/${paper.openAlexId.split('/').pop()}`
 
   return (
-    <div className="group flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow duration-300 hover:shadow-md">
+    <div className="group flex flex-col gap-4 rounded-xl border border-gray-200 bg-white p-6 shadow-sm transition-shadow duration-300 hover:shadow-md dark:border-gray-700 dark:bg-gray-900 dark:hover:shadow-gray-800/50">
       <div className="flex flex-col gap-2">
         <div className="flex items-start justify-between gap-4">
           <a
             href={targetUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-lg font-bold leading-tight text-black transition-colors hover:text-blue-600"
+            className="inline-flex items-center gap-1.5 text-lg font-bold leading-tight text-black transition-colors hover:text-blue-600 dark:text-white dark:hover:text-blue-400"
           >
             {paper.title}
-            <span className="shrink-0 text-gray-400 transition-colors group-hover:text-blue-500">
+            <span className="shrink-0 text-gray-400 transition-colors group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400">
               <ExternalLinkIcon />
             </span>
           </a>
@@ -1229,25 +1393,25 @@ function PaperCard({
             {paper.isOpenAccess && <PaperBadge tone="success">OA</PaperBadge>}
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
           <span>
             {displayAuthors.join(', ') || '未知作者'}
             {hasMoreAuthors && ' et al.'}
           </span>
-          {paper.year && <span className="h-1 w-1 rounded-full bg-gray-300" />}
+          {paper.year && <span className="h-1 w-1 rounded-full bg-gray-300 dark:bg-gray-600" />}
           {paper.year && <span>{paper.year}</span>}
-          {paper.venue && <span className="h-1 w-1 rounded-full bg-gray-300" />}
+          {paper.venue && <span className="h-1 w-1 rounded-full bg-gray-300 dark:bg-gray-600" />}
           {paper.venue && <span className="italic">{paper.venue}</span>}
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-gray-100 pt-4">
-        <div className="text-sm leading-relaxed text-gray-600">
-          <span className="mr-2 font-semibold text-gray-900">摘要片段:</span>
+      <div className="flex flex-col gap-3 border-t border-gray-100 pt-4 dark:border-gray-800">
+        <div className="text-sm leading-relaxed text-gray-600 dark:text-gray-300">
+          <span className="mr-2 font-semibold text-gray-900 dark:text-white">摘要片段:</span>
           {paper.abstractSnippet}
         </div>
-        <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-3 text-sm leading-relaxed text-gray-600">
-          <span className="mr-2 font-semibold text-gray-900">推荐理由:</span>
+        <div className="rounded-lg border border-gray-100 bg-gray-50/50 p-3 text-sm leading-relaxed text-gray-600 dark:border-gray-800 dark:bg-gray-800/50 dark:text-gray-300">
+          <span className="mr-2 font-semibold text-gray-900 dark:text-white">推荐理由:</span>
           {paper.recommendationReason || '该论文与当前研究问题高度相关。'}
         </div>
       </div>
@@ -1264,10 +1428,10 @@ function PaperCard({
       )}
 
       <div className="mt-1 flex flex-wrap gap-2">
-        <button type="button" onClick={() => onSave(paper)} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
+        <button type="button" onClick={() => onSave(paper)} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
           保存到知识库
         </button>
-        <button type="button" onClick={() => onInsert(paper)} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50">
+        <button type="button" onClick={() => onInsert(paper)} className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700">
           插入引用
         </button>
         {paper.pdfUrl && (
@@ -1275,7 +1439,7 @@ function PaperCard({
             href={paper.pdfUrl}
             target="_blank"
             rel="noreferrer"
-            className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50"
+            className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
           >
             打开 PDF
           </a>
@@ -1322,70 +1486,126 @@ function ClarificationPanel({
         damping: 24,
         bounce: 0.22,
       }}
-      className="fixed inset-x-0 bottom-20 z-50 mx-auto w-full max-w-lg overflow-hidden rounded-2xl border border-purple-100 bg-white p-5 shadow-[0_8px_30px_rgb(0,0,0,0.12)]"
-      style={{ maxHeight: 'min(480px, calc(100vh - 200px))' }}
+      className="fixed inset-x-0 bottom-20 z-50 mx-auto flex w-full max-w-xl flex-col overflow-hidden rounded-2xl border border-indigo-100 bg-white shadow-[0_8px_40px_rgb(0,0,0,0.12)] dark:border-indigo-900/50 dark:bg-gray-900 dark:shadow-[0_8px_40px_rgb(0,0,0,0.4)]"
+      style={{ maxHeight: 'min(520px, calc(100vh - 200px))' }}
     >
-      <div className="absolute left-0 right-0 top-0 h-1 bg-gradient-to-r from-purple-400 to-indigo-500 opacity-50" />
+      {/* Top gradient bar with progress */}
+      <div className="relative h-1.5 shrink-0 bg-gray-100 dark:bg-gray-800">
+        <motion.div
+          className="absolute inset-y-0 left-0 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"
+          initial={{ width: '0%' }}
+          animate={{ width: `${(answeredCount / questions.length) * 100}%` }}
+          transition={{ duration: 0.4, ease: 'easeOut' }}
+        />
+      </div>
 
-      <div className="flex max-h-[inherit] min-h-0 flex-col gap-4">
-        <div className="flex items-center gap-2 text-sm font-semibold uppercase tracking-widest text-purple-600">
-          <ClarifyIcon />
-          <span>答题器</span>
+      {/* Header - Fixed */}
+      <div className="shrink-0 border-b border-gray-100 p-5 pb-4 dark:border-gray-800">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <motion.div
+              className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white"
+              animate={!reduceMotion ? { scale: [1, 1.05, 1] } : undefined}
+              transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+            >
+              <ClarifyIcon />
+            </motion.div>
+            <div>
+              <h2 className="text-base font-semibold text-gray-900 dark:text-white">补充研究约束</h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                已完成 {answeredCount}/{questions.length} 题
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            {questions.map((_, idx) => (
+              <motion.span
+                key={idx}
+                className={cn(
+                  "h-2 w-2 rounded-full transition-colors",
+                  idx < answeredCount ? "bg-indigo-500" : "bg-gray-200 dark:bg-gray-700"
+                )}
+                initial={false}
+                animate={{ scale: idx < answeredCount ? [1, 1.2, 1] : 1 }}
+                transition={{ duration: 0.3 }}
+              />
+            ))}
+          </div>
         </div>
-        <div className="text-sm leading-relaxed text-gray-600">
-          当前问题仍偏宽。先补充几个约束，系统会据此重新规划检索策略。已完成 {answeredCount}/{questions.length} 题。
-        </div>
+      </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
-          <div className="flex flex-col gap-4">
-            {questions.map(question => {
-              const answer = answers[question.id] || { value: '', customText: '' }
+      {/* Questions - Scrollable */}
+      <div className="min-h-0 flex-1 overflow-y-auto p-5 pt-4">
+        <div className="flex flex-col gap-6">
+          {questions.map((question, qIdx) => {
+            const answer = answers[question.id] || { value: '', customText: '' }
 
-              return (
-                <div key={question.id} className="flex flex-col gap-3">
-                  <h3 className="text-base font-medium leading-snug text-gray-900">{question.prompt}</h3>
-                  <div className="flex flex-col gap-2">
-                    {question.options.map(option => {
-                      const selected = answer.value === option.value
-                      return (
+            return (
+              <motion.div
+                key={question.id}
+                initial={reduceMotion ? false : { opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: qIdx * 0.1 }}
+                className="rounded-xl border border-gray-100 bg-gray-50/30 p-4 dark:border-gray-800 dark:bg-gray-800/30"
+              >
+                <h3 className="mb-3 text-sm font-medium text-gray-900 dark:text-gray-100">
+                  {question.prompt}
+                </h3>
+                <div className="flex flex-col gap-2">
+                  {question.options.map(option => {
+                    const selected = answer.value === option.value
+                    return (
+                      <div key={option.id} className="flex flex-col gap-2">
                         <label
-                          key={option.id}
-                          className={[
-                            'flex cursor-pointer flex-col gap-3 rounded-xl border p-3 transition-all duration-200',
+                          className={cn(
+                            "flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-all",
                             selected
-                              ? 'border-purple-500 bg-purple-50/50 shadow-[inset_0_0_0_1px_rgba(168,85,247,0.5)]'
-                              : 'border-gray-200 hover:border-purple-200 hover:bg-gray-50',
-                          ].join(' ')}
+                              ? "border-indigo-500 bg-indigo-50/50 dark:border-indigo-400 dark:bg-indigo-900/30"
+                              : "border-gray-200 hover:border-indigo-200 hover:bg-gray-50 dark:border-gray-700 dark:hover:border-indigo-800 dark:hover:bg-gray-800"
+                          )}
                         >
-                          <span className="flex items-center gap-3">
-                            <span className={[
-                              'flex h-4 w-4 items-center justify-center rounded-full border transition-colors',
-                              selected ? 'border-purple-500 bg-purple-500' : 'border-gray-300',
-                            ].join(' ')}>
-                              {selected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
-                            </span>
-                            <input
-                              type="radio"
-                              name={question.id}
-                              value={option.value}
-                              checked={selected}
-                              onChange={() => {
-                                setAnswers(current => ({
-                                  ...current,
-                                  [question.id]: {
-                                    value: option.value,
-                                    customText: option.isOther ? current[question.id]?.customText || '' : '',
-                                  },
-                                }))
-                              }}
-                              className="sr-only"
-                            />
-                            <span className={selected ? 'text-sm font-medium text-purple-900' : 'text-sm text-gray-700'}>
-                              {option.label}
-                            </span>
+                          <span className={cn(
+                            "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
+                            selected
+                              ? "border-indigo-500 bg-indigo-500 dark:border-indigo-400 dark:bg-indigo-400"
+                              : "border-gray-300 dark:border-gray-600"
+                          )}>
+                            {selected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
                           </span>
-
-                          {option.isOther && selected && (
+                          <input
+                            type="radio"
+                            name={question.id}
+                            value={option.value}
+                            checked={selected}
+                            onChange={() => {
+                              setAnswers(current => ({
+                                ...current,
+                                [question.id]: {
+                                  value: option.value,
+                                  customText: option.isOther ? current[question.id]?.customText || '' : '',
+                                },
+                              }))
+                            }}
+                            className="sr-only"
+                          />
+                          <span className={cn(
+                            "text-sm",
+                            selected
+                              ? "font-medium text-indigo-900 dark:text-indigo-100"
+                              : "text-gray-700 dark:text-gray-300"
+                          )}>
+                            {option.label}
+                          </span>
+                        </label>
+                        
+                        {/* Custom text input for "other" option */}
+                        {option.isOther && selected && (
+                          <motion.div
+                            initial={{ opacity: 0, height: 0 }}
+                            animate={{ opacity: 1, height: 'auto' }}
+                            exit={{ opacity: 0, height: 0 }}
+                            className="ml-7"
+                          >
                             <input
                               value={answer.customText}
                               onChange={event => {
@@ -1398,37 +1618,59 @@ function ClarificationPanel({
                                   },
                                 }))
                               }}
-                              placeholder="补充你的自定义说明"
-                              className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none"
+                              placeholder="补充你的自定义说明..."
+                              className="w-full rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition-all placeholder:text-gray-400 focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 dark:border-indigo-800 dark:bg-gray-800 dark:text-gray-100 dark:placeholder:text-gray-500 dark:focus:border-indigo-600 dark:focus:ring-indigo-900/50"
                             />
-                          )}
-                        </label>
-                      )
-                    })}
-                  </div>
+                          </motion.div>
+                        )}
+                      </div>
+                    )
+                  })}
                 </div>
-              )
-            })}
-          </div>
+              </motion.div>
+            )
+          })}
         </div>
+      </div>
 
-        <div className="mt-2 flex items-center justify-between gap-3">
+      {/* Footer - Fixed */}
+      <div className="shrink-0 border-t border-gray-100 p-5 pt-4 dark:border-gray-800">
+        <div className="flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={onSkip}
             disabled={isLoading}
-            className="rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm font-medium text-gray-600 transition-all duration-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-600 transition-all duration-200 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
           >
-            跳过
+            跳过此步
           </button>
           <button
             type="button"
             onClick={onSubmit}
             disabled={!canSubmit || isLoading}
-            className="flex items-center justify-center gap-2 rounded-xl bg-black px-4 py-3 text-sm font-medium text-white transition-all duration-200 hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
+            className={cn(
+              "flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium transition-all duration-200 disabled:cursor-not-allowed disabled:opacity-50",
+              canSubmit
+                ? "bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-lg shadow-indigo-200 hover:shadow-xl hover:shadow-indigo-300 dark:shadow-indigo-900/50 dark:hover:shadow-indigo-800/50"
+                : "bg-gray-100 text-gray-400 dark:bg-gray-800 dark:text-gray-500"
+            )}
           >
-            提交并继续检索
-            <SendIcon />
+            {isLoading ? (
+              <>
+                <motion.span
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                >
+                  <LoadingSpinnerIcon />
+                </motion.span>
+                处理中...
+              </>
+            ) : (
+              <>
+                继续检索
+                <SendIcon />
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -1576,6 +1818,84 @@ function SendIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M22 2 11 13" />
       <path d="m22 2-7 20-4-9-9-4 20-7z" />
+    </svg>
+  )
+}
+
+function LoadingSpinnerIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  )
+}
+
+function ThinkingIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 2a8 8 0 0 0-8 8c0 2.76 1.4 5.2 3.5 6.6V19a2 2 0 0 0 2 2h5a2 2 0 0 0 2-2v-2.4c2.1-1.4 3.5-3.84 3.5-6.6a8 8 0 0 0-8-8z" />
+      <path d="M9 22v1" />
+      <path d="M15 22v1" />
+    </svg>
+  )
+}
+
+function BrainIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
+      <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
+      <path d="M15 13a4.5 4.5 0 0 1-3-4 4.5 4.5 0 0 1-3 4" />
+      <path d="M17.599 6.5a3 3 0 0 0 .399-1.375" />
+      <path d="M6.003 5.125A3 3 0 0 0 6.401 6.5" />
+      <path d="M3.477 10.896a4 4 0 0 1 .585-.396" />
+      <path d="M19.938 10.5a4 4 0 0 1 .585.396" />
+      <path d="M6 18a4 4 0 0 1-1.967-.516" />
+      <path d="M19.967 17.484A4 4 0 0 1 18 18" />
+    </svg>
+  )
+}
+
+function LinkIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </svg>
+  )
+}
+
+function FilterIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" />
+    </svg>
+  )
+}
+
+function UserIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" />
+      <circle cx="12" cy="7" r="4" />
+    </svg>
+  )
+}
+
+function RankIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 3v18h18" />
+      <path d="m19 9-5 5-4-4-3 3" />
+    </svg>
+  )
+}
+
+function CheckCircleIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <path d="m9 11 3 3L22 4" />
     </svg>
   )
 }

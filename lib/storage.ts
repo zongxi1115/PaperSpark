@@ -52,6 +52,15 @@ export function deleteDocument(id: string): void {
   saveDocuments(getDocuments().filter(d => d.id !== id))
 }
 
+export function renameDocument(id: string, newTitle: string): void {
+  const docs = getDocuments()
+  const idx = docs.findIndex(d => d.id === id)
+  if (idx >= 0) {
+    docs[idx] = { ...docs[idx], title: newTitle, updatedAt: new Date().toISOString() }
+    saveDocuments(docs)
+  }
+}
+
 export function getSettings(): AppSettings {
   if (!isBrowser()) return defaultSettings
   try {

@@ -1,6 +1,7 @@
 'use client'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { motion, AnimatePresence } from 'framer-motion'
 import {
   Button,
   Dropdown,
@@ -13,20 +14,29 @@ import {
   ModalFooter,
   ModalHeader,
   useDisclosure,
-  Tooltip,
 } from '@heroui/react'
-import { formatDate, generateId, getDocuments, saveDocuments, deleteDocument } from '@/lib/storage'
+import { formatDate, generateId, getDocuments, saveDocuments, deleteDocument, renameDocument } from '@/lib/storage'
 import type { AppDocument } from '@/lib/types'
 
 export function DocumentListContent() {
   const [documents, setDocuments] = useState<AppDocument[]>([])
   const [deleteTarget, setDeleteTarget] = useState<AppDocument | null>(null)
   const { isOpen, onOpen, onClose } = useDisclosure()
+  const [editingDocId, setEditingDocId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+  const renameInputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
 
   useEffect(() => {
     setDocuments(getDocuments())
   }, [])
+
+  useEffect(() => {
+    if (editingDocId && renameInputRef.current) {
+      renameInputRef.current.focus()
+      renameInputRef.current.select()
+    }
+  }, [editingDocId])
 
   const handleNew = useCallback(() => {
     const now = new Date().toISOString()
@@ -43,8 +53,9 @@ export function DocumentListContent() {
   }, [router])
 
   const handleOpenDoc = useCallback((docId: string) => {
+    if (editingDocId) return
     router.push(`/editor/${docId}`)
-  }, [router])
+  }, [router, editingDocId])
 
   const confirmDelete = useCallback((doc: AppDocument) => {
     setDeleteTarget(doc)
@@ -59,6 +70,30 @@ export function DocumentListContent() {
     onClose()
   }, [deleteTarget, onClose])
 
+  const startRename = useCallback((doc: AppDocument) => {
+    setEditingDocId(doc.id)
+    setRenameValue(doc.title)
+  }, [])
+
+  const commitRename = useCallback(() => {
+    if (!editingDocId || !renameValue.trim()) {
+      setEditingDocId(null)
+      setRenameValue('')
+      return
+    }
+    renameDocument(editingDocId, renameValue.trim())
+    setDocuments(prev => prev.map(d =>
+      d.id === editingDocId ? { ...d, title: renameValue.trim(), updatedAt: new Date().toISOString() } : d
+    ))
+    setEditingDocId(null)
+    setRenameValue('')
+  }, [editingDocId, renameValue])
+
+  const cancelRename = useCallback(() => {
+    setEditingDocId(null)
+    setRenameValue('')
+  }, [])
+
   // 格式化作者显示
   const formatAuthors = (doc: AppDocument): string => {
     if (doc.articleAuthors && doc.articleAuthors.length > 0) {
@@ -70,7 +105,10 @@ export function DocumentListContent() {
   }
 
   return (
-    <div style={{ padding: '24px 32px', maxWidth: 1000, margin: '0 auto' }}>
+    <div
+      style={{ padding: '24px 32px', maxWidth: 1000, margin: '0 auto' }}
+      onClick={() => { if (editingDocId) cancelRename() }}
+    >
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
@@ -141,7 +179,7 @@ export function DocumentListContent() {
                 fontSize: 14,
                 alignItems: 'center',
                 transition: 'background 0.15s',
-                cursor: 'pointer',
+                cursor: editingDocId === doc.id ? 'default' : 'pointer',
               }}
               onClick={() => handleOpenDoc(doc.id)}
               onMouseEnter={(e) => {
@@ -161,14 +199,57 @@ export function DocumentListContent() {
                 <div style={{ color: 'var(--accent-color)', flexShrink: 0 }}>
                   <DocIcon />
                 </div>
-                <span style={{ 
-                  fontWeight: 500, 
-                  overflow: 'hidden', 
-                  textOverflow: 'ellipsis', 
-                  whiteSpace: 'nowrap' 
-                }}>
-                  {doc.title}
-                </span>
+                <AnimatePresence mode="wait">
+                  {editingDocId === doc.id ? (
+                    <motion.div
+                      key="input"
+                      layoutId={`rename-${doc.id}`}
+                      initial={{ opacity: 0, scaleX: 0.9 }}
+                      animate={{ opacity: 1, scaleX: 1 }}
+                      exit={{ opacity: 0, scaleX: 0.9 }}
+                      transition={{ duration: 0.2, ease: 'easeInOut' }}
+                      style={{ width: '100%', minWidth: 0 }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        ref={renameInputRef}
+                        type="text"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitRename()
+                          if (e.key === 'Escape') cancelRename()
+                        }}
+                        onBlur={commitRename}
+                        style={{
+                          width: '100%',
+                          padding: '4px 8px',
+                          fontSize: 14,
+                          fontWeight: 500,
+                          border: '1.5px solid var(--accent-color)',
+                          borderRadius: 6,
+                          background: 'var(--bg-primary)',
+                          color: 'var(--text-primary)',
+                          outline: 'none',
+                          boxShadow: '0 0 0 3px var(--accent-light)',
+                        }}
+                      />
+                    </motion.div>
+                  ) : (
+                    <motion.span
+                      key="text"
+                      layoutId={`rename-${doc.id}`}
+                      style={{ 
+                        fontWeight: 500, 
+                        overflow: 'hidden', 
+                        textOverflow: 'ellipsis', 
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {doc.title}
+                    </motion.span>
+                  )}
+                </AnimatePresence>
               </div>
               
               {/* 作者 */}
@@ -200,6 +281,13 @@ export function DocumentListContent() {
                     </Button>
                   </DropdownTrigger>
                   <DropdownMenu aria-label="文档操作">
+                    <DropdownItem
+                      key="rename"
+                      startContent={<RenameIcon />}
+                      onPress={() => startRename(doc)}
+                    >
+                      重命名
+                    </DropdownItem>
                     <DropdownItem
                       key="open"
                       startContent={<EditIcon />}
@@ -285,6 +373,14 @@ function TrashIcon() {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <polyline points="3,6 5,6 21,6" />
       <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+    </svg>
+  )
+}
+
+function RenameIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
     </svg>
   )
 }

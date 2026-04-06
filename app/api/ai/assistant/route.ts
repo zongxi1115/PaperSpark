@@ -144,7 +144,8 @@ export async function POST(req: Request) {
         let fullSystemPrompt = systemPrompt || '你是一个智能学术助手，帮助用户解答学术问题、写作和思考。'
 
         if (finalCitations.length > 0) {
-          fullSystemPrompt += `\n\n你现在可以使用用户知识库中检索出的证据。回答时必须遵守：\n1. 只引用给定证据，不得虚构来源。\n2. 使用到哪条证据，就在对应句末使用 [K1] 这类编号引用。\n3. 回答末尾必须单独给出“参考资料”小节，每条一行，格式为 [K1] 标题｜来源类型｜年份/页码。\n4. 如果证据不足，明确说明证据不足。\n\n可用证据如下：\n${buildKnowledgeContext(finalCitations)}`
+          const citationIndexMap = finalCitations.map((c, i) => ({ ...c, _index: i + 1 }))
+          fullSystemPrompt += `\n\n你现在可以使用用户知识库中检索出的证据。回答时必须遵守：\n1. 只引用给定证据，不得虚构来源。\n2. 使用到哪条证据，就在对应句末使用 <cite:N> 标记，其中 N 是该证据的序号（从 1 开始）。\n3. 如果证据不足，明确说明证据不足。\n\n可用证据如下：\n${citationIndexMap.map(c => `[${c._index}] ${c.title}`).join('\n')}\n${buildKnowledgeContext(finalCitations)}`
         }
 
         if (assetContext && assetContext.trim()) {

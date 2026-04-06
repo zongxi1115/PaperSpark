@@ -24,6 +24,7 @@ import type {
   SearchReview,
   SearchWorksOutput,
   StepStatus,
+  ToolCallEvent,
 } from '@/lib/literatureSearchTypes'
 import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
 
@@ -33,6 +34,37 @@ interface DiscoveryPassResult {
   works: SearchPaper[]
   ranked: RankedWorksOutput
   filterResult: FilterWorksOutput
+}
+
+const TOOL_RUNTIME_LABELS: Record<ToolCallEvent['name'], string> = {
+  searchWorks: '文献检索',
+  getConceptTree: '概念扩展',
+  getRelatedWorks: '关联文献扩展',
+  filterWorks: '筛选过滤',
+  getAuthorWorks: '作者追踪',
+  rankAndDeduplicate: '排序去重',
+}
+
+function buildHeartbeatThinking(
+  stage: LiteratureSearchStage,
+  runningToolNames: ToolCallEvent['name'][],
+): string | null {
+  const uniqueRunningTools = Array.from(new Set(runningToolNames))
+
+  if (uniqueRunningTools.length === 1) {
+    const name = TOOL_RUNTIME_LABELS[uniqueRunningTools[0]]
+    return `正在调用 ${name}，等待工具返回结果。`
+  }
+
+  if (uniqueRunningTools.length > 1) {
+    const top3 = uniqueRunningTools.slice(0, 3).map(name => TOOL_RUNTIME_LABELS[name]).join('、')
+    if (uniqueRunningTools.length <= 3) {
+      return `正在并行调用 ${top3}，持续汇总候选文献。`
+    }
+    return `正在并行调用 ${uniqueRunningTools.length} 个工具（${top3} 等），持续汇总候选文献。`
+  }
+
+  return null
 }
 
 function stageDetail(stage: LiteratureSearchStage) {
@@ -442,29 +474,8 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       let lastEventAt = Date.now()
       let heartbeatStage: LiteratureSearchStage = 'intent'
-      let heartbeatIndex = 0
-      const heartbeatHints: Record<LiteratureSearchStage, string[]> = {
-        intent: [
-          'Working... 正在等待意图分析模型返回澄清结果。',
-          'Working... 正在整理研究目标、核心概念与时间窗口。',
-        ],
-        expansion: [
-          'Working... 正在扩展同义词、近义术语和多语关键词。',
-          'Working... 正在组织多组检索表达式。',
-        ],
-        'parallel-search': [
-          'Working... OpenAlex 正在返回关键词检索结果。',
-          'Working... 正在汇总并行检索批次的候选文献。',
-        ],
-        analysis: [
-          'Working... 正在执行滚雪球扩展与作者追踪。',
-          'Working... 正在补充分析阶段的关联证据。',
-        ],
-        aggregation: [
-          'Working... 正在检阅结果质量并准备最终推荐。',
-          'Working... 正在生成结果摘要与阅读建议。',
-        ],
-      }
+      const runningTools = new Map<string, ToolCallEvent['name']>()
+      const thinkingCache = new Map<LiteratureSearchStage, { text: string; at: number }>()
       const heartbeatEnabledStages = new Set<LiteratureSearchStage>([
         'parallel-search',
         'analysis',
@@ -490,25 +501,35 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      const pushThinking = (stage: LiteratureSearchStage, text: string) => {
+      const pushThinking = (
+        stage: LiteratureSearchStage,
+        text: string,
+        source: 'manual' | 'heartbeat' = 'manual',
+      ) => {
+        const normalized = text.trim()
+        if (!normalized) return
+        const now = Date.now()
+        const cached = thinkingCache.get(stage)
+        const minGapMs = source === 'heartbeat' ? 12_000 : 1_500
+        if (cached && cached.text === normalized && now - cached.at < minGapMs) return
+        thinkingCache.set(stage, { text: normalized, at: now })
         send({
           type: 'thinking',
           bubble: {
             id: `${stage}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             stage,
-            text,
+            text: normalized,
           },
         })
       }
 
       const heartbeat = setInterval(() => {
         if (!heartbeatEnabledStages.has(heartbeatStage)) return
-        if (Date.now() - lastEventAt < 2800) return
-        const hints = heartbeatHints[heartbeatStage]
-        const message = hints[heartbeatIndex % hints.length]
-        heartbeatIndex += 1
-        pushThinking(heartbeatStage, message)
-      }, 3000)
+        if (Date.now() - lastEventAt < 4500) return
+        const message = buildHeartbeatThinking(heartbeatStage, Array.from(runningTools.values()))
+        if (!message) return
+        pushThinking(heartbeatStage, message, 'heartbeat')
+      }, 5000)
 
       try {
         send({
@@ -520,7 +541,14 @@ export async function POST(req: NextRequest) {
         const tools = createOpenAlexToolset({
           signal: req.signal,
           workRegistry,
-          report: tool => send({ type: 'tool', tool }),
+          report: tool => {
+            if (tool.status === 'running') {
+              runningTools.set(tool.id, tool.name)
+            } else {
+              runningTools.delete(tool.id)
+            }
+            send({ type: 'tool', tool })
+          },
         })
 
         ensureActive(req.signal)

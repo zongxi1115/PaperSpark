@@ -2261,83 +2261,84 @@ export function AssistantChatPanel() {
                                   key={key}
                                   remarkPlugins={[remarkGfm]}
                                   components={{
-                            code({ node, className, children, ...props }: any) {
-                            const codeContent = String(children).replace(/\n$/, '')
-                            const isBlock = node?.position?.start?.line !== node?.position?.end?.line || codeContent.includes('\n')
-                            const lang = /language-(\w+)/.exec(className || '')?.[1]
-                            
-                            // Handle legacy edit_document format
-                            if (isBlock && lang === 'edit_document') {
-                              try {
-                                const req: EditDocumentRequest = JSON.parse(codeContent.trim())
-                                // find which index this block is in the message
-                                const allBlocks = parseEditBlocks(message.content)
-                                const blockIdx = allBlocks.requests.findIndex(b => JSON.stringify(b) === JSON.stringify(req))
-                                const key = `${message.id}:${blockIdx >= 0 ? blockIdx : 0}`
-                                const state = editStates[key] ?? { status: 'idle' as EditStatus, progress: '', error: '' }
+                                    code({ node, className, children, ...props }: any) {
+                                      const codeContent = String(children).replace(/\n$/, '')
+                                      const isBlock = node?.position?.start?.line !== node?.position?.end?.line || codeContent.includes('\n')
+                                      const lang = /language-(\w+)/.exec(className || '')?.[1]
 
-                                const handleAccept = () => {
-                                  try {
-                                    acceptInsertionChanges(key)
-                                  } catch {
-                                    // ignore errors
-                                  }
-                                  setEditStates(prev => ({ ...prev, [key]: { status: 'accepted', progress: '', error: '' } }))
-                                  const editor = getEditor()
-                                  if (editor) {
-                                    editor._tiptapEditor.view.dispatch(
-                                      editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
-                                    )
-                                  }
-                                }
-                                const handleReject = () => {
-                                  try {
-                                    rejectInsertionChanges(key)
-                                  } catch (e) {
-                                    console.warn('Reject changes failed:', e)
-                                  }
-                                  setEditStates(prev => ({ ...prev, [key]: { status: 'rejected', progress: '', error: '' } }))
-                                  const editor = getEditor()
-                                  if (editor) {
-                                    editor._tiptapEditor.view.dispatch(
-                                      editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
-                                    )
-                                  }
-                                }
+                                      // Handle legacy edit_document format
+                                      if (isBlock && lang === 'edit_document') {
+                                        try {
+                                          const req: EditDocumentRequest = JSON.parse(codeContent.trim())
+                                          // find which index this block is in the message
+                                          const allBlocks = parseEditBlocks(message.content)
+                                          const blockIdx = allBlocks.requests.findIndex(b => JSON.stringify(b) === JSON.stringify(req))
+                                          const key = `${message.id}:${blockIdx >= 0 ? blockIdx : 0}`
+                                          const state = editStates[key] ?? { status: 'idle' as EditStatus, progress: '', error: '' }
 
-                                return (
-                                  <EditDocumentTool
-                                    request={req}
-                                    status={state.status}
-                                    progress={state.progress}
-                                    error={state.error}
-                                    onAccept={handleAccept}
-                                    onReject={handleReject}
-                                  />
-                                )
-                              } catch {
-                                // fall through to normal code block
-                              }
-                            }
-                            
-                            // 行内代码
-                            if (!isBlock) {
-                              return <code className={className} {...props}>{children}</code>
-                            }
+                                          const handleAccept = () => {
+                                            try {
+                                              acceptInsertionChanges(key)
+                                            } catch {
+                                              // ignore errors
+                                            }
+                                            setEditStates(prev => ({ ...prev, [key]: { status: 'accepted', progress: '', error: '' } }))
+                                            const editor = getEditor()
+                                            if (editor) {
+                                              editor._tiptapEditor.view.dispatch(
+                                                editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                                              )
+                                            }
+                                          }
 
-                            if (lang === 'mermaid') {
-                              const blockKey = `${message.id}:mermaid:${getCodeHash(codeContent)}`
-                              return <MermaidCodeBlock codeContent={codeContent} blockKey={blockKey} />
-                            }
-                            
-                            // 代码块 - 添加复制按钮和运行按钮
-                            // 使用代码内容的 hash 作为 key 的一部分，确保每个代码块有唯一的状态
-                            const blockKey = `${message.id}:codeblock:${getCodeHash(codeContent)}`
-                            const blockState = codeBlockStates[blockKey]
-                            const isPython = lang === 'python' || lang === 'py'
-                            
-                            return (
-                              <div style={{ position: 'relative', margin: '8px 0' }}>
+                                          const handleReject = () => {
+                                            try {
+                                              rejectInsertionChanges(key)
+                                            } catch (e) {
+                                              console.warn('Reject changes failed:', e)
+                                            }
+                                            setEditStates(prev => ({ ...prev, [key]: { status: 'rejected', progress: '', error: '' } }))
+                                            const editor = getEditor()
+                                            if (editor) {
+                                              editor._tiptapEditor.view.dispatch(
+                                                editor._tiptapEditor.view.state.tr.setMeta('force-refresh', true)
+                                              )
+                                            }
+                                          }
+
+                                          return (
+                                            <EditDocumentTool
+                                              request={req}
+                                              status={state.status}
+                                              progress={state.progress}
+                                              error={state.error}
+                                              onAccept={handleAccept}
+                                              onReject={handleReject}
+                                            />
+                                          )
+                                        } catch {
+                                          // fall through to normal code block
+                                        }
+                                      }
+
+                                      // 行内代码
+                                      if (!isBlock) {
+                                        return <code className={className} {...props}>{children}</code>
+                                      }
+
+                                      if (lang === 'mermaid') {
+                                        const blockKey = `${message.id}:mermaid:${getCodeHash(codeContent)}`
+                                        return <MermaidCodeBlock codeContent={codeContent} blockKey={blockKey} />
+                                      }
+
+                                      // 代码块 - 添加复制按钮和运行按钮
+                                      // 使用代码内容的 hash 作为 key 的一部分，确保每个代码块有唯一的状态
+                                      const blockKey = `${message.id}:codeblock:${getCodeHash(codeContent)}`
+                                      const blockState = codeBlockStates[blockKey]
+                                      const isPython = lang === 'python' || lang === 'py'
+
+                                      return (
+                                        <div style={{ position: 'relative', margin: '8px 0' }}>
                                 {/* 代码块头部 */}
                                 <div style={{
                                   display: 'flex',
@@ -2568,90 +2569,90 @@ export function AssistantChatPanel() {
                                     )}
                                   </div>
                                 )}
-                              </div>
-                            )
-                          },
-                          // 图片组件
-                          img({ src, alt }) {
-                            if (!src || typeof src !== 'string') return null
-                            
-                            return (
-                              <div style={{ 
-                                position: 'relative', 
-                                display: 'inline-block',
-                                margin: '8px 0',
-                              }}>
-                                <img 
-                                  src={src} 
-                                  alt={alt || ''}
-                                  style={{
-                                    maxWidth: '100%',
-                                    borderRadius: 6,
-                                    border: '1px solid var(--border-color)',
+                                        </div>
+                                      )
+                                    },
+                                    // 图片组件
+                                    img({ src, alt }) {
+                                      if (!src || typeof src !== 'string') return null
+
+                                      return (
+                                        <div style={{ 
+                                          position: 'relative', 
+                                          display: 'inline-block',
+                                          margin: '8px 0',
+                                        }}>
+                                          <img 
+                                            src={src} 
+                                            alt={alt || ''}
+                                            style={{
+                                              maxWidth: '100%',
+                                              borderRadius: 6,
+                                              border: '1px solid var(--border-color)',
+                                            }}
+                                          />
+                                          {/* 图片操作按钮 */}
+                                          <div style={{
+                                            position: 'absolute',
+                                            top: 8,
+                                            right: 8,
+                                            display: 'flex',
+                                            gap: 4,
+                                            opacity: 0,
+                                            transition: 'opacity 0.2s',
+                                          }}
+                                          onMouseEnter={(e) => {
+                                            (e.currentTarget as HTMLElement).style.opacity = '1'
+                                          }}
+                                          onMouseLeave={(e) => {
+                                            (e.currentTarget as HTMLElement).style.opacity = '0'
+                                          }}
+                                          >
+                                            <Tooltip content="插入编辑器">
+                                              <button
+                                                onClick={() => insertImageToEditor(src)}
+                                                style={{
+                                                  background: 'rgba(0, 0, 0, 0.7)',
+                                                  border: 'none',
+                                                  borderRadius: 4,
+                                                  padding: 6,
+                                                  cursor: 'pointer',
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                }}
+                                              >
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                                                  <path d="M12 5v14M5 12h14"/>
+                                                </svg>
+                                              </button>
+                                            </Tooltip>
+                                            <Tooltip content="添加到资产库">
+                                              <button
+                                                onClick={() => addImageToAssets(src, alt || undefined)}
+                                                style={{
+                                                  background: 'rgba(0, 0, 0, 0.7)',
+                                                  border: 'none',
+                                                  borderRadius: 4,
+                                                  padding: 6,
+                                                  cursor: 'pointer',
+                                                  display: 'flex',
+                                                  alignItems: 'center',
+                                                  justifyContent: 'center',
+                                                }}
+                                              >
+                                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                                                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                                                  <polyline points="17 8 12 3 7 8"/>
+                                                  <line x1="12" y1="3" x2="12" y2="15"/>
+                                                </svg>
+                                              </button>
+                                            </Tooltip>
+                                          </div>
+                                        </div>
+                                      )
+                                    },
                                   }}
-                                />
-                                {/* 图片操作按钮 */}
-                                <div style={{
-                                  position: 'absolute',
-                                  top: 8,
-                                  right: 8,
-                                  display: 'flex',
-                                  gap: 4,
-                                  opacity: 0,
-                                  transition: 'opacity 0.2s',
-                                }}
-                                onMouseEnter={(e) => {
-                                  (e.currentTarget as HTMLElement).style.opacity = '1'
-                                }}
-                                onMouseLeave={(e) => {
-                                  (e.currentTarget as HTMLElement).style.opacity = '0'
-                                }}
-                                >
-                                  <Tooltip content="插入编辑器">
-                                    <button
-                                      onClick={() => insertImageToEditor(src)}
-                                      style={{
-                                        background: 'rgba(0, 0, 0, 0.7)',
-                                        border: 'none',
-                                        borderRadius: 4,
-                                        padding: 6,
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                      }}
-                                    >
-                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                                        <path d="M12 5v14M5 12h14"/>
-                                      </svg>
-                                    </button>
-                                  </Tooltip>
-                                  <Tooltip content="添加到资产库">
-                                    <button
-                                      onClick={() => addImageToAssets(src, alt || undefined)}
-                                      style={{
-                                        background: 'rgba(0, 0, 0, 0.7)',
-                                        border: 'none',
-                                        borderRadius: 4,
-                                        padding: 6,
-                                        cursor: 'pointer',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'center',
-                                      }}
-                                    >
-                                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                                        <polyline points="17 8 12 3 7 8"/>
-                                        <line x1="12" y1="3" x2="12" y2="15"/>
-                                      </svg>
-                                    </button>
-                                  </Tooltip>
-                                </div>
-                              </div>
-                            )
-                          },
-                          }}
                                 >
                                   {segment}
                                 </ReactMarkdown>

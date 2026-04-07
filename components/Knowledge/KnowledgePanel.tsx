@@ -2,6 +2,7 @@
 // TODO: fetch下来的文件需要保存到本地，后续沉浸式阅读直接从本地读取，避免重复下载和分析
 import { useState, useCallback, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { motion } from 'framer-motion'
 import {
   Button,
   Input,
@@ -1251,18 +1252,22 @@ export function KnowledgePanel() {
                 <FileIcon type={item.sourceType} hasAttachment={item.hasAttachment} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ 
-                  fontSize: 13, 
-                  fontWeight: 500, 
-                  margin: 0, 
-                  lineHeight: 1.4,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                  paddingRight: 50,
-                }}>
+                <motion.p
+                  layoutId={`knowledge-title-${item.id}`}
+                  style={{ 
+                    fontSize: 13, 
+                    fontWeight: 500, 
+                    margin: 0, 
+                    lineHeight: 1.4,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    paddingRight: 50,
+                  }}
+                  transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+                >
                   {item.title}
-                </p>
+                </motion.p>
                 {item.authors.length > 0 && (
                   <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 0' }}>
                     {item.authors.slice(0, 3).join(', ')}{item.authors.length > 3 && ' 等'}
@@ -1493,7 +1498,15 @@ export function KnowledgePanel() {
       <Modal isOpen={isDetailOpen} onClose={onDetailClose} size="lg" scrollBehavior="inside">
         <ModalContent>
           <ModalHeader>
-            <div style={{ fontSize: 15, paddingRight: 30 }}>{selectedItem?.title}</div>
+            {selectedItem ? (
+              <motion.div
+                layoutId={`knowledge-title-${selectedItem.id}`}
+                style={{ fontSize: 15, paddingRight: 30, lineHeight: 1.45, fontWeight: 600 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+              >
+                {selectedItem.title}
+              </motion.div>
+            ) : null}
           </ModalHeader>
           <ModalBody>
             {selectedItem && (

@@ -24,6 +24,7 @@ import type {
   SearchReview,
   SearchWorksOutput,
   StepStatus,
+  ToolCallEvent,
 } from '@/lib/literatureSearchTypes'
 import { LITERATURE_SEARCH_STEPS } from '@/lib/literatureSearchTypes'
 
@@ -33,6 +34,37 @@ interface DiscoveryPassResult {
   works: SearchPaper[]
   ranked: RankedWorksOutput
   filterResult: FilterWorksOutput
+}
+
+const TOOL_RUNTIME_LABELS: Record<ToolCallEvent['name'], string> = {
+  searchWorks: '文献检索',
+  getConceptTree: '概念扩展',
+  getRelatedWorks: '关联文献扩展',
+  filterWorks: '筛选过滤',
+  getAuthorWorks: '作者追踪',
+  rankAndDeduplicate: '排序去重',
+}
+
+function buildHeartbeatThinking(
+  stage: LiteratureSearchStage,
+  runningToolNames: ToolCallEvent['name'][],
+): string | null {
+  const uniqueRunningTools = Array.from(new Set(runningToolNames))
+
+  if (uniqueRunningTools.length === 1) {
+    const name = TOOL_RUNTIME_LABELS[uniqueRunningTools[0]]
+    return `正在调用 ${name}，等待工具返回结果。`
+  }
+
+  if (uniqueRunningTools.length > 1) {
+    const top3 = uniqueRunningTools.slice(0, 3).map(name => TOOL_RUNTIME_LABELS[name]).join('、')
+    if (uniqueRunningTools.length <= 3) {
+      return `正在并行调用 ${top3}，持续汇总候选文献。`
+    }
+    return `正在并行调用 ${uniqueRunningTools.length} 个工具（${top3} 等），持续汇总候选文献。`
+  }
+
+  return null
 }
 
 function stageDetail(stage: LiteratureSearchStage) {
@@ -326,11 +358,13 @@ async function runDiscoveryPass(
   queryGroups: QueryExpansionGroup[],
   filters: SearchFilters,
   onProgress?: (message: string) => void,
+  onThinking?: (message: string) => void,
   abortSignal?: AbortSignal,
 ): Promise<DiscoveryPassResult> {
   const extraKeywords = [...intent.coreConcepts, ...intent.relatedFields]
   const searchQueries = uniqueStrings(queryGroups.map(group => group.query)).slice(0, 5)
 
+  onThinking?.(`准备用 ${searchQueries.length} 组关键词并行检索 OpenAlex，涵盖核心概念及其同义表达。`)
   const keywordSearchResults = await Promise.all(
     searchQueries.map(query =>
       callTool<SearchWorksOutput>(tools.searchWorks, {
@@ -344,6 +378,7 @@ async function runDiscoveryPass(
   )
   onProgress?.(`关键词检索已返回 ${keywordSearchResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
 
+  onThinking?.(`使用 ${intent.coreConcepts.slice(0, 2).join('、')} 查询概念树，用于扩展检索范围到相关领域。`)
   const conceptTreeResults = await Promise.all(
     intent.coreConcepts.slice(0, 2).map(conceptName =>
       callTool<ConceptTreeOutput>(tools.getConceptTree, { conceptName }, abortSignal),
@@ -351,6 +386,9 @@ async function runDiscoveryPass(
   )
   onProgress?.(`概念扩展完成，命中 ${conceptTreeResults.filter(result => result.matched?.id).length} 个概念节点。`)
 
+  if (conceptTreeResults.some(result => result.matched?.id)) {
+    onThinking?.(`基于匹配的概念ID进行语义检索，补充关键词检索可能遗漏的相关文献。`)
+  }
   const conceptSearchResults = await Promise.all(
     conceptTreeResults
       .filter(result => result.matched?.id)
@@ -377,6 +415,7 @@ async function runDiscoveryPass(
     extraKeywords,
   )
 
+  onThinking?.(`对 ${combined.length} 篇候选应用筛选条件：年份范围、引用数阈值、开放获取等约束。`)
   const filterResult = await callTool<FilterWorksOutput>(tools.filterWorks, {
     workIds: combined.map(work => work.openAlexId),
     criteria: {
@@ -393,6 +432,7 @@ async function runDiscoveryPass(
 
   combined = mergeWorks(filterResult.works, queryGroups, extraKeywords)
 
+  onThinking?.(`对候选文献进行去重和综合排序，兼顾相关性、引用数、新颖性和开放性等多维度得分。`)
   const ranked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
     workList: combined,
     queryGroups,
@@ -434,29 +474,8 @@ export async function POST(req: NextRequest) {
     async start(controller) {
       let lastEventAt = Date.now()
       let heartbeatStage: LiteratureSearchStage = 'intent'
-      let heartbeatIndex = 0
-      const heartbeatHints: Record<LiteratureSearchStage, string[]> = {
-        intent: [
-          'Working... 正在等待意图分析模型返回澄清结果。',
-          'Working... 正在整理研究目标、核心概念与时间窗口。',
-        ],
-        expansion: [
-          'Working... 正在扩展同义词、近义术语和多语关键词。',
-          'Working... 正在组织多组检索表达式。',
-        ],
-        'parallel-search': [
-          'Working... OpenAlex 正在返回关键词检索结果。',
-          'Working... 正在汇总并行检索批次的候选文献。',
-        ],
-        analysis: [
-          'Working... 正在执行滚雪球扩展与作者追踪。',
-          'Working... 正在补充分析阶段的关联证据。',
-        ],
-        aggregation: [
-          'Working... 正在检阅结果质量并准备最终推荐。',
-          'Working... 正在生成结果摘要与阅读建议。',
-        ],
-      }
+      const runningTools = new Map<string, ToolCallEvent['name']>()
+      const thinkingCache = new Map<LiteratureSearchStage, { text: string; at: number }>()
       const heartbeatEnabledStages = new Set<LiteratureSearchStage>([
         'parallel-search',
         'analysis',
@@ -482,25 +501,35 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      const pushThinking = (stage: LiteratureSearchStage, text: string) => {
+      const pushThinking = (
+        stage: LiteratureSearchStage,
+        text: string,
+        source: 'manual' | 'heartbeat' = 'manual',
+      ) => {
+        const normalized = text.trim()
+        if (!normalized) return
+        const now = Date.now()
+        const cached = thinkingCache.get(stage)
+        const minGapMs = source === 'heartbeat' ? 12_000 : 1_500
+        if (cached && cached.text === normalized && now - cached.at < minGapMs) return
+        thinkingCache.set(stage, { text: normalized, at: now })
         send({
           type: 'thinking',
           bubble: {
             id: `${stage}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
             stage,
-            text,
+            text: normalized,
           },
         })
       }
 
       const heartbeat = setInterval(() => {
         if (!heartbeatEnabledStages.has(heartbeatStage)) return
-        if (Date.now() - lastEventAt < 2800) return
-        const hints = heartbeatHints[heartbeatStage]
-        const message = hints[heartbeatIndex % hints.length]
-        heartbeatIndex += 1
-        pushThinking(heartbeatStage, message)
-      }, 3000)
+        if (Date.now() - lastEventAt < 4500) return
+        const message = buildHeartbeatThinking(heartbeatStage, Array.from(runningTools.values()))
+        if (!message) return
+        pushThinking(heartbeatStage, message, 'heartbeat')
+      }, 5000)
 
       try {
         send({
@@ -512,7 +541,14 @@ export async function POST(req: NextRequest) {
         const tools = createOpenAlexToolset({
           signal: req.signal,
           workRegistry,
-          report: tool => send({ type: 'tool', tool }),
+          report: tool => {
+            if (tool.status === 'running') {
+              runningTools.set(tool.id, tool.name)
+            } else {
+              runningTools.delete(tool.id)
+            }
+            send({ type: 'tool', tool })
+          },
         })
 
         ensureActive(req.signal)
@@ -556,6 +592,7 @@ export async function POST(req: NextRequest) {
           activeQueryGroups,
           baseFilters,
           message => pushThinking('parallel-search', message),
+          message => pushThinking('parallel-search', message), // Add onThinking callback
           req.signal,
         )
 
@@ -581,6 +618,7 @@ export async function POST(req: NextRequest) {
             activeQueryGroups,
             retryFilters,
             message => pushThinking('parallel-search', message),
+            message => pushThinking('parallel-search', message), // Add onThinking callback
             req.signal,
           )
 
@@ -619,6 +657,9 @@ export async function POST(req: NextRequest) {
         const activeFilters = buildRetryFilters(baseFilters, retryCount)
         let analysisEnriched = applyAnalysisToPapers(discovery.ranked.works, analysis)
 
+        if (analysis.newQueries.length > 0) {
+          pushThinking('analysis', `使用Agent提取的 ${analysis.newQueries.length} 个新查询词进行补充检索。`)
+        }
         const reSearchResults = analysis.newQueries.length > 0
           ? await Promise.all(
               analysis.newQueries.map(searchQuery =>
@@ -636,6 +677,9 @@ export async function POST(req: NextRequest) {
           pushThinking('analysis', `补充检索新增 ${reSearchResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
         }
 
+        if (analysis.corePaperIds.length > 0) {
+          pushThinking('analysis', `对 ${analysis.corePaperIds.slice(0, 2).length} 篇核心论文做引用和被引双向扩展。`)
+        }
         const relatedResults = analysis.corePaperIds.length > 0
           ? await Promise.all(
               analysis.corePaperIds
@@ -651,6 +695,9 @@ export async function POST(req: NextRequest) {
         }
 
         const authorIds = getPrimaryAuthorIds(analysisEnriched.slice(0, 5))
+        if (authorIds.length > 0) {
+          pushThinking('analysis', `追踪 ${authorIds.length} 位高产作者的近期工作，补充相关文献。`)
+        }
         const authorResults = authorIds.length > 0
           ? await Promise.all(
               authorIds.map(authorId =>
@@ -683,12 +730,14 @@ export async function POST(req: NextRequest) {
         pushStage('aggregation', 'in_progress')
         pushThinking('aggregation', '开始综合排序，并由结果检阅智能体判断是否需要再次重检。')
 
+        pushThinking('aggregation', `对 ${analysisEnriched.length} 篇候选文献进行最终排序和去重。`)
         let finalRanked = await callTool<RankedWorksOutput>(tools.rankAndDeduplicate, {
           workList: analysisEnriched,
           queryGroups: activeQueryGroups,
           extraKeywords: [...intent.coreConcepts, ...intent.relatedFields, ...analysis.newQueries],
         }, req.signal)
 
+        pushThinking('aggregation', '调用结果检阅Agent评估Top-12候选文献的质量和覆盖度。')
         let review = await runResultReviewAgent(intent, finalRanked.works.slice(0, 12), modelConfig)
         let reviewNotes = uniqueStrings(review.reviewNotes)
 
@@ -716,12 +765,14 @@ export async function POST(req: NextRequest) {
           send({ type: 'strategy', queryGroups: activeQueryGroups, intent })
 
           const reviewRetryFilters = buildRetryFilters(baseFilters, retryCount, review)
+          pushThinking('aggregation', `基于检阅意见，使用更宽松的筛选条件重新检索 ${retryQueries.length} 组查询。`)
           const reviewRetryPass = await runDiscoveryPass(
             tools,
             intent,
             activeQueryGroups,
             reviewRetryFilters,
             message => pushThinking('aggregation', message),
+            message => pushThinking('aggregation', message), // Add onThinking callback
             req.signal,
           )
 

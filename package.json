@@ -36,6 +36,7 @@
     "@blocknote/xl-ai": "^0.47.1",
     "@heroui/react": "^2.8.10",
     "@iconify/react": "^6.0.2",
+    "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@xyflow/react": "^12.10.1",
     "ai": "^6.0.116",
     "chromadb": "^3.3.3",

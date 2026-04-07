@@ -21,34 +21,103 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Get commit history
+        id: commits
+        run: |
+          BASE_BRANCH="origin/master"
+
+          # 获取 commit 数量
+          COMMIT_COUNT=$(git rev-list --count "$BASE_BRANCH"..HEAD)
+          echo "count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+
+          # 生成完整 commit 列表
+          COMMITS=$(git log "$BASE_BRANCH"..HEAD --pretty=format:"- %s (\`%h\`) — @%an" --reverse)
+
+          # 按类型分组
+          WHATS_NEW=""
+          BUG_FIXES=""
+          REFACTORING=""
+          DOCS_AND_TESTS=""
+          MAINTENANCE=""
+          OTHER_CHANGES=""
+
+          while IFS='|' read -r SUBJECT HASH AUTHOR; do
+            [ -z "$SUBJECT" ] && continue
+
+            LOWER_SUBJECT=$(printf '%s' "$SUBJECT" | tr '[:upper:]' '[:lower:]')
+            ENTRY="- $SUBJECT (\`$HASH\`) — @$AUTHOR"
+
+            case "$LOWER_SUBJECT" in
+              feat:*|feat\(*\):*|feature:*|add:*|implement:* )
+                WHATS_NEW="$WHATS_NEW$ENTRY\n"
+                ;;
+              fix:*|fix\(*\):*|bugfix:*|hotfix:* )
+                BUG_FIXES="$BUG_FIXES$ENTRY\n"
+                ;;
+              refactor:*|refactor\(*\):*|perf:*|perf\(*\):*|optimize:* )
+                REFACTORING="$REFACTORING$ENTRY\n"
+                ;;
+              docs:*|docs\(*\):*|test:*|test\(*\):* )
+                DOCS_AND_TESTS="$DOCS_AND_TESTS$ENTRY\n"
+                ;;
+              chore:*|chore\(*\):*|build:*|build\(*\):*|ci:*|ci\(*\):*|style:* )
+                MAINTENANCE="$MAINTENANCE$ENTRY\n"
+                ;;
+              * )
+                OTHER_CHANGES="$OTHER_CHANGES$ENTRY\n"
+                ;;
+            esac
+          done < <(git log "$BASE_BRANCH"..HEAD --pretty=format:'%s|%h|%an' --reverse)
+
+          append_section() {
+            local TITLE="$1"
+            local CONTENT="$2"
+
+            if [ -n "$CONTENT" ]; then
+              PR_BODY="$PR_BODY$TITLE\n$CONTENT\n"
+            fi
+          }
+
+          PR_BODY="## Summary\n\n"
+          PR_BODY="$PR_BODY- Sync branch: \`${{ github.ref_name }}\` → \`master\`\n"
+          PR_BODY="$PR_BODY- Total updates: **$COMMIT_COUNT** commit(s)\n"
+          PR_BODY="$PR_BODY- Latest commit: \`${{ github.sha }}\`\n\n"
+
+          append_section "## What's New" "$WHATS_NEW"
+          append_section "## Bug Fixes" "$BUG_FIXES"
+          append_section "## Refactoring & Improvements" "$REFACTORING"
+          append_section "## Docs & Tests" "$DOCS_AND_TESTS"
+          append_section "## Maintenance" "$MAINTENANCE"
+          append_section "## Other Changes" "$OTHER_CHANGES"
+
+          PR_BODY="$PR_BODY## Full Commit History\n$COMMITS\n\n"
+          PR_BODY="$PR_BODY## PR Metadata\n\n"
+          PR_BODY="$PR_BODY- Branch: \`${{ github.ref_name }}\`\n"
+          PR_BODY="$PR_BODY- Triggered by: @${{ github.actor }}\n"
+          PR_BODY="$PR_BODY- Event time: ${{ github.event.head_commit.timestamp }}\n\n"
+          PR_BODY="$PR_BODY## Pre-Merge Checklist\n\n"
+          PR_BODY="$PR_BODY- [ ] Code review completed\n"
+          PR_BODY="$PR_BODY- [ ] All checks passed\n"
+          PR_BODY="$PR_BODY- [ ] Breaking changes reviewed\n"
+          PR_BODY="$PR_BODY- [ ] Version update completed (if needed)\n\n"
+          PR_BODY="$PR_BODY**Recommended merge strategy:** \`Squash and Merge\`"
+
+          {
+            echo "commits<<EOF"
+            printf '%s\n' "$COMMITS"
+            echo "EOF"
+            echo "body<<EOF"
+            printf '%b\n' "$PR_BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create or Update Pull Request
         uses: repo-sync/pull-request@v2
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           source_branch: ${{ github.ref_name }}
           destination_branch: master
-          pr_title: "🚀 Auto PR: ${{ github.ref_name }}"
-          pr_body: |
-            ## 📝 Description
-            
-            This PR is automatically created/updated from branch `${{ github.ref_name }}`.
-            
-            ### 📋 Latest Commit
-            ```
-            ${{ github.event.head_commit.message }}
-            ```
-            
-            **Commit SHA**: `${{ github.sha }}`  
-            **Author**: @${{ github.actor }}  
-            **Pusher**: @${{ github.event.pusher.name }}
-            
-            ### ⚠️ Before Merging
-            - [ ] Review all changes
-            - [ ] Update version if needed
-            - [ ] Verify all checks pass
-            - [ ] Use **Squash and Merge** when ready
-            
-            ---
-            _This PR is automatically managed and will sync with new commits to `${{ github.ref_name }}`._
+          pr_title: "Sync `${{ github.ref_name }}` into master · ${{ steps.commits.outputs.count }} update(s)"
+          pr_body: ${{ steps.commits.outputs.body }}
           pr_label: "automated,auto-pr"
           pr_allow_empty: false

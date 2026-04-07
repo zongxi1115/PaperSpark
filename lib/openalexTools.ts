@@ -282,6 +282,7 @@ async function runToolWithReport<T>(
       status: 'completed',
       inputSummary: summarizeInput(input),
       resultCount: getResultCount(result),
+      output: result,
     })
     return result
   } catch (error) {

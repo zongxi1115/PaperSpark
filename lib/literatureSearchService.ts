@@ -289,7 +289,7 @@ function fallbackQueryGroups(intent: SearchIntent): QueryExpansionGroup[] {
   const base = concepts.slice(0, 4)
 
   return base.map((concept, index) => ({
-    id: `group-${index + 1}`,
+    id: `group-${Date.now()}-${index}`,
     label: index === 0 ? '核心问题' : `扩展方向 ${index}`,
     focus: index === 0 ? '直接覆盖原始研究问题' : `围绕 ${concept} 扩展相邻概念`,
     query: index === 0 ? intent.clarifiedQuery : `${concept} AND ${intent.coreConcepts[0] || concept}`,
@@ -304,7 +304,7 @@ function normalizeQueryGroups(groups: QueryExpansionGroup[], fallback: QueryExpa
     .filter(group => group.query?.trim())
     .slice(0, 5)
     .map((group, index) => ({
-      id: group.id || `group-${index + 1}`,
+      id: group.id || `group-${Date.now()}-${index}`,
       label: group.label?.trim() || `检索组 ${index + 1}`,
       focus: group.focus?.trim() || '补充相关方向',
       query: group.query.trim(),

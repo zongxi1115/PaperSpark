@@ -36,6 +36,7 @@ import {
   ChainOfThoughtContent,
   ChainOfThoughtItem,
 } from '@/components/ui/chain-of-thought'
+import { Tool, type ToolPart } from '@/components/ui/tool'
 
 type AnswerState = Record<string, { value: string; customText: string }>
 
@@ -155,6 +156,14 @@ function parseToolInputSummary(name: ToolCallEvent['name'], inputSummary: string
   } catch {
     return inputSummary ? [inputSummary] : []
   }
+}
+
+function toToolRecord(value: unknown): Record<string, unknown> | undefined {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+
+  return undefined
 }
 
 function isNumericLikeValue(value: string | number) {
@@ -935,6 +944,10 @@ function ProcessLogCard({
               const isTool = item.type === 'tool'
               const isQuery = item.type === 'queryGroup'
               const isLatest = index === timeline.length - 1 && isLoading
+              const toolEvent = isTool ? item.data as ToolCallEvent : undefined
+              const toolOutput = toolEvent
+                ? toToolRecord(toolEvent.output) || (toolEvent.note ? { note: toolEvent.note } : undefined)
+                : undefined
 
               return (
                 <ChainOfThoughtStep key={`${item.seq}-${item.type}`} defaultOpen={isLatest || index >= timeline.length - 3}>
@@ -995,25 +1008,21 @@ function ProcessLogCard({
                     )}
                     
                     {isTool && (
-                      <div className="space-y-2">
-                        <div className={cn(
-                          "rounded-lg border px-3 py-2.5 text-sm",
-                          (item.data as ToolCallEvent).status === 'running'
-                            ? "border-blue-100 bg-blue-50/30 dark:border-blue-900 dark:bg-blue-900/20"
-                            : (item.data as ToolCallEvent).status === 'error'
-                              ? "border-red-100 bg-red-50/30 dark:border-red-900 dark:bg-red-900/20"
-                              : "border-gray-100 bg-gray-50/30 dark:border-gray-800 dark:bg-gray-800/30"
-                        )}>
-                          <div className="font-mono text-xs text-gray-600 dark:text-gray-400">
-                            {(item.data as ToolCallEvent).inputSummary}
-                          </div>
-                        </div>
-                        {(item.data as ToolCallEvent).note && (
-                          <div className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-xs leading-relaxed text-gray-500 dark:border-gray-800 dark:bg-gray-900 dark:text-gray-400">
-                            💡 {(item.data as ToolCallEvent).note}
-                          </div>
-                        )}
-                      </div>
+                      <Tool 
+                        toolPart={{
+                          type: toolEvent!.name,
+                          state: toolEvent!.status === 'running' 
+                            ? 'input-streaming' 
+                            : toolEvent!.status === 'error'
+                              ? 'output-error'
+                              : 'output-available',
+                          input: toolEvent!.inputSummary ? { summary: toolEvent!.inputSummary } : undefined,
+                          output: toolOutput,
+                          toolCallId: toolEvent!.id,
+                          errorText: toolEvent!.status === 'error' ? (toolEvent!.note || '工具调用失败') : undefined
+                        } satisfies ToolPart}
+                        defaultOpen={isLatest}
+                      />
                     )}
                     
                     {isQuery && (
@@ -1050,6 +1059,22 @@ function ProcessLogCard({
               )
             })}
           </ChainOfThought>
+          
+          {/* Loading indicator - thinking animation */}
+          {isLoading && (
+            <div className="mt-3 flex items-center gap-2 px-3 py-2">
+              <motion.div
+                animate={!reduceMotion ? { rotate: 360 } : undefined}
+                transition={{ duration: 1.2, repeat: Infinity, ease: "linear" }}
+                className="text-blue-500"
+              >
+                <LoadingSpinnerIcon />
+              </motion.div>
+              <AnimatedShinyText shimmerWidth={120} className="text-sm font-medium text-blue-600 dark:text-blue-400">
+                思考中...
+              </AnimatedShinyText>
+            </div>
+          )}
         </div>
       )}
 

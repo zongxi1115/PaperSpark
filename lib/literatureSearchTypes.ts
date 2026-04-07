@@ -180,6 +180,7 @@ export interface ToolCallEvent {
   inputSummary: string
   resultCount?: number
   note?: string
+  output?: unknown
 }
 
 export interface ThoughtBubble {

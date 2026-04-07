@@ -1,11 +1,15 @@
 name: Release
 on:
-  push:
+  pull_request:
+    types:
+      - closed
     branches:
       - master
 
 jobs:
   release:
+    # 只在 PR 被 merge 时运行（不是 close 或 reject）
+    if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -1,23 +1,17 @@
 name: Build and Push Next.js Image
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
     branches: [main, master]
-    paths:
-      - "app/**"
-      - "components/**"
-      - "lib/**"
-      - "public/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "next.config.ts"
-      - "Dockerfile.next"
-      - ".github/workflows/nextjs-docker.yml"
   workflow_dispatch:
 
 jobs:
   docker:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[docker]')
+    # Release 成功完成后自动构建，或手动触发
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read

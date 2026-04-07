@@ -1,0 +1,54 @@
+name: Auto Create/Update PR
+
+on:
+  push:
+    branches:
+      - dev
+      - develop
+      - feature/**
+      - fix/**
+      - hotfix/**
+
+jobs:
+  auto-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create or Update Pull Request
+        uses: repo-sync/pull-request@v2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          source_branch: ${{ github.ref_name }}
+          destination_branch: master
+          pr_title: "🚀 Auto PR: ${{ github.ref_name }}"
+          pr_body: |
+            ## 📝 Description
+            
+            This PR is automatically created/updated from branch `${{ github.ref_name }}`.
+            
+            ### 📋 Latest Commit
+            ```
+            ${{ github.event.head_commit.message }}
+            ```
+            
+            **Commit SHA**: `${{ github.sha }}`  
+            **Author**: @${{ github.actor }}  
+            **Pusher**: @${{ github.event.pusher.name }}
+            
+            ### ⚠️ Before Merging
+            - [ ] Review all changes
+            - [ ] Update version if needed
+            - [ ] Verify all checks pass
+            - [ ] Use **Squash and Merge** when ready
+            
+            ---
+            _This PR is automatically managed and will sync with new commits to `${{ github.ref_name }}`._
+          pr_label: "automated,auto-pr"
+          pr_allow_empty: false

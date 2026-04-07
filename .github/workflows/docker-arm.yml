@@ -1,24 +1,17 @@
 name: Build and Push ARM64 Images
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
     branches: [main, master]
-    paths:
-      - "app/**"
-      - "components/**"
-      - "lib/**"
-      - "public/**"
-      - "package.json"
-      - "pnpm-lock.yaml"
-      - "next.config.ts"
-      - "Dockerfile.next"
-      - "services/surya_ocr_service/**"
-      - ".github/workflows/docker-arm.yml"
   workflow_dispatch:
 
 jobs:
   nextjs-arm64:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[docker-arm]')
+    # Release 成功完成后自动构建，或手动触发
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -52,7 +45,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=nextjs-arm64
 
   surya-cpu-arm64:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[docker-arm]')
+    # Release 成功完成后自动构建，或手动触发
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read

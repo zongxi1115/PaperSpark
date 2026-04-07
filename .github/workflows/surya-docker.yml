@@ -1,16 +1,17 @@
 name: Build and Push Surya OCR Image
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Release"]
+    types:
+      - completed
     branches: [main, master]
-    paths:
-      - "services/surya_ocr_service/**"
-      - ".github/workflows/surya-docker.yml"
   workflow_dispatch:
 
 jobs:
   docker:
-    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[docker]')
+    # Release 成功完成后自动构建，或手动触发
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read

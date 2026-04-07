@@ -501,6 +501,37 @@ pnpm data:cli search "transformer"
 pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.json
 ```
 
+## 开发与发版流程
+
+本项目采用基于 Pull Request 的发版流程。详细的工作流说明请参考：
+
+**📖 [完整工作流文档](.github/WORKFLOW.md)**
+
+### 快速开始开发
+
+```bash
+# 1. 创建开发分支
+git checkout -b dev  # 或 feature/xxx, fix/xxx
+
+# 2. 进行开发并提交
+git add .
+git commit -m "feat: 添加新功能"
+git push origin dev
+
+# 3. 自动创建 PR（无需手动操作）
+# GitHub Actions 会自动为你创建或更新 PR
+
+# 4. 代码审查通过后，使用 Squash and Merge 合并
+# 合并后会自动触发发版流程
+```
+
+### 重要提示
+
+- ✅ 每次 push 到开发分支会自动创建/更新 PR
+- ✅ 只有 PR merge 到 master 后才会自动发版
+- ✅ 遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范
+- ⚠️ 不要直接 push 到 master 分支
+
 ## Roadmap
 
 - [x] Word解析

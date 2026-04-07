@@ -112,12 +112,34 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Create or Update Pull Request
-        uses: repo-sync/pull-request@v2
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          source_branch: ${{ github.ref_name }}
-          destination_branch: master
-          pr_title: "Sync `${{ github.ref_name }}` into master · ${{ steps.commits.outputs.count }} update(s)"
-          pr_body: ${{ steps.commits.outputs.body }}
-          pr_label: "automated,auto-pr"
-          pr_allow_empty: false
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          DESTINATION_BRANCH: master
+          PR_TITLE: "Sync `${{ github.ref_name }}` into master · ${{ steps.commits.outputs.count }} update(s)"
+          PR_BODY: ${{ steps.commits.outputs.body }}
+        run: |
+          EXISTING_PR_NUMBER=$(gh pr list \
+            --head "$SOURCE_BRANCH" \
+            --base "$DESTINATION_BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -n "$EXISTING_PR_NUMBER" ] && [ "$EXISTING_PR_NUMBER" != "null" ]; then
+            gh pr edit "$EXISTING_PR_NUMBER" \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY"
+
+            gh pr edit "$EXISTING_PR_NUMBER" \
+              --add-label automated \
+              --add-label auto-pr
+          else
+            gh pr create \
+              --base "$DESTINATION_BRANCH" \
+              --head "$SOURCE_BRANCH" \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY" \
+              --label automated \
+              --label auto-pr
+          fi

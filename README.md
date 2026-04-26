@@ -506,6 +506,7 @@ pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.jso
 ### 重要提示
 
 - ✅ 每次 push 到开发分支会自动创建/更新 PR
+- ✅ 普通 PR merge 到 master 后只会更新工作版本号，不会正式发版
 - ✅ 只有带 `release` label 的 PR merge 到 master 后才会自动发版
 - ✅ 遵循 [Conventional Commits](https://www.conventionalcommits.org/) 规范
 - ⚠️ 尽量不要直接使用 Squash and Merge；如必须 squash，请把最终提交标题改成 Conventional Commit

@@ -99,7 +99,7 @@ jobs:
           PR_BODY="$PR_BODY- [ ] Code review completed\n"
           PR_BODY="$PR_BODY- [ ] All checks passed\n"
           PR_BODY="$PR_BODY- [ ] Breaking changes reviewed\n"
-          PR_BODY="$PR_BODY- [ ] Add \`release\` label if this PR should publish a new version\n"
+          PR_BODY="$PR_BODY- [ ] Add \`release\` label if this PR should publish an official release\n"
           PR_BODY="$PR_BODY- [ ] Conventional commit messages preserved for semantic-release\n\n"
           PR_BODY="$PR_BODY**Recommended merge strategy:** \`Create a merge commit\` (or \`Rebase and merge\`). Avoid \`Squash and Merge\` unless you rewrite the final commit title as a Conventional Commit."
 

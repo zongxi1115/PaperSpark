@@ -1,0 +1,62 @@
+name: Bump Working Version
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - master
+
+concurrency:
+  group: master-versioning
+  cancel-in-progress: false
+
+jobs:
+  bump-working-version:
+    if: github.event.pull_request.merged == true && !contains(github.event.pull_request.labels.*.name, 'release')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Resolve latest release version
+        id: latest-release
+        shell: bash
+        run: |
+          LATEST_TAG="$(git describe --tags --abbrev=0 --match 'v*' 2>/dev/null || true)"
+          echo "version=${LATEST_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Bump working version
+        id: bump
+        shell: bash
+        run: |
+          NEW_VERSION="$(node scripts/bump-working-version.mjs "${{ steps.latest-release.outputs.version }}")"
+          echo "version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push version bump
+        shell: bash
+        run: |
+          git add package.json
+
+          if git diff --cached --quiet; then
+            echo "No version change detected"
+            exit 0
+          fi
+
+          git commit -m "chore(version): bump working version to ${{ steps.bump.outputs.version }} [skip ci]"
+          git push origin HEAD:${{ github.event.pull_request.base.ref }}

@@ -1,10 +1,14 @@
-name: Release and Deploy
+name: Release
 on:
   pull_request:
     types:
       - closed
     branches:
       - master
+
+concurrency:
+  group: master-versioning
+  cancel-in-progress: false
 
 jobs:
   release:

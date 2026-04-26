@@ -16,7 +16,7 @@ import { CustomDragHandleMenu } from './CustomDragHandleMenu'
 import { BlockNoteView } from '@blocknote/mantine'
 import { zh } from '@blocknote/core/locales'
 import { filterSuggestionItems } from '@blocknote/core/extensions'
-import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core'
+import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs, defaultStyleSpecs } from '@blocknote/core'
 import type { Block } from '@blocknote/core'
 import {
   AIExtension,
@@ -31,13 +31,16 @@ import { DefaultChatTransport } from 'ai'
 import { Button, Divider, Tooltip, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Input, useDisclosure } from '@heroui/react'
 import { TocSidebar } from '@/components/Sidebar/TocSidebar'
 import { RightSidebar } from '@/components/Sidebar/RightSidebar'
-import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems, saveDocumentVersion, calculateWordCount, addComment, generateId } from '@/lib/storage'
+import { getDocument, saveDocument, setLastDocId, getSettings, getSelectedSmallModel, getSelectedLargeModel, getKnowledgeItem, getKnowledgeItems, saveDocumentVersion, calculateWordCount, addComment } from '@/lib/storage'
 import type { AppDocument, AppSettings, ArticleAuthor, DocumentVersion } from '@/lib/types'
+import { extractInlineText } from '@/lib/agentDocument'
+import { removeCommentThreadMarks } from '@/lib/commentStyles'
 import { VersionHistoryPanel } from './VersionHistoryPanel'
 import { continueWritingItem, translateItem, polishItem } from './aiCommands'
 import { FormulaInlineContentSpec } from './InlineFormula'
 import { FormulaInputExtension } from '@/lib/formulaInputExtension'
 import { CitationInlineContentSpec, CitationData, dispatchCitationInsert } from './CitationBlock'
+import { COMMENT_THREAD_STYLE_TYPE, CommentThreadStyleSpec } from './CommentThreadStyle'
 import { getThemeById, buildBlockNoteTheme, injectGoogleFont } from '@/lib/editorThemes'
 import { registerEditor, unregisterEditor } from '@/lib/editorContext'
 import { exportToLatex, type LatexExportLanguage } from '@/lib/latexExporter'
@@ -48,6 +51,7 @@ import { QuoteToAssistantButton } from './QuoteToAssistantButton'
 import { CommentToolbarButton } from './CommentToolbarButton'
 import { useIsMobile } from '@/lib/useIsMobile'
 import useClickOutside from '@/hooks/useClickOutside'
+import { DocumentIssueHighlighter } from '@/components/Assistant/tools/DocumentIssueHighlighter'
 
 // 自定义 Schema：包含行内公式和引用
 const schema = BlockNoteSchema.create({
@@ -59,6 +63,10 @@ const schema = BlockNoteSchema.create({
     ...defaultInlineContentSpecs,
     formula: FormulaInlineContentSpec,
     citation: CitationInlineContentSpec,
+  },
+  styleSpecs: {
+    ...defaultStyleSpecs,
+    commentThread: CommentThreadStyleSpec,
   },
 })
 
@@ -161,7 +169,7 @@ function extractTitle(content: Block[], articleTitle?: string): string {
   if (content.length > 0) {
     const first = content[0] as { type: string; content?: { type: string; text: string }[] }
     if (first.type === 'heading' || first.type === 'paragraph') {
-      const text = first.content?.filter(c => c.type === 'text').map(c => c.text).join('') ?? ''
+      const text = extractInlineText(first.content)
       if (text.trim()) return (first.type === 'heading' ? text.trim() : text.trim().slice(0, 40))
     }
   }
@@ -169,8 +177,8 @@ function extractTitle(content: Block[], articleTitle?: string): string {
 }
 
 function getBlockPlainText(block: Block): string {
-  const b = block as { content?: { type: string; text: string }[] }
-  return b.content?.filter(c => c.type === 'text').map(c => c.text).join('') ?? ''
+  const b = block as { content?: unknown }
+  return extractInlineText(b.content)
 }
 
 function getAuthorChipLabel(authors: ArticleAuthor[]): string {
@@ -256,6 +264,84 @@ function sanitizeBlockTree(content: unknown): Block[] {
   return content
     .map((node) => sanitizeNode(node))
     .filter((node): node is Block => node !== null)
+}
+
+function stripCommentThreadStyleFromInlineContent(content: unknown): unknown {
+  if (!Array.isArray(content)) return content
+
+  return content.map((item) => {
+    if (!item || typeof item !== 'object') return item
+
+    const node = item as Record<string, unknown>
+    const nextNode: Record<string, unknown> = { ...node }
+
+    if (node.styles && typeof node.styles === 'object') {
+      const nextStyles = { ...(node.styles as Record<string, unknown>) }
+      delete nextStyles[COMMENT_THREAD_STYLE_TYPE]
+      nextNode.styles = nextStyles
+    }
+
+    if (Array.isArray(node.content)) {
+      nextNode.content = stripCommentThreadStyleFromInlineContent(node.content)
+    }
+
+    return nextNode
+  })
+}
+
+function normalizeBlockForCommentDiff(block: Block): unknown {
+  const current = block as Record<string, unknown>
+  return {
+    ...current,
+    content: stripCommentThreadStyleFromInlineContent(current.content),
+    children: Array.isArray(current.children)
+      ? (current.children as Block[]).map((child) => normalizeBlockForCommentDiff(child))
+      : current.children,
+  }
+}
+
+function isCommentThreadOnlyUpdate(block: Block, prevBlock: Block): boolean {
+  return JSON.stringify(normalizeBlockForCommentDiff(block)) === JSON.stringify(normalizeBlockForCommentDiff(prevBlock))
+}
+
+function replaceBlocksInTree(blocks: Block[], updatesById: Map<string, Block>): Block[] {
+  return blocks.map((block) => {
+    const replacement = updatesById.get(block.id)
+    if (replacement) {
+      return replacement
+    }
+
+    if (block.children.length === 0) {
+      return block
+    }
+
+    return {
+      ...block,
+      children: replaceBlocksInTree(block.children, updatesById),
+    }
+  })
+}
+
+function hasCitationInlineContent(content: unknown): boolean {
+  if (Array.isArray(content)) {
+    return content.some((item) => hasCitationInlineContent(item))
+  }
+
+  if (!content || typeof content !== 'object') return false
+  const node = content as Record<string, unknown>
+
+  if (node.type === 'citation') return true
+  if (Array.isArray(node.content)) return hasCitationInlineContent(node.content)
+  return false
+}
+
+function isHeadingRelatedChange(change: { block: Block; prevBlock?: Block }): boolean {
+  return change.block.type === 'heading' || change.prevBlock?.type === 'heading'
+}
+
+function isCitationRelatedChange(change: { block: Block; prevBlock?: Block }): boolean {
+  return hasCitationInlineContent((change.block as { content?: unknown }).content)
+    || hasCitationInlineContent((change.prevBlock as { content?: unknown } | undefined)?.content)
 }
 
 function getSafeCurrentDocumentBlocks(editor: ReturnType<typeof useCreateBlockNote>): Block[] {
@@ -405,7 +491,10 @@ export function EditorPageContent({ docId }: EditorPageProps) {
 
   // 选中文本评论相关状态
   const [selectedText, setSelectedText] = useState<string | null>(null)
+  const [pendingCommentThreadId, setPendingCommentThreadId] = useState<string | null>(null)
   const [selectedBlockId, setSelectedBlockId] = useState<string | undefined>(undefined)
+  const [selectedCommentStartOffset, setSelectedCommentStartOffset] = useState<number | undefined>(undefined)
+  const [selectedCommentEndOffset, setSelectedCommentEndOffset] = useState<number | undefined>(undefined)
   const [commentModalPosition, setCommentModalPosition] = useState<{ top: number; left: number } | null>(null)
   const [commentContent, setCommentContent] = useState('')
 
@@ -433,9 +522,12 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   const correctTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const completeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const completeAbortRef = useRef<AbortController | null>(null)
+  const commentOnlySaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const contentSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const editorFocusedRef = useRef(true)
   const lastCorrectedRef = useRef<string>('')
   const settingsRef = useRef<AppSettings>(settings)
+  const docRef = useRef<AppDocument | null>(null)
   const ghostTextRef = useRef<string | null>(null) // 用于 Tab 键处理
   const citationsRef = useRef<Map<string, CitationData>>(new Map()) // 用于事件处理中获取最新引用
 
@@ -553,10 +645,22 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     ghostTextRef.current = ghostText
   }, [ghostText])
 
+  useEffect(() => {
+    docRef.current = doc
+  }, [doc])
+
   // 同步 citationsRef
   useEffect(() => {
     citationsRef.current = citations
   }, [citations])
+
+  useEffect(() => {
+    const frameId = requestAnimationFrame(() => {
+      window.dispatchEvent(new Event('editor-content-updated'))
+    })
+
+    return () => cancelAnimationFrame(frameId)
+  }, [docId, blocks.length])
 
   // 监听引用插入事件
   useEffect(() => {
@@ -679,10 +783,13 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     editorElement?.addEventListener('focusin', handleFocusIn)
     
     // 监听评论工具栏按钮事件
-    const handleEditorComment = (e: CustomEvent<{ text: string; blockId?: string; position: { top: number; left: number } }>) => {
-      const { text, blockId, position } = e.detail
+    const handleEditorComment = (e: CustomEvent<{ threadId: string; text: string; blockId?: string; startOffset?: number; endOffset?: number; position: { top: number; left: number } }>) => {
+      const { threadId, text, blockId, startOffset, endOffset, position } = e.detail
+      setPendingCommentThreadId(threadId)
       setSelectedText(text)
       setSelectedBlockId(blockId)
+      setSelectedCommentStartOffset(startOffset)
+      setSelectedCommentEndOffset(endOffset)
       setCommentModalPosition(position)
       setCommentContent('')
     }
@@ -812,6 +919,21 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [syncSettingsFromStorage])
+
+  useEffect(() => {
+    return () => {
+      if (commentOnlySaveTimeoutRef.current) {
+        clearTimeout(commentOnlySaveTimeoutRef.current)
+      }
+      if (contentSaveTimeoutRef.current) {
+        clearTimeout(contentSaveTimeoutRef.current)
+        const pendingDoc = docRef.current
+        if (pendingDoc) {
+          saveDocument(pendingDoc)
+        }
+      }
+    }
+  }, [])
 
   // 保存文章元数据
   const saveArticleMetadata = useCallback(() => {
@@ -1197,14 +1319,53 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     }
   }, [editor, settings])
 
-  const handleChange = useCallback(() => {
-    const current = editor.document as Block[]
-    setBlocks(current)
+  const handleChange = useCallback((_changedEditor: any, ctx?: { getChanges: () => Array<{ type: string; block: Block; prevBlock?: Block }> }) => {
+    const changes = ctx?.getChanges() || []
+    const commentOnlyChange = changes.length > 0 && changes.every((change) => (
+      change.type === 'update'
+      && change.prevBlock
+      && isCommentThreadOnlyUpdate(change.block as Block, change.prevBlock as Block)
+    ))
+    const shouldRefreshSidebarBlocks = changes.length === 0 || changes.some((change) => (
+      change.type !== 'update' || isHeadingRelatedChange(change)
+    ))
+    const shouldReindexCitations = changes.length === 0 || changes.some((change) => (
+      change.type !== 'update' || isCitationRelatedChange(change)
+    ))
+    const activeDoc = docRef.current
 
-    if (!doc) return
+    if (!activeDoc) return
+
+    if (commentOnlyChange) {
+      const current = replaceBlocksInTree(
+        activeDoc.content as Block[],
+        new Map(changes.map((change) => [change.block.id, change.block as Block])),
+      )
+      const updated: AppDocument = {
+        ...activeDoc,
+        content: current,
+        updatedAt: new Date().toISOString(),
+      }
+
+      docRef.current = updated
+
+      if (commentOnlySaveTimeoutRef.current) {
+        clearTimeout(commentOnlySaveTimeoutRef.current)
+      }
+      commentOnlySaveTimeoutRef.current = setTimeout(() => {
+        const latestDoc = docRef.current
+        if (latestDoc) {
+          saveDocument(latestDoc)
+        }
+        commentOnlySaveTimeoutRef.current = null
+      }, 80)
+      return
+    }
+
+    const current = editor.document as Block[]
     const title = extractTitle(current, articleTitle)
     const updated: AppDocument = {
-      ...doc,
+      ...activeDoc,
       title,
       content: current,
       articleTitle,
@@ -1214,8 +1375,24 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       articleDate,
       updatedAt: new Date().toISOString(),
     }
-    setDoc(updated)
-    saveDocument(updated)
+
+    docRef.current = updated
+
+    if (shouldRefreshSidebarBlocks) {
+      setBlocks(current)
+    }
+
+    if (contentSaveTimeoutRef.current) {
+      clearTimeout(contentSaveTimeoutRef.current)
+    }
+    contentSaveTimeoutRef.current = setTimeout(() => {
+      const latestDoc = docRef.current
+      if (latestDoc) {
+        setDoc(latestDoc)
+        saveDocument(latestDoc)
+      }
+      contentSaveTimeoutRef.current = null
+    }, 180)
 
     // 清除之前的 ghost text
     setGhostVisible(false)
@@ -1225,9 +1402,11 @@ export function EditorPageContent({ docId }: EditorPageProps) {
     }, 150)
     
     // 重新索引引用（延迟执行，避免频繁更新）
-    setTimeout(() => {
-      reindexCitations()
-    }, 100)
+    if (shouldReindexCitations) {
+      setTimeout(() => {
+        reindexCitations()
+      }, 100)
+    }
 
     // Auto-correct: debounce 2.5s
     const smallModelConfig = getSelectedSmallModel(settings)
@@ -1272,7 +1451,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
       cancelAutoComplete()
       completeTimeoutRef.current = setTimeout(requestAutoComplete, AUTO_COMPLETE_DELAY)
     }
-  }, [doc, editor, settings, requestAutoComplete, cancelAutoComplete])
+  }, [editor, articleTitle, articleAuthors, articleAbstract, articleKeywords, articleDate, settings, requestAutoComplete, cancelAutoComplete])
 
   const handleExport = useCallback(async () => {
     if (!doc) return
@@ -1371,28 +1550,30 @@ export function EditorPageContent({ docId }: EditorPageProps) {
   }
 
   return (
-    <div style={{ 
-      position: 'fixed', 
-      top: 52, 
-      left: 0, 
-      right: 0, 
-      bottom: 0, 
-      display: 'flex', 
-      overflow: 'hidden' 
-    }}>
-      {/* Left TOC Sidebar - Desktop: inline, Mobile: overlay */}
-      {isMobile ? (
-        mobileTocOpen && (
-          <>
-            <div className="sidebar-backdrop" onClick={() => setMobileTocOpen(false)} />
-            <div className="toc-sidebar-overlay">
-              <TocSidebar blocks={blocks} docTitle={doc.title} onCollapse={() => setMobileTocOpen(false)} />
-            </div>
-          </>
-        )
-      ) : (
-        <TocSidebar blocks={blocks} docTitle={doc.title} />
-      )}
+    <>
+      <DocumentIssueHighlighter />
+      <div style={{ 
+        position: 'fixed', 
+        top: 52, 
+        left: 0, 
+        right: 0, 
+        bottom: 0, 
+        display: 'flex', 
+        overflow: 'hidden' 
+      }}>
+        {/* Left TOC Sidebar - Desktop: inline, Mobile: overlay */}
+        {isMobile ? (
+          mobileTocOpen && (
+            <>
+              <div className="sidebar-backdrop" onClick={() => setMobileTocOpen(false)} />
+              <div className="toc-sidebar-overlay">
+                <TocSidebar blocks={blocks} docTitle={doc.title} onCollapse={() => setMobileTocOpen(false)} />
+              </div>
+            </>
+          )
+        ) : (
+          <TocSidebar blocks={blocks} docTitle={doc.title} />
+        )}
 
       {/* Main editor area - only this part scrolls */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
@@ -1504,7 +1685,7 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           <Divider orientation="vertical" style={{ height: 20 }} />
           <VersionHistoryPanel
             documentId={doc.id}
-            currentContent={blocks}
+            currentContent={doc.content as Block[]}
             articleTitle={articleTitle}
             articleAuthors={articleAuthors}
             articleAbstract={articleAbstract}
@@ -1848,23 +2029,37 @@ export function EditorPageContent({ docId }: EditorPageProps) {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
                       e.preventDefault()
-                      if (commentContent.trim()) {
+                      if (commentContent.trim() && pendingCommentThreadId) {
                         addComment({
-                          id: generateId(),
+                          id: pendingCommentThreadId,
                           documentId: docId,
                           selectedText,
                           blockId: selectedBlockId,
+                          startOffset: selectedCommentStartOffset,
+                          endOffset: selectedCommentEndOffset,
                           content: commentContent.trim(),
+                          source: 'user',
                           createdAt: new Date().toISOString(),
                           updatedAt: new Date().toISOString(),
                         })
                         addToast({ title: '评论已添加', color: 'success' })
+                        setPendingCommentThreadId(null)
                         setSelectedText(null)
+                        setSelectedBlockId(undefined)
+                        setSelectedCommentStartOffset(undefined)
+                        setSelectedCommentEndOffset(undefined)
                         setCommentModalPosition(null)
                         setCommentContent('')
                       }
                     } else if (e.key === 'Escape') {
+                      if (pendingCommentThreadId) {
+                        removeCommentThreadMarks(pendingCommentThreadId)
+                      }
+                      setPendingCommentThreadId(null)
                       setSelectedText(null)
+                      setSelectedBlockId(undefined)
+                      setSelectedCommentStartOffset(undefined)
+                      setSelectedCommentEndOffset(undefined)
                       setCommentModalPosition(null)
                       setCommentContent('')
                     }
@@ -1885,8 +2080,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
 
             <BlockNoteView
               key={settings.editorThemeId ?? 'default'}
-              editor={editor}
-              onChange={handleChange}
+              editor={editor as any}
+              onChange={handleChange as any}
               theme={activeTheme}
               formattingToolbar={false}
               slashMenu={false}
@@ -2144,7 +2339,8 @@ export function EditorPageContent({ docId }: EditorPageProps) {
           </ModalFooter>
         </ModalContent>
       </Modal>
-    </div>
+      </div>
+    </>
   )
 }
 

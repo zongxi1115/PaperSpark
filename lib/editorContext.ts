@@ -6,12 +6,19 @@ import type { BlockNoteEditor } from '@blocknote/core'
 
 let _editor: BlockNoteEditor<any, any, any> | null = null
 
+function emitEditorContextEvent() {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(new Event('editor-instance-updated'))
+}
+
 export function registerEditor(editor: BlockNoteEditor<any, any, any>) {
   _editor = editor
+  emitEditorContextEvent()
 }
 
 export function unregisterEditor() {
   _editor = null
+  emitEditorContextEvent()
 }
 
 export function getEditor(): BlockNoteEditor<any, any, any> | null {

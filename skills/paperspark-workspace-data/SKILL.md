@@ -1,63 +1,51 @@
 ---
 name: paperspark-workspace-data
-description: Access and inspect saved PaperSpark workspace data, including knowledge base entries, immersive-reading full text, guide summaries, assets, thoughts, assistant conversations, and document versions. Use when asked to answer questions from the user's local PaperSpark data, list saved materials, fetch article full text or summaries, or query PaperSpark workspace content through the local service or snapshot bridge.
+description: Access and inspect live PaperSpark workspace data, including knowledge base entries, immersive-reading full text, guide summaries, assets, thoughts, assistant conversations, and document versions. Use when asked to answer questions from the user's local PaperSpark data, list saved materials, fetch article full text or summaries, or query PaperSpark workspace content through the local service bridge.
 ---
 
 # PaperSpark Workspace Data
 
 ## Overview
 
-Use the PaperSpark data bridge instead of scraping repo files or guessing browser storage. Prefer the local service bridge first, then fall back to the local snapshot file if the service is unavailable.
+Use the PaperSpark local service bridge instead of scraping repo files or guessing browser storage. The app now auto-bridges browser data to the local Next service while the page is open, and the CLI should query the HTTP API by default.
 
 ## Query Workflow
 
 1. Check whether the local service bridge is available.
 
 ```powershell
-.\paperspark-data.ps1 summary --server http://127.0.0.1:3000
-```
-
-If the command returns a 404-style error about missing synced data, tell the user to open PaperSpark settings and click `Sync to Local Service`.
-
-2. Fall back to the local snapshot when the service is unavailable.
-
-```powershell
 .\paperspark-data.ps1 summary
 ```
 
-The CLI will automatically look in:
+If the command says the bridge has no data yet, tell the user to keep the PaperSpark page open for a few seconds. If needed, ask them to open Settings and click `立即同步`.
 
-- `out/workspace-cli/paperspark-workspace-snapshot.json`
-- `out/paperspark-workspace-snapshot.json`
-- `paperspark-workspace-snapshot.json`
-
-3. Discover the right records before reading large payloads.
+2. Discover the right records before reading large payloads.
 
 ```powershell
-.\paperspark-data.ps1 list knowledge --server http://127.0.0.1:3000
-.\paperspark-data.ps1 list assets --server http://127.0.0.1:3000
-.\paperspark-data.ps1 list documents --server http://127.0.0.1:3000
+.\paperspark-data.ps1 list knowledge
+.\paperspark-data.ps1 list assets
+.\paperspark-data.ps1 list documents
 ```
 
-4. Read a specific record once you know its id.
+3. Read a specific record once you know its id.
 
 ```powershell
-.\paperspark-data.ps1 get knowledge <knowledgeId> --server http://127.0.0.1:3000
-.\paperspark-data.ps1 get assets <assetId> --server http://127.0.0.1:3000
+.\paperspark-data.ps1 get knowledge <knowledgeId>
+.\paperspark-data.ps1 get assets <assetId>
 ```
 
-5. Pull raw full text or other nested fields with `--field` and `--raw`.
+4. Pull raw full text or other nested fields with `--field` and `--raw`.
 
 ```powershell
-.\paperspark-data.ps1 get knowledge <knowledgeId> --field immersive.fullText --raw --server http://127.0.0.1:3000
-.\paperspark-data.ps1 get knowledge <knowledgeId> --field immersive.guide.summary --server http://127.0.0.1:3000
-.\paperspark-data.ps1 get documents <documentId> --field plainText --raw --server http://127.0.0.1:3000
+.\paperspark-data.ps1 get knowledge <knowledgeId> --field immersive.fullText --raw
+.\paperspark-data.ps1 get knowledge <knowledgeId> --field immersive.guide.summary
+.\paperspark-data.ps1 get documents <documentId> --field plainText --raw
 ```
 
-6. Use full-text search when the user does not know exact ids.
+5. Use full-text search when the user does not know exact ids.
 
 ```powershell
-.\paperspark-data.ps1 search "transformer" --server http://127.0.0.1:3000
+.\paperspark-data.ps1 search "transformer"
 ```
 
 ## High-Value Sections
@@ -81,6 +69,7 @@ The CLI will automatically look in:
 
 ## Failure Recovery
 
-- If `--server` fails because the service is down, fall back to local snapshot mode.
-- If both service and snapshot mode fail, tell the user that the PaperSpark bridge has not been synced or exported yet.
-- If the user wants zero manual sync steps, explain that the current project still stores source data in browser-local storage, so a future refactor would need to move persistence to a true server-side store.
+- If the local service is down, tell the user to start PaperSpark with `pnpm dev` or `pnpm start`.
+- If the service is up but reports no bridged data yet, tell the user to open PaperSpark and wait a few seconds for auto-sync, or click `立即同步` in Settings.
+- Only use `--snapshot` when the user explicitly wants an offline JSON backup path. Do not lead with snapshot mode.
+- If the user asks why this bridge exists at all, explain briefly that the source data still lives in browser-local storage and IndexedDB, so the CLI needs the running app to relay that data into an HTTP-accessible local bridge.

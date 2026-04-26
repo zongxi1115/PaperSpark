@@ -1,24 +1,54 @@
 'use client'
 
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useState, type CSSProperties } from 'react'
 import { Button, Card, CardBody, CardHeader, Divider, addToast } from '@heroui/react'
 import { Icon } from '@iconify/react'
 import {
   buildWorkspaceSnapshot,
+  getWorkspaceBridgeStatus,
   saveWorkspaceSnapshotToDisk,
   syncWorkspaceSnapshotToServer,
 } from '@/lib/workspaceSnapshotClient'
 import { DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME } from '@/lib/workspaceSnapshot'
 
 const CLI_EXAMPLE = [
-  '.\\paperspark-data.ps1 summary --server http://127.0.0.1:3000',
-  '.\\paperspark-data.ps1 list knowledge --server http://127.0.0.1:3000',
-  '.\\paperspark-data.ps1 get knowledge <knowledgeId> --field immersive.fullText --raw --server http://127.0.0.1:3000',
+  '.\\paperspark-data.ps1 summary',
+  '.\\paperspark-data.ps1 list knowledge',
+  '.\\paperspark-data.ps1 get knowledge <knowledgeId> --field immersive.fullText --raw',
 ].join('\n')
+
+type BridgeStatus = Awaited<ReturnType<typeof getWorkspaceBridgeStatus>>
 
 export function WorkspaceSnapshotCard() {
   const [exporting, setExporting] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [status, setStatus] = useState<BridgeStatus | null>(null)
+  const [statusLoading, setStatusLoading] = useState(true)
+
+  const refreshStatus = async (showErrorToast = false) => {
+    try {
+      const nextStatus = await getWorkspaceBridgeStatus()
+      setStatus(nextStatus)
+    } catch (error) {
+      if (showErrorToast) {
+        addToast({
+          title: '读取桥接状态失败',
+          description: error instanceof Error ? error.message : '未知错误',
+          color: 'warning',
+        })
+      }
+    } finally {
+      setStatusLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    void refreshStatus()
+    const intervalId = window.setInterval(() => {
+      void refreshStatus()
+    }, 15000)
+    return () => window.clearInterval(intervalId)
+  }, [])
 
   const handleExport = async () => {
     setExporting(true)
@@ -26,7 +56,7 @@ export function WorkspaceSnapshotCard() {
       const snapshot = await buildWorkspaceSnapshot()
       const result = await saveWorkspaceSnapshotToDisk(snapshot)
       addToast({
-        title: result.method === 'file-picker' ? 'CLI 快照已保存' : 'CLI 快照已开始下载',
+        title: result.method === 'file-picker' ? '离线备份已保存' : '离线备份已开始下载',
         description: `已导出 ${snapshot.stats.knowledgeItems} 篇知识项、${snapshot.stats.documents} 篇文档、${snapshot.stats.assets} 条资产到 ${DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME}`,
         color: 'success',
       })
@@ -52,9 +82,10 @@ export function WorkspaceSnapshotCard() {
       const result = await syncWorkspaceSnapshotToServer(snapshot)
       addToast({
         title: '已同步到本地服务',
-        description: `知识库 ${snapshot.stats.knowledgeItems} 篇，文档 ${snapshot.stats.documents} 篇，资产 ${snapshot.stats.assets} 条。服务端缓存位置：${result.filePath}`,
+        description: `知识库 ${snapshot.stats.knowledgeItems} 篇，文档 ${snapshot.stats.documents} 篇，资产 ${snapshot.stats.assets} 条。桥接缓存位置：${result.filePath}`,
         color: 'success',
       })
+      await refreshStatus()
     } catch (error) {
       addToast({
         title: '服务同步失败',
@@ -79,36 +110,66 @@ export function WorkspaceSnapshotCard() {
     }
   }
 
+  const statusLabel = getStatusLabel(status, statusLoading)
+  const syncedLabel = status?.syncedAt ? formatDateTime(status.syncedAt) : '尚未桥接'
+  const statsLabel = status?.stats
+    ? `知识库 ${status.stats.knowledgeItems} 篇 / 文档 ${status.stats.documents} 篇 / 资产 ${status.stats.assets} 条`
+    : '等待本地服务收到工作区数据'
+
   return (
     <Card shadow="sm">
       <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <Icon icon="solar:database-export-linear" width={18} style={{ color: 'var(--text-muted)' }} />
-          <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>CLI 数据快照</p>
+          <Icon icon="solar:server-square-cloud-linear" width={18} style={{ color: 'var(--text-muted)' }} />
+          <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>CLI 实时桥接</p>
         </div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-          将本地知识库、精读全文、导读概要、资产库、文档、随记与助手会话统一导出为 JSON，方便其他 AI 工具通过 CLI 调用。
+          应用打开时会自动把浏览器里的工作区数据桥接到本地服务，CLI 直接请求 HTTP 接口拿最新内容。JSON 导出只作为离线备份。
         </p>
       </CardHeader>
       <Divider />
       <CardBody style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 8 }}>
           <div style={tileStyle}>
-            <span style={tileLabelStyle}>包含内容</span>
-            <span style={tileValueStyle}>知识库、全文、导读、资产、文档</span>
+            <span style={tileLabelStyle}>桥接状态</span>
+            <span style={tileValueStyle}>{statusLabel}</span>
           </div>
           <div style={tileStyle}>
-            <span style={tileLabelStyle}>默认文件名</span>
-            <code style={codeStyle}>{DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME}</code>
+            <span style={tileLabelStyle}>上次同步</span>
+            <span style={tileValueStyle}>{syncedLabel}</span>
           </div>
           <div style={tileStyle}>
             <span style={tileLabelStyle}>CLI 入口</span>
             <code style={codeStyle}>.\paperspark-data.ps1</code>
           </div>
           <div style={tileStyle}>
-            <span style={tileLabelStyle}>服务端同步</span>
-            <span style={tileValueStyle}>同步后 CLI 可直接走 HTTP，不必读本地 JSON</span>
+            <span style={tileLabelStyle}>离线备份</span>
+            <code style={codeStyle}>{DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME}</code>
           </div>
+        </div>
+
+        <div
+          style={{
+            padding: '10px 12px',
+            borderRadius: 10,
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border-color)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <p style={{ fontSize: 12, fontWeight: 600, margin: 0, color: 'var(--text-secondary)' }}>
+            当前桥接概况
+          </p>
+          <p style={{ fontSize: 12, lineHeight: 1.6, margin: 0, color: 'var(--text-muted)' }}>
+            {statsLabel}
+          </p>
+          {!status?.available && status?.message ? (
+            <p style={{ fontSize: 12, lineHeight: 1.6, margin: 0, color: 'var(--text-muted)' }}>
+              {status.message}
+            </p>
+          ) : null}
         </div>
 
         <div
@@ -144,7 +205,7 @@ export function WorkspaceSnapshotCard() {
             isLoading={syncing}
             startContent={!syncing ? <Icon icon="solar:cloud-upload-linear" width={16} /> : undefined}
           >
-            同步到本地服务
+            立即同步
           </Button>
           <Button
             color="primary"
@@ -152,7 +213,7 @@ export function WorkspaceSnapshotCard() {
             isLoading={exporting}
             startContent={!exporting ? <Icon icon="solar:download-linear" width={16} /> : undefined}
           >
-            导出 JSON 快照
+            导出离线备份
           </Button>
           <Button
             variant="flat"
@@ -166,6 +227,25 @@ export function WorkspaceSnapshotCard() {
       </CardBody>
     </Card>
   )
+}
+
+function getStatusLabel(status: BridgeStatus | null, loading: boolean) {
+  if (loading) return '正在检测'
+  if (!status?.available) return '等待连接'
+  if (typeof status.ageMs === 'number' && status.ageMs <= 30000) return '已连接，内容较新'
+  return '已连接，可能需要刷新'
+}
+
+function formatDateTime(input: string) {
+  const date = new Date(input)
+  if (Number.isNaN(date.getTime())) return input
+  return date.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  })
 }
 
 const tileStyle: CSSProperties = {

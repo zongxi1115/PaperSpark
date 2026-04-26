@@ -1,4 +1,4 @@
 interface:
   display_name: "PaperSpark Data"
-  short_description: "Query local PaperSpark workspace data via service or snapshot"
-  default_prompt: "Use $paperspark-workspace-data to inspect my PaperSpark knowledge base, immersive full text, assets, or conversations."
+  short_description: "Query live local PaperSpark workspace data via the service bridge"
+  default_prompt: "Use $paperspark-workspace-data to inspect my live PaperSpark knowledge base, immersive full text, assets, or conversations."

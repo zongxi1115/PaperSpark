@@ -1,6 +1,6 @@
 'use client'
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { Button, Tooltip, Autocomplete, AutocompleteItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure, Spinner } from '@heroui/react'
+import { Button, Tooltip, Autocomplete, AutocompleteItem, addToast, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Textarea, useDisclosure, Spinner, Switch } from '@heroui/react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -17,7 +17,12 @@ import { ChatContainerRoot, ChatContainerContent, ChatContainerScrollAnchor } fr
 import { Message, MessageAction, MessageActions, MessageContent } from '@/components/prompt-kit/message'
 import { PromptInput, PromptInputAction, PromptInputActions, PromptInputTextarea } from '@/components/prompt-kit/prompt-input'
 import { ScrollButton } from '@/components/ui/scroll-button'
-import { readDocument } from './tools/ReadDocumentTool'
+import { readDocument, getDocumentStructure } from '@/lib/agentDocument'
+import { canAgentCommentDocument, canAgentEditDocument, canAgentReadDocument, canAgentUseAssets, canAgentUseKnowledge, getAgentCapabilityDefinitions } from '@/lib/agents'
+import type { AgentDocumentCommentOutput, AgentDocumentContext, AgentEditToolOutput } from '@/lib/agentTooling'
+import { convertAgentEditToolOutputToRequest, EditDocumentTool, applyEditOperations, acceptInsertionChanges, rejectInsertionChanges, type EditDocumentRequest, type EditStatus } from './tools/EditDocumentTool'
+import { AgentToolInvocationCard } from './tools/AgentToolInvocationCard'
+import { applyAgentDocumentComments } from '@/lib/agentToolRuntime'
 
 // Python 运行结果接口
 interface PythonRunResult {
@@ -36,18 +41,11 @@ interface CodeBlockState {
   showOutput: boolean
 }
 import {
-  EditDocumentTool,
   SimpleTool,
-  applyEditOperations,
-  acceptInsertionChanges,
-  rejectInsertionChanges,
   parseSimpleToolCalls,
   stripSimpleToolSyntax,
   convertToolCallsToRequest,
-  getDocumentStructure,
   StreamingToolDetector,
-  type EditDocumentRequest,
-  type EditStatus,
   type ParsedToolCall,
 } from './tools/EditDocumentTool'
 import { getEditor, getSelectedText, getSelectionContext } from '@/lib/editorContext'
@@ -77,7 +75,7 @@ import { getFullTextByKnowledgeId } from '@/lib/pdfCache'
 import { searchMyKnowledgeBase as runKnowledgeSearch } from '@/lib/assistantKnowledge'
 import { indexKnowledgeForRAG } from '@/lib/rag'
 import { getJSON, setJSON } from '@/lib/storage/StorageUtils'
-import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote, AssistantToolEvent, AssistantCitation, AssetItem, ArticleAuthor } from '@/lib/types'
+import type { Agent, AppSettings, ModelConfig, AssistantConversation, AssistantMessage, AssistantNote, AssistantToolEvent, AssistantCitation, AssetItem, ArticleAuthor, AssistantToolInvocation } from '@/lib/types'
 
 import {
   ChainOfThought,
@@ -127,62 +125,12 @@ function getAssistantCheckpointById(id: string): AssistantDocCheckpoint | null {
   return getAssistantCheckpoints().find(item => item.id === id) ?? null
 }
 
-type StreamingToken = {
-  value: string
-  isWhitespace: boolean
-}
-
-function tokenizeStreamingText(input: string): StreamingToken[] {
-  if (!input) return []
-
-  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
-    try {
-      const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' })
-      const tokens: StreamingToken[] = []
-      for (const segment of segmenter.segment(input)) {
-        tokens.push({
-          value: segment.segment,
-          isWhitespace: /^\s+$/.test(segment.segment),
-        })
-      }
-      return tokens
-    } catch {
-      // fall through to regex tokenizer
-    }
-  }
-
-  return (
-    input.match(/\s+|[A-Za-z0-9_]+|[\u4e00-\u9fff]|[^\sA-Za-z0-9_\u4e00-\u9fff]/g)?.map(part => ({
-      value: part,
-      isWhitespace: /^\s+$/.test(part),
-    })) ?? []
-  )
-}
-
 function StreamingTokenizedContent({ text }: { text: string }) {
-  const tokens = useMemo(() => tokenizeStreamingText(text), [text])
-
   if (!text) return null
 
   return (
     <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-      {tokens.map((token, index) => {
-        if (token.isWhitespace) {
-          return <span key={`ws-${index}`}>{token.value}</span>
-        }
-
-        return (
-          <motion.span
-            key={`tk-${index}`}
-            initial={{ opacity: 0, y: 2, filter: 'blur(8px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-            style={{ display: 'inline-block', willChange: 'opacity, transform, filter' }}
-          >
-            {token.value}
-          </motion.span>
-        )
-      })}
+      {text}
     </div>
   )
 }
@@ -226,6 +174,19 @@ export function AssistantChatPanel() {
   // 图片预览状态
   const [previewImage, setPreviewImage] = useState<string | null>(null)
 
+  const selectedAgentCanUseKnowledge = !selectedAgent || canAgentUseKnowledge(selectedAgent)
+  const selectedAgentCanUseAssets = !selectedAgent || canAgentUseAssets(selectedAgent)
+  const selectedAgentCanReadDocument = !selectedAgent || canAgentReadDocument(selectedAgent)
+  const selectedAgentCanEditDocument = !selectedAgent || canAgentEditDocument(selectedAgent)
+  const selectedAgentCanCommentDocument = !selectedAgent || canAgentCommentDocument(selectedAgent)
+  const selectedAgentUsesToolCalls = Boolean(
+    selectedAgent && (canAgentEditDocument(selectedAgent) || canAgentCommentDocument(selectedAgent))
+  )
+  const selectedAgentCapabilities = useMemo(
+    () => selectedAgent ? getAgentCapabilityDefinitions(selectedAgent) : [],
+    [selectedAgent]
+  )
+
   const getCodeHash = useCallback((str: string) => {
     let hash = 0
     for (let i = 0; i < str.length; i++) {
@@ -255,6 +216,40 @@ export function AssistantChatPanel() {
     setConversations(getConversations())
     setNotes(getAssistantNotes())
   }, [])
+
+  useEffect(() => {
+    const handleAgentsUpdated = () => {
+      setAgents(getAgents())
+    }
+
+    window.addEventListener('agents-updated', handleAgentsUpdated)
+    return () => window.removeEventListener('agents-updated', handleAgentsUpdated)
+  }, [])
+
+  useEffect(() => {
+    if (!selectedAgent) return
+    const latestAgent = agents.find(agent => agent.id === selectedAgent.id)
+    if (!latestAgent) {
+      setSelectedAgent(null)
+      return
+    }
+
+    if (latestAgent !== selectedAgent) {
+      setSelectedAgent(latestAgent)
+    }
+  }, [agents, selectedAgent])
+
+  useEffect(() => {
+    if (useKnowledge && !selectedAgentCanUseKnowledge) {
+      setUseKnowledge(false)
+    }
+    if (useAssets && !selectedAgentCanUseAssets) {
+      setUseAssets(false)
+    }
+    if (useDocEditing && !selectedAgentCanReadDocument) {
+      setUseDocEditing(false)
+    }
+  }, [selectedAgentCanReadDocument, selectedAgentCanUseAssets, selectedAgentCanUseKnowledge, useAssets, useDocEditing, useKnowledge])
 
   // 监听编辑器选中文本事件
   useEffect(() => {
@@ -1436,6 +1431,7 @@ export function AssistantChatPanel() {
       role: 'assistant',
       content: '',
       toolEvents: [],
+      toolInvocations: [],
       citations: [],
       createdAt: new Date().toISOString(),
     }
@@ -1450,11 +1446,33 @@ export function AssistantChatPanel() {
 
       const systemPrompt = selectedAgent?.prompt || ''
       let knowledgeCandidates: AssistantCitation[] = []
-      const assetContext = useAssets ? buildAssetContext(content) : ''
+      const allowKnowledge = useKnowledge && selectedAgentCanUseKnowledge
+      const allowAssets = useAssets && selectedAgentCanUseAssets
+      const allowDocumentRead = useDocEditing && selectedAgentCanReadDocument
+      const allowDocumentEdit = useDocEditing && selectedAgentCanEditDocument
+      const allowDocumentComment = useDocEditing && selectedAgentUsesToolCalls && selectedAgentCanCommentDocument
+      const useStructuredDocumentTools = selectedAgentUsesToolCalls && allowDocumentRead
+      const assetContext = allowAssets ? buildAssetContext(content) : ''
 
       // Auto-read document content when doc editing is enabled
       let docContextText = ''
-      if (useDocEditing) {
+      const documentContext: AgentDocumentContext | null = allowDocumentRead
+        ? (() => {
+            const freshDoc = readDocument()
+            const freshStructure = getDocumentStructure()
+            const currentDocId = getLastDocId()
+            const currentDoc = currentDocId ? getDocument(currentDocId) : null
+            if (!freshDoc || !freshStructure) return null
+            return {
+              documentId: currentDocId || undefined,
+              title: currentDoc?.title,
+              markdown: freshDoc.markdown,
+              structure: freshStructure,
+            }
+          })()
+        : null
+
+      if (allowDocumentRead && !useStructuredDocumentTools) {
         const freshDoc = readDocument()
         if (freshDoc) {
           docContextText = `\n\n当前编辑器文档内容（Markdown格式）：\n\`\`\`\n${freshDoc.markdown.slice(0, 8000)}\n\`\`\``
@@ -1467,9 +1485,9 @@ export function AssistantChatPanel() {
         quoteContext = `\n\n用户选中的文本内容（请基于此内容回答）：\n> ${selectedQuote.split('\n').join('\n> ')}`
       }
       const mentionCandidates = mentions.length > 0
-        ? await buildMentionKnowledgeCandidates(content, { allowIndexing: useKnowledge })
+        ? await buildMentionKnowledgeCandidates(content, { allowIndexing: allowKnowledge })
         : []
-      const shouldRunGlobalKnowledgeSearch = useKnowledge
+      const shouldRunGlobalKnowledgeSearch = allowKnowledge
       const shouldSendKnowledgeContext = mentionCandidates.length > 0 || shouldRunGlobalKnowledgeSearch
 
       if (shouldRunGlobalKnowledgeSearch) {
@@ -1526,8 +1544,8 @@ export function AssistantChatPanel() {
 
       abortControllerRef.current = new AbortController()
 
-      // 仅在文档编辑模式时获取文档结构
-      const docStructure = useDocEditing ? getDocumentStructure() : null
+      // 仅在旧链路文档编辑模式时获取文档结构
+      const docStructure = allowDocumentEdit && !useStructuredDocumentTools ? getDocumentStructure() : null
 
       const response = await fetch('/api/ai/assistant', {
         method: 'POST',
@@ -1543,6 +1561,13 @@ export function AssistantChatPanel() {
           knowledgeCandidates,
           assetContext,
           documentStructure: docStructure || undefined,
+          documentAccess: {
+            canRead: allowDocumentRead,
+            canEdit: allowDocumentEdit,
+            canComment: allowDocumentComment,
+            toolMode: useStructuredDocumentTools,
+          },
+          documentContext: documentContext || undefined,
         }),
         signal: abortControllerRef.current.signal,
       })
@@ -1557,9 +1582,105 @@ export function AssistantChatPanel() {
       let buffer = ''
 
       // Streaming tool detection
-      const detector = useDocEditing ? new StreamingToolDetector() : null
+      const detector = allowDocumentEdit ? new StreamingToolDetector() : null
       const executedToolIndices = new Set<number>()
       const shownToolIndices = new Set<number>()
+
+      const applyAssistantUpdate = (updater: (draft: AssistantMessage) => void) => {
+        updater(assistantMessage)
+        setCurrentConversation(prev => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            messages: [...updatedMessages, { ...assistantMessage }],
+          }
+        })
+      }
+
+      const upsertToolInvocation = (nextInvocation: AssistantToolInvocation) => {
+        const currentInvocations = assistantMessage.toolInvocations || []
+        const existingIndex = currentInvocations.findIndex(item => item.toolCallId === nextInvocation.toolCallId)
+        const nextInvocations = [...currentInvocations]
+
+        if (existingIndex >= 0) {
+          nextInvocations[existingIndex] = {
+            ...nextInvocations[existingIndex],
+            ...nextInvocation,
+          }
+        } else {
+          nextInvocations.push(nextInvocation)
+        }
+
+        applyAssistantUpdate((draft) => {
+          draft.toolInvocations = nextInvocations
+        })
+      }
+
+      const executeEditToolOutput = (toolCallId: string, output: AgentEditToolOutput) => {
+        if (!assistantMessage.checkpointId) {
+          const checkpointId = createPreEditCheckpoint(assistantMessage)
+          if (checkpointId) {
+            applyAssistantUpdate(draft => {
+              draft.checkpointId = checkpointId
+            })
+          }
+        }
+
+        const key = `${assistantMessage.id}:tool:${toolCallId}`
+        const abort = new AbortController()
+        editAbortRefs.current[key] = abort
+
+        setEditStates(prev => ({ ...prev, [key]: { status: 'running', progress: '准备中…', error: '' } }))
+
+        const request = convertAgentEditToolOutputToRequest(output)
+        applyEditOperations(
+          request,
+          (message) => setEditStates(prev => ({ ...prev, [key]: { ...prev[key], progress: message } })),
+          abort.signal,
+          key,
+        ).then(result => {
+          if (result.success) {
+            setEditStates(prev => ({ ...prev, [key]: { status: 'reviewing', progress: '', error: '' } }))
+            upsertToolInvocation({
+              id: toolCallId,
+              toolCallId,
+              toolName: 'editCurrentDocument',
+              status: 'reviewing',
+              output,
+            })
+          } else {
+            setEditStates(prev => ({ ...prev, [key]: { status: 'error', progress: '', error: result.error || '操作失败' } }))
+            upsertToolInvocation({
+              id: toolCallId,
+              toolCallId,
+              toolName: 'editCurrentDocument',
+              status: 'error',
+              output,
+              error: result.error || '操作失败',
+            })
+          }
+        })
+      }
+
+      const executeCommentToolOutput = (toolCallId: string, output: AgentDocumentCommentOutput) => {
+        if (!selectedAgent) return
+
+        const result = applyAgentDocumentComments({
+          agent: selectedAgent,
+          toolOutput: output,
+          generateId,
+          capabilityId: selectedAgent.capabilities?.includes('document_review') ? 'document_review' : 'document_comment',
+        })
+
+        upsertToolInvocation({
+          id: toolCallId,
+          toolCallId,
+          toolName: 'commentCurrentDocument',
+          status: result.success ? 'applied' : 'error',
+          output,
+          error: result.error,
+        })
+      }
 
       const executeDetectedTool = (idx: number, tool: { type: 'insert' | 'delete' | 'update'; params: Record<string, string>; contentSoFar: string }) => {
         if (executedToolIndices.has(idx)) return
@@ -1596,17 +1717,6 @@ export function AssistantChatPanel() {
         })
       }
 
-      const applyAssistantUpdate = (updater: (draft: AssistantMessage) => void) => {
-        updater(assistantMessage)
-        setCurrentConversation(prev => {
-          if (!prev) return prev
-          return {
-            ...prev,
-            messages: [...updatedMessages, { ...assistantMessage }],
-          }
-        })
-      }
-
       const upsertToolEvent = (nextEvent: AssistantToolEvent) => {
         const currentEvents = assistantMessage.toolEvents || []
         const existingIndex = currentEvents.findIndex(event => event.id === nextEvent.id)
@@ -1626,13 +1736,16 @@ export function AssistantChatPanel() {
       const processLine = (line: string) => {
         if (!line.trim()) return
         const payload = JSON.parse(line) as {
-          type: 'tool-status' | 'text-delta' | 'citations' | 'error' | 'done'
+          type: 'tool-status' | 'text-delta' | 'citations' | 'tool-call' | 'tool-result' | 'error' | 'done'
           id?: string
           toolName?: string
+          toolCallId?: string
           status?: AssistantToolEvent['status']
           message?: string
           delta?: string
           citations?: AssistantCitation[]
+          input?: unknown
+          output?: unknown
           error?: string
         }
 
@@ -1650,6 +1763,40 @@ export function AssistantChatPanel() {
           applyAssistantUpdate(draft => {
             draft.citations = payload.citations
           })
+          return
+        }
+
+        if (payload.type === 'tool-call' && payload.toolCallId && payload.toolName) {
+          upsertToolInvocation({
+            id: payload.toolCallId,
+            toolCallId: payload.toolCallId,
+            toolName: payload.toolName,
+            status: 'running',
+            input: payload.input,
+          })
+          return
+        }
+
+        if (payload.type === 'tool-result' && payload.toolCallId && payload.toolName) {
+          const toolInvocation: AssistantToolInvocation = {
+            id: payload.toolCallId,
+            toolCallId: payload.toolCallId,
+            toolName: payload.toolName,
+            status: 'completed',
+            input: payload.input,
+            output: payload.output,
+          }
+
+          upsertToolInvocation(toolInvocation)
+
+          if (payload.toolName === 'commentCurrentDocument' && payload.output) {
+            executeCommentToolOutput(payload.toolCallId, payload.output as AgentDocumentCommentOutput)
+          }
+
+          if (payload.toolName === 'editCurrentDocument' && payload.output) {
+            executeEditToolOutput(payload.toolCallId, payload.output as AgentEditToolOutput)
+          }
+
           return
         }
 
@@ -1747,7 +1894,27 @@ export function AssistantChatPanel() {
       setIsLoading(false)
       abortControllerRef.current = null
     }
-  }, [inputValue, isLoading, currentConversation, settings, selectedAgent, useKnowledge, useAssets, useDocEditing, agents, buildAssetContext, mentions, buildMentionKnowledgeCandidates, selectedQuote])
+  }, [
+    inputValue,
+    isLoading,
+    currentConversation,
+    settings,
+    selectedAgent,
+    selectedAgentCanCommentDocument,
+    selectedAgentCanEditDocument,
+    selectedAgentCanReadDocument,
+    selectedAgentCanUseAssets,
+    selectedAgentCanUseKnowledge,
+    selectedAgentUsesToolCalls,
+    useKnowledge,
+    useAssets,
+    useDocEditing,
+    agents,
+    buildAssetContext,
+    mentions,
+    buildMentionKnowledgeCandidates,
+    selectedQuote,
+  ])
 
   const messages = currentConversation?.messages || []
 
@@ -1927,11 +2094,12 @@ export function AssistantChatPanel() {
   }, [settings?.defaultLargeModelId, models])
 
   return (
-    <div style={{ 
-      display: 'flex', 
-      height: '100%',
-      overflow: 'hidden',
-    }}>
+    <>
+      <div style={{ 
+        display: 'flex', 
+        height: '100%',
+        overflow: 'hidden',
+      }}>
       {/* 历史对话侧栏 */}
       {showHistory && (
         <div style={{
@@ -2119,6 +2287,73 @@ export function AssistantChatPanel() {
             </Autocomplete>
           </div>
 
+          <div style={{ display: 'grid', gap: 8 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Tooltip content="输入 / 可切换智能体，也可以在输入框里直接用 / 打开命令菜单">
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  {selectedAgent ? `当前智能体：${selectedAgent.title}` : '当前智能体：未指定'}
+                </span>
+              </Tooltip>
+              {selectedAgent && (
+                <Button size="sm" variant="light" onPress={handleRemoveAgent}>
+                  清除
+                </Button>
+              )}
+            </div>
+
+            {selectedAgent && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                {selectedAgentCapabilities.map(capability => (
+                  <span
+                    key={capability.id}
+                    style={{
+                      fontSize: 11,
+                      lineHeight: 1,
+                      padding: '4px 6px',
+                      borderRadius: 999,
+                      border: '1px solid var(--border-color)',
+                      color: 'var(--text-secondary)',
+                      background: 'var(--bg-secondary)',
+                    }}
+                    title={capability.description}
+                  >
+                    {capability.label}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Tooltip content={selectedAgentCanUseKnowledge ? '基于关键词 + RAG 混合检索知识库摘要与精读全文，并在回答中附规范引用' : '当前智能体未开启知识库检索权限'}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>我的知识库检索</span>
+              </Tooltip>
+              <Switch size="sm" isSelected={useKnowledge} onValueChange={setUseKnowledge} isDisabled={knowledgeBusy || !selectedAgentCanUseKnowledge} />
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+              <Tooltip content={selectedAgentCanUseAssets ? '引用资产库中与你问题相关的素材、摘要和标签，作为辅助回答上下文' : '当前智能体未开启资产库引用权限'}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>引用我的资产库</span>
+              </Tooltip>
+              <Switch size="sm" isSelected={useAssets} onValueChange={setUseAssets} isDisabled={!selectedAgentCanUseAssets} />
+            </div>
+
+            {getEditor() && (
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+                <Tooltip content={
+                  !selectedAgentCanReadDocument
+                    ? '当前智能体未开启文档读取权限'
+                    : selectedAgentCanEditDocument
+                      ? '开启后，AI 自动获取文档结构和内容，可读取和编辑当前文档'
+                      : '开启后，AI 可以读取当前文档内容，但不会获得直接编辑权限'
+                }>
+                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                    {selectedAgentCanEditDocument ? '可操作当前文档' : '可读取当前文档'}
+                  </span>
+                </Tooltip>
+                <Switch size="sm" isSelected={useDocEditing} onValueChange={setUseDocEditing} isDisabled={!selectedAgentCanReadDocument} />
+              </div>
+            )}
+          </div>
         </div>
 
         {/* 对话区域 */}
@@ -2140,14 +2375,13 @@ export function AssistantChatPanel() {
               </div>
             </motion.div>
               ) : (
-                <AnimatePresence mode="popLayout">
+                <AnimatePresence initial={false}>
                   {messages.map((message, idx) => (
                 <motion.div 
                   key={message.id}
                   ref={(el) => {
                     if (el) messageRefs.current.set(message.id, el)
                   }}
-                  layout
                   initial={{ opacity: 0, y: 16, scale: 0.97 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}
@@ -2242,6 +2476,90 @@ export function AssistantChatPanel() {
                           </ChainOfThoughtStep>
                         ))}
                       </ChainOfThought>
+                    </div>
+                  )}
+                  {message.role === 'assistant' && message.toolInvocations && message.toolInvocations.length > 0 && (
+                    <div style={{ display: 'grid', gap: 6, marginBottom: 10 }}>
+                      {message.toolInvocations.map((invocation) => {
+                        const editKey = `${message.id}:tool:${invocation.toolCallId}`
+                        const editState = editStates[editKey] ?? { status: 'idle' as EditStatus, progress: '', error: '' }
+                        const editOutput = invocation.toolName === 'editCurrentDocument'
+                          ? invocation.output as AgentEditToolOutput | undefined
+                          : undefined
+
+                        const handleAcceptToolEdit = () => {
+                          try {
+                            acceptInsertionChanges(editKey)
+                          } catch {
+                            // ignore errors
+                          }
+                          setEditStates(prev => ({ ...prev, [editKey]: { status: 'accepted', progress: '', error: '' } }))
+                          setCurrentConversation(prev => {
+                            if (!prev) return prev
+                            const updatedConversation = {
+                              ...prev,
+                              messages: prev.messages.map(item => (
+                                item.id !== message.id
+                                  ? item
+                                  : {
+                                      ...item,
+                                      toolInvocations: (item.toolInvocations || []).map(toolItem => (
+                                        toolItem.toolCallId === invocation.toolCallId
+                                          ? { ...toolItem, status: 'accepted' as const }
+                                          : toolItem
+                                      )),
+                                    }
+                              )),
+                            }
+                            saveConversation(updatedConversation)
+                            setConversations(getConversations())
+                            return updatedConversation
+                          })
+                        }
+
+                        const handleRejectToolEdit = () => {
+                          try {
+                            rejectInsertionChanges(editKey)
+                          } catch {
+                            // ignore errors
+                          }
+                          setEditStates(prev => ({ ...prev, [editKey]: { status: 'rejected', progress: '', error: '' } }))
+                          setCurrentConversation(prev => {
+                            if (!prev) return prev
+                            const updatedConversation = {
+                              ...prev,
+                              messages: prev.messages.map(item => (
+                                item.id !== message.id
+                                  ? item
+                                  : {
+                                      ...item,
+                                      toolInvocations: (item.toolInvocations || []).map(toolItem => (
+                                        toolItem.toolCallId === invocation.toolCallId
+                                          ? { ...toolItem, status: 'rejected' as const }
+                                          : toolItem
+                                      )),
+                                    }
+                              )),
+                            }
+                            saveConversation(updatedConversation)
+                            setConversations(getConversations())
+                            return updatedConversation
+                          })
+                        }
+
+                        return (
+                          <AgentToolInvocationCard
+                            key={invocation.toolCallId}
+                            invocation={invocation}
+                            editRequest={editOutput ? convertAgentEditToolOutputToRequest(editOutput) : undefined}
+                            editStatus={editState.status}
+                            editProgress={editState.progress}
+                            editError={editState.error}
+                            onAcceptEdit={editOutput ? handleAcceptToolEdit : undefined}
+                            onRejectEdit={editOutput ? handleRejectToolEdit : undefined}
+                          />
+                        )
+                      })}
                     </div>
                   )}
                   {message.role === 'assistant' ? (
@@ -3628,6 +3946,7 @@ export function AssistantChatPanel() {
           </button>
         </div>
       )}
-    </div>
+      </div>
+    </>
   )
 }

@@ -1,0 +1,146 @@
+name: Auto Create/Update PR
+
+on:
+  push:
+    branches:
+      - dev
+      - develop
+      - feature/**
+      - fix/**
+      - hotfix/**
+
+jobs:
+  auto-pr:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get commit history
+        id: commits
+        run: |
+          BASE_BRANCH="origin/master"
+
+          # 获取 commit 数量
+          COMMIT_COUNT=$(git rev-list --count "$BASE_BRANCH"..HEAD)
+          echo "count=$COMMIT_COUNT" >> $GITHUB_OUTPUT
+
+          # 生成完整 commit 列表
+          COMMITS=$(git log "$BASE_BRANCH"..HEAD --pretty=format:"- %s (\`%h\`) — @%an" --reverse)
+
+          # 按类型分组
+          WHATS_NEW=""
+          BUG_FIXES=""
+          REFACTORING=""
+          DOCS_AND_TESTS=""
+          MAINTENANCE=""
+          OTHER_CHANGES=""
+
+          while IFS='|' read -r SUBJECT HASH AUTHOR; do
+            [ -z "$SUBJECT" ] && continue
+
+            LOWER_SUBJECT=$(printf '%s' "$SUBJECT" | tr '[:upper:]' '[:lower:]')
+            ENTRY="- $SUBJECT (\`$HASH\`) — @$AUTHOR"
+
+            case "$LOWER_SUBJECT" in
+              feat:*|feat\(*\):*|feature:*|add:*|implement:* )
+                WHATS_NEW="$WHATS_NEW$ENTRY\n"
+                ;;
+              fix:*|fix\(*\):*|bugfix:*|hotfix:* )
+                BUG_FIXES="$BUG_FIXES$ENTRY\n"
+                ;;
+              refactor:*|refactor\(*\):*|perf:*|perf\(*\):*|optimize:* )
+                REFACTORING="$REFACTORING$ENTRY\n"
+                ;;
+              docs:*|docs\(*\):*|test:*|test\(*\):* )
+                DOCS_AND_TESTS="$DOCS_AND_TESTS$ENTRY\n"
+                ;;
+              chore:*|chore\(*\):*|build:*|build\(*\):*|ci:*|ci\(*\):*|style:* )
+                MAINTENANCE="$MAINTENANCE$ENTRY\n"
+                ;;
+              * )
+                OTHER_CHANGES="$OTHER_CHANGES$ENTRY\n"
+                ;;
+            esac
+          done < <(git log "$BASE_BRANCH"..HEAD --pretty=format:'%s|%h|%an' --reverse)
+
+          append_section() {
+            local TITLE="$1"
+            local CONTENT="$2"
+
+            if [ -n "$CONTENT" ]; then
+              PR_BODY="$PR_BODY$TITLE\n$CONTENT\n"
+            fi
+          }
+
+          PR_BODY="## Summary\n\n"
+          PR_BODY="$PR_BODY- Sync branch: \`${{ github.ref_name }}\` → \`master\`\n"
+          PR_BODY="$PR_BODY- Total updates: **$COMMIT_COUNT** commit(s)\n"
+          PR_BODY="$PR_BODY- Latest commit: \`${{ github.sha }}\`\n\n"
+
+          append_section "## What's New" "$WHATS_NEW"
+          append_section "## Bug Fixes" "$BUG_FIXES"
+          append_section "## Refactoring & Improvements" "$REFACTORING"
+          append_section "## Docs & Tests" "$DOCS_AND_TESTS"
+          append_section "## Maintenance" "$MAINTENANCE"
+          append_section "## Other Changes" "$OTHER_CHANGES"
+
+          PR_BODY="$PR_BODY## Full Commit History\n$COMMITS\n\n"
+          PR_BODY="$PR_BODY## PR Metadata\n\n"
+          PR_BODY="$PR_BODY- Branch: \`${{ github.ref_name }}\`\n"
+          PR_BODY="$PR_BODY- Triggered by: @${{ github.actor }}\n"
+          PR_BODY="$PR_BODY- Event time: ${{ github.event.head_commit.timestamp }}\n\n"
+          PR_BODY="$PR_BODY## Pre-Merge Checklist\n\n"
+          PR_BODY="$PR_BODY- [ ] Code review completed\n"
+          PR_BODY="$PR_BODY- [ ] All checks passed\n"
+          PR_BODY="$PR_BODY- [ ] Breaking changes reviewed\n"
+          PR_BODY="$PR_BODY- [ ] Add \`release\` label if this PR should publish an official release\n"
+          PR_BODY="$PR_BODY- [ ] Conventional commit messages preserved for semantic-release\n\n"
+          PR_BODY="$PR_BODY**Recommended merge strategy:** \`Create a merge commit\` (or \`Rebase and merge\`). Avoid \`Squash and Merge\` unless you rewrite the final commit title as a Conventional Commit."
+
+          {
+            echo "commits<<EOF"
+            printf '%s\n' "$COMMITS"
+            echo "EOF"
+            echo "body<<EOF"
+            printf '%b\n' "$PR_BODY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create or Update Pull Request
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+          DESTINATION_BRANCH: master
+          PR_TITLE: "Sync `${{ github.ref_name }}` into master · ${{ steps.commits.outputs.count }} update(s)"
+          PR_BODY: ${{ steps.commits.outputs.body }}
+        run: |
+          EXISTING_PR_NUMBER=$(gh pr list \
+            --head "$SOURCE_BRANCH" \
+            --base "$DESTINATION_BRANCH" \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -n "$EXISTING_PR_NUMBER" ] && [ "$EXISTING_PR_NUMBER" != "null" ]; then
+            gh pr edit "$EXISTING_PR_NUMBER" \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY"
+
+            gh pr edit "$EXISTING_PR_NUMBER" \
+              --add-label automated \
+              --add-label auto-pr
+          else
+            gh pr create \
+              --base "$DESTINATION_BRANCH" \
+              --head "$SOURCE_BRANCH" \
+              --title "$PR_TITLE" \
+              --body "$PR_BODY" \
+              --label automated \
+              --label auto-pr
+          fi

@@ -1,7 +1,10 @@
 import type { AppDocument, AppSettings, KnowledgeItem, ZoteroConfig, Thought, Agent, AssistantConversation, AssistantNote, AssetType, AssetItem, EditorComment, DocumentVersion } from './types'
 import { defaultSettings } from './types'
+import { extractInlineText } from './agentDocument'
+import { normalizeAgent, normalizeAgents, REVIEWER_AGENT_ID } from './agents'
 import { getStorage } from './storage/StorageFactory'
 import { getJSON, setJSON, getString, setString, removeItem as removeStorageItem } from './storage/StorageUtils'
+import { emitWorkspaceBridgeChanged } from './workspaceBridgeEvents'
 
 const DOCUMENTS_KEY = 'documents'
 const SETTINGS_KEY = 'settings'
@@ -14,6 +17,7 @@ function isBrowser() {
 function emitStorageEvent(eventName: string) {
   if (!isBrowser()) return
   window.dispatchEvent(new Event(eventName))
+  emitWorkspaceBridgeChanged(eventName)
 }
 
 export function getDocuments(): AppDocument[] {
@@ -86,6 +90,7 @@ export function getSettings(): AppSettings {
 export function saveSettings(settings: AppSettings): void {
   if (!isBrowser()) return
   setJSON(SETTINGS_KEY, settings)
+  emitStorageEvent('settings-changed')
 }
 
 // 根据模型 ID 获取模型配置
@@ -152,6 +157,7 @@ export function getLastDocId(): string | null {
 export function setLastDocId(id: string): void {
   if (!isBrowser()) return
   setString(LAST_DOC_KEY, id)
+  emitStorageEvent('last-doc-changed')
 }
 
 export const generateId = () => Math.random().toString(36).substring(2, 9)
@@ -216,11 +222,13 @@ export function getZoteroConfig(): ZoteroConfig | null {
 export function saveZoteroConfig(config: ZoteroConfig): void {
   if (!isBrowser()) return
   setJSON(ZOTERO_CONFIG_KEY, config)
+  emitStorageEvent('zotero-config-changed')
 }
 
 export function clearZoteroConfig(): void {
   if (!isBrowser()) return
   removeStorageItem(ZOTERO_CONFIG_KEY)
+  emitStorageEvent('zotero-config-changed')
 }
 
 // 随记想法存储
@@ -234,6 +242,7 @@ export function getThoughts(): Thought[] {
 export function saveThoughts(thoughts: Thought[]): void {
   if (!isBrowser()) return
   setJSON(THOUGHTS_KEY, thoughts)
+  emitStorageEvent('thoughts-changed')
 }
 
 export function getThought(id: string): Thought | null {
@@ -280,37 +289,73 @@ export const PRESET_AGENTS: Agent[] = [
     prompt: 'Role: 论文降AI率大师 (Thesis AI-Reduction Master) Background： 你是一位在特定学术领域拥有深厚知识储备的专家。你的核心任务是帮助用户修改学术论文，显著降低其被AI检测工具识别的概率。你的方法论不是机械的‘同义词替换’，而是基于对人类学者口头阐述与书面写作双重习惯的深刻理解，对文本进行‘人性化重塑’。你深知AI文本的特征是逻辑直接、语言凝练、句式刻板，而你的使命就是将这种‘机器报告风格’转变为一种既有深度又不失流畅的‘专家讲解风格’。 我的知识库是动态调整的：如果你提供的是医学领域的文本，我将化身为一位资深的医学传播专家；如果你提供的是法律文书，我将以一位精通法律语言艺术的律师视角进行改写。 核心原则 (Core Principles): 1.  观点与事实绝对中立: 你的任务是且仅是‘改写’，绝不对原文的学术观点、论证逻辑、实验数据、事实和专业术语的准确性进行任何增删、修改或评判。 2.  保留关键信息: 必须保留原始文本中的所有关键信息、专业术语和引文标记（如 [1], [2],），并确保其位置与原文基本一致。 核心降AI改写策略 (Core AI-Reduction Strategies): 规则一：词汇‘降维’与口语化处理 核心思想: 将源文本中高度书面化、凝练的词汇，替换为更日常、更通俗、长度更长的口语化表达。 具体表现: ‘内涵’ → ‘包含的意义’ ‘演变’ → ‘转变过程’ ‘将...定义为’ → ‘把...界定成’ 规则二：句法结构的‘冗余化’重构 核心思想: 打破源文本简洁的‘主-谓-宾’结构，通过增加修饰成分、辅助词和结构助词，刻意拉长句子，制造一种‘边想边说’的语感。 具体表现: 将简单的定语扩展成‘的’字短语或从句：‘开创性研究’ → ‘所开展的具有开创意义的研究成果’。 增加无实际意义的状语或后缀：‘从生理学角度看’ → ‘从生理学方面来讲’。 将动词名词化，并搭配新的动词：‘打破了...平衡’ → ‘致使...平衡状态遭到破坏’。 规则三：逻辑连接的‘松散化’处理 核心思想: 将源文本中紧凑、明确的逻辑连接词，替换为更松散、更口语化的关联词，弱化逻辑的‘刻意感’。 具体表现: 在条件句中增加关联词：‘只要...就会...’ → ‘要是...那么其将会...’。 使用更具阐释性的长句来替代精炼短语，从而自然过渡。 规则四：叙事节奏的‘慢速化’调整 核心思想: 通过上述策略，整体放慢信息的传递速度。源文本信息密度高，改写后文本通过增加词汇和复杂化句式，迫使读者放慢阅读速度，模拟人类思考和组织语言时存在的停顿与迂回。 规则五：冗余中的精炼——实现可读性与低AI率的平衡 核心思想: 此为平衡性原则。我们的目标是‘人性化的复杂’，而非‘无意义的臃肿’。在运用前四条规则构建复杂句式后，必须反向审视，剔除那些真正拉低文本质量的、纯粹的口水词和冗余助词，确保最终文本虽长但精、虽绕但顺。 具体表现: 删除不必要的结构助词: 在动词意图明确时，避免使用口语化的助词‘去’。例如，将‘去构建一个体系’优化为‘构建起一套体系’。 审慎使用量词: 避免在抽象概念或已有明确集合指代的名词前，使用泛化的量词‘一个’。例如，将‘形成一个管理的闭环’精炼为‘形成管理闭环’。 精简空洞的修饰词: 删减如‘一整’、‘相关的’这类在上下文中显得多余的强调性修饰词，使表达更直接。例如，将‘对这一整套方案进行评估’简化为‘对这套方案进行评估’。 3. 详细分析（附案例对比） 为了让您更清晰地掌握这些规则，以下进行逐条详细拆解： | 规则分类 | 源文本 (Source Text) 节选 | 改写后文本 (Imitated Text) 节选 | 规则应用分析 | | --- | --- | --- | --- | | 词汇‘降维’ | ‘压力’是理解...的核心概念，其内涵...经历了深刻的演变。 | 压力乃是理解...的关键概念，其包含的意义...历经了颇为深刻的转变过程。 | 降维替换：是→乃是 (文白夹杂，增加风格化)；内涵→包含的意义 (单核心词→短语)；演变→转变过程 (抽象名词→过程性短语)。 | | 句法冗余化 (1) | Selye (1976)的开创性研究。 | Selye在1976年所开展的具有开创意义的研究成果。 | 结构扩展：将一个简单的偏正短语，扩展为一个包含时间状语、结构助词‘所’和物主代词‘的’的复杂短语。 | | 动词名词化与复杂化 | 只要它打破了...平衡，机体就会产生...反应。 | 只要它致使...平衡状态遭到破坏，那么机体便会启动...反应机制。 | 核心改写技巧：打破平衡 (动宾结构) → 致使平衡状态遭到破坏 (使动结构+名词化+被动语态)。产生反应 → 启动反应机制 (增加‘机制’一词)。 | | 逻辑连接松散化 | 然而，Selye的理论因...而受到后续学者的挑战。 | Selye的理论由于...所以遭到了后来学者的质疑。 | 逻辑词替换：然而 (强转折) → 由于...所以 (因果解释)，使得语气更缓和、更具解释性。 | | 冗余中的精炼 (新) | （可能产生的过度冗余初稿）...与外部的协同层级显得比较浅，没有能够去利用自身的业务规模去形成一个有效的议价能力... | （应用精炼规则后）...与外部的协同层级比较浅，没有能够利用自身的业务规模形成有效的议价能力... | 平衡性精简：删除了无意义的动词修饰‘显得’、冗余的助动词‘能够去’以及助词‘去’，并去掉了抽象概念前的量词‘一个’，使复杂化的句子恢复了流畅性。 | 约束条件 (Constraints): 1.  严格遵循: 必须严格遵循上述所有核心改写策略，特别是规则五的平衡作用。 2.  纯净输出: 最终只输出经过改写处理的最终中文文本，不包含任何形式的标题、注解、说明、前言或括号。 3.  格式规整: 删除结尾: 若源文末尾有总结性段落（通常以‘综上所述’、‘总而言之’等词开头），必须将其删除。 数字编号保留: 如果原文中包含数字编号的列表（如 一、 （一）、 (1)、1、 等），必须完整保留其编号格式和条目结构。 段落格式保留:保持原文的段落结构。 字数控制: 输出的总字数应控制在源文本总字数的 ±10% 范围内，以确保信息密度不丢失。', // 留空给用户填写
     isPreset: true,
   },
-  {
-    id: 'preset-mermaid-drawer',
-    title: 'Mermaid绘图专家',
-    prompt: `1. 我需要你根据我目前的项目设计架构生成相应的Mermaid示意图。
-    2. 图的种类你可以自己决定。在Mermaid代码中，你不要在说明内使用"\n"来换行，所有说明都尽量控制在一句话结束。也不要在任何插入括号与空格，仅仅使用中文字符。此外，禁止在其中使用任何注释。
-    3. （可以更改控制此处的模块）主要为这些内容生成图片：总体架构、文字转音乐模块、参数化生成模块、和弦生成器模块。
-    4. 注意将Mermaid代码放在代码块中，并注明代码块的语言类型为mermaid。
-    5. 在代码块外为我注明该图的标题Caption。
-    6. 你绘制的图片复杂度可以适当提高，但不要超过我提供的内容。`, // 留空给用户填写
-    isPreset: true,
-  },
-]
+    {
+      id: 'preset-mermaid-drawer',
+      title: 'Mermaid绘图专家',
+      prompt: `1. 我需要你根据我目前的项目设计架构生成相应的Mermaid示意图。
+      2. 图的种类你可以自己决定。在Mermaid代码中，你不要在说明内使用"\n"来换行，所有说明都尽量控制在一句话结束。也不要在任何插入括号与空格，仅仅使用中文字符。此外，禁止在其中使用任何注释。
+      3. （可以更改控制此处的模块）主要为这些内容生成图片：总体架构、文字转音乐模块、参数化生成模块、和弦生成器模块。
+      4. 注意将Mermaid代码放在代码块中，并注明代码块的语言类型为mermaid。
+      5. 在代码块外为我注明该图的标题Caption。
+      6. 你绘制的图片复杂度可以适当提高，但不要超过我提供的内容。`, // 留空给用户填写
+      isPreset: true,
+    },
+    {
+      id: REVIEWER_AGENT_ID,
+      title: '论文审稿人',
+      prompt: `你是一位严格、负责且建设性的学术论文审稿人。你的任务不是直接改写全文，而是像真实审稿过程一样阅读用户当前文稿，优先定位最需要修改的不合适片段，并给出可执行的审稿意见。
+
+请始终遵守以下原则：
+1. 先判断问题是否真实存在，再给出批注，避免空泛挑刺。
+2. 批注要具体，指出问题类型，例如论证跳跃、概念不清、证据不足、表述不严谨、结构失衡、语气不学术、结论过度外推。
+3. 优先标记最影响论文质量的片段，不要把整篇文章都判成问题。
+4. 修改建议必须可执行，避免只说“建议加强”而不给方向。
+5. 如果某段没有明显问题，不要强行生成意见。
+6. 你的输出重点是“定位问题 + 解释原因 + 建议如何改”，而不是直接替用户重写整篇文稿。`,
+      isPreset: true,
+    },
+  ]
+
+function mergeAgentsWithPresets(savedAgents: Agent[]): Agent[] {
+  const presetIds = new Set(PRESET_AGENTS.map(agent => agent.id))
+  const savedAgentMap = new Map(savedAgents.map(agent => [agent.id, agent]))
+
+  const mergedPresets = PRESET_AGENTS.map((preset) => {
+    const saved = savedAgentMap.get(preset.id)
+    return normalizeAgent(saved ? { ...preset, ...saved } : preset)
+  })
+
+  const customAgents = savedAgents
+    .filter(agent => !presetIds.has(agent.id))
+    .map(normalizeAgent)
+
+  return [...mergedPresets, ...customAgents]
+}
 
 export function getAgents(): Agent[] {
   if (!isBrowser()) return []
   try {
-    const agents = getJSON<Agent[] | null>(AGENTS_KEY, null)
-    if (!agents) {
-      // 首次加载时初始化预设智能体
-      saveAgents(PRESET_AGENTS)
-      return PRESET_AGENTS
+    const savedAgents = getJSON<Agent[] | null>(AGENTS_KEY, null)
+    if (!savedAgents) {
+      const initialAgents = normalizeAgents(PRESET_AGENTS)
+      saveAgents(initialAgents)
+      return initialAgents
     }
-    return agents
+
+    const mergedAgents = mergeAgentsWithPresets(savedAgents)
+    if (JSON.stringify(savedAgents) !== JSON.stringify(mergedAgents)) {
+      saveAgents(mergedAgents)
+    }
+    return mergedAgents
   } catch {
-    return PRESET_AGENTS
+    return normalizeAgents(PRESET_AGENTS)
   }
 }
 
 export function saveAgents(agents: Agent[]): void {
   if (!isBrowser()) return
-  setJSON(AGENTS_KEY, agents)
+  setJSON(AGENTS_KEY, normalizeAgents(agents))
+  emitStorageEvent('agents-updated')
 }
 
 export function getAgent(id: string): Agent | null {
@@ -319,11 +364,12 @@ export function getAgent(id: string): Agent | null {
 
 export function saveAgent(agent: Agent): void {
   const agents = getAgents()
-  const idx = agents.findIndex(a => a.id === agent.id)
+  const normalizedAgent = normalizeAgent(agent)
+  const idx = agents.findIndex(a => a.id === normalizedAgent.id)
   if (idx >= 0) {
-    agents[idx] = agent
+    agents[idx] = normalizedAgent
   } else {
-    agents.unshift(agent)
+    agents.unshift(normalizedAgent)
   }
   saveAgents(agents)
 }
@@ -347,6 +393,7 @@ export function getConversations(): AssistantConversation[] {
 export function saveConversations(conversations: AssistantConversation[]): void {
   if (!isBrowser()) return
   setJSON(CONVERSATIONS_KEY, conversations)
+  emitStorageEvent('conversations-changed')
 }
 
 export function getConversation(id: string): AssistantConversation | null {
@@ -389,6 +436,7 @@ export function getAssistantNotes(): AssistantNote[] {
 export function saveAssistantNotes(notes: AssistantNote[]): void {
   if (!isBrowser()) return
   setJSON(NOTES_KEY, notes)
+  emitStorageEvent('assistant-notes-changed')
 }
 
 export function addAssistantNote(note: Omit<AssistantNote, 'id' | 'createdAt' | 'updatedAt'>): AssistantNote {
@@ -465,6 +513,7 @@ export function getAssetTypes(): AssetType[] {
 export function saveAssetTypes(types: AssetType[]): void {
   if (!isBrowser()) return
   setJSON(ASSET_TYPES_KEY, types)
+  emitStorageEvent('asset-types-changed')
 }
 
 export function getAssetType(id: string): AssetType | null {
@@ -499,6 +548,7 @@ export function getAssets(): AssetItem[] {
 export function saveAssets(assets: AssetItem[]): void {
   if (!isBrowser()) return
   setJSON(ASSETS_KEY, assets)
+  emitStorageEvent('assets-changed')
 }
 
 export function getAsset(id: string): AssetItem | null {
@@ -588,14 +638,8 @@ export async function getDocumentVersion(versionId: string): Promise<DocumentVer
 export function calculateWordCount(blocks: unknown[]): number {
   let count = 0
   for (const block of blocks) {
-    const b = block as { content?: { type: string; text: string }[] }
-    if (b.content && Array.isArray(b.content)) {
-      for (const inline of b.content) {
-        if (inline.type === 'text' && inline.text) {
-          count += inline.text.length
-        }
-      }
-    }
+    const b = block as { content?: unknown }
+    count += extractInlineText(b.content).length
   }
   return count
 }
@@ -619,6 +663,16 @@ export function getDocumentComments(documentId: string): EditorComment[] {
   return getComments().filter(c => c.documentId === documentId)
 }
 
+function matchesAgentComment(comment: EditorComment, documentId: string, agentId: string, capabilityId?: string): boolean {
+  return comment.documentId === documentId
+    && comment.agentId === agentId
+    && (capabilityId ? comment.capabilityId === capabilityId : true)
+}
+
+export function getDocumentCommentsByAgent(documentId: string, agentId: string, capabilityId?: string): EditorComment[] {
+  return getComments().filter(comment => matchesAgentComment(comment, documentId, agentId, capabilityId))
+}
+
 export function addComment(comment: EditorComment): void {
   const comments = getComments()
   comments.unshift(comment)
@@ -635,7 +689,18 @@ export function updateComment(id: string, updates: Partial<EditorComment>): void
 }
 
 export function deleteComment(id: string): void {
-  saveComments(getComments().filter(c => c.id !== id))
+  saveComments(getComments().filter(c => c.id !== id && c.parentId !== id))
+}
+
+export function deleteDocumentCommentsByAgent(documentId: string, agentId: string, capabilityId?: string): void {
+  saveComments(
+    getComments().filter(comment => !matchesAgentComment(comment, documentId, agentId, capabilityId))
+  )
+}
+
+export function replaceDocumentCommentsByAgent(documentId: string, agentId: string, nextComments: EditorComment[], capabilityId?: string): void {
+  const preservedComments = getComments().filter(comment => !matchesAgentComment(comment, documentId, agentId, capabilityId))
+  saveComments([...nextComments, ...preservedComments])
 }
 
 export function getComment(id: string): EditorComment | null {

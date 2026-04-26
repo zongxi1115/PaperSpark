@@ -331,11 +331,26 @@ export interface Thought {
   aiProcessedAt?: string // AI 处理时间
 }
 
+export const AGENT_CAPABILITY_IDS = [
+  'knowledge_search',
+  'asset_reference',
+  'literature_search',
+  'document_read',
+  'document_edit',
+  'document_comment',
+  'document_issue_mark',
+  'document_review',
+] as const
+
+export type AgentCapabilityId = typeof AGENT_CAPABILITY_IDS[number]
+
 // 智能体类型
 export interface Agent {
   id: string
   title: string // 智能体名称
+  description?: string // 智能体说明
   prompt: string // 系统 prompt
+  capabilities?: AgentCapabilityId[] // 技能与权限
   isPreset: boolean // 是否为预设
   isDefault?: boolean // 是否为默认选中
 }
@@ -346,6 +361,7 @@ export interface AssistantMessage {
   role: 'user' | 'assistant'
   content: string
   toolEvents?: AssistantToolEvent[]
+  toolInvocations?: AssistantToolInvocation[]
   citations?: AssistantCitation[]
   checkpointId?: string
   createdAt: string
@@ -356,6 +372,26 @@ export interface AssistantToolEvent {
   toolName: string
   status: 'running' | 'success' | 'error'
   message: string
+}
+
+export type AssistantToolInvocationStatus =
+  | 'input-streaming'
+  | 'running'
+  | 'completed'
+  | 'applied'
+  | 'reviewing'
+  | 'accepted'
+  | 'rejected'
+  | 'error'
+
+export interface AssistantToolInvocation {
+  id: string
+  toolCallId: string
+  toolName: string
+  status: AssistantToolInvocationStatus
+  input?: unknown
+  output?: unknown
+  error?: string
 }
 
 export interface AssistantCitation {
@@ -809,10 +845,23 @@ export interface GraphBuildResponse {
 
 // ============ 编辑器评论相关类型 ============
 
+export type EditorCommentSource = 'user' | 'agent'
+export type EditorCommentSeverity = 'info' | 'warning' | 'critical'
+export type EditorCommentTone = 'default' | 'red' | 'amber' | 'blue'
+
+export interface DocumentReviewIssue {
+  blockId: string
+  quote: string
+  reason: string
+  suggestion?: string
+  severity: EditorCommentSeverity
+}
+
 // 编辑器评论类型
 export interface EditorComment {
   id: string
   documentId: string
+  parentId?: string
   // 选中的文本信息
   selectedText: string
   blockId?: string // 关联的 BlockNote 块 ID
@@ -820,6 +869,14 @@ export interface EditorComment {
   endOffset?: number // 在块中的结束位置
   // 评论内容
   content: string
+  source?: EditorCommentSource
+  agentId?: string
+  agentTitle?: string
+  capabilityId?: AgentCapabilityId
+  severity?: EditorCommentSeverity
+  tone?: EditorCommentTone
+  resolvedAt?: string
+  resolvedBy?: 'user' | 'agent'
   // 元数据
   createdAt: string
   updatedAt: string

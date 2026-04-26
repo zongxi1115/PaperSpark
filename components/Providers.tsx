@@ -2,6 +2,7 @@
 import { HeroUIProvider, ToastProvider } from '@heroui/react'
 import { useRouter } from 'next/navigation'
 import { VercelPreviewNotice } from '@/components/VercelPreviewNotice'
+import { WorkspaceBridgeAutoSync } from '@/components/Settings/WorkspaceBridgeAutoSync'
 import { createContext, useContext, ReactNode } from 'react'
 import { useTheme, ThemeMode } from '@/lib/theme'
 
@@ -33,6 +34,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
       <ThemeContext.Provider value={themeValue}>
         <ToastProvider placement="top-right" />
         <VercelPreviewNotice />
+        <WorkspaceBridgeAutoSync />
         {children}
       </ThemeContext.Provider>
     </HeroUIProvider>

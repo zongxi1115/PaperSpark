@@ -1,14 +1,16 @@
 'use client'
 import { useBlockNoteEditor, useComponentsContext, useSelectedBlocks } from '@blocknote/react'
 import { addToast } from '@heroui/react'
+import { encodeCommentThreadStyleValue } from './CommentThreadStyle'
+import { generateId } from '@/lib/storage'
 
 /**
  * Formatting Toolbar 按钮：将选中文本添加评论
  * 选中文字后在浮动工具栏中点击，弹出评论输入浮层
  */
 export function CommentToolbarButton() {
-  const editor = useBlockNoteEditor()
   const Components = useComponentsContext()!
+  const editor = useBlockNoteEditor()
 
   // 仅在有 inline content 的块被选中时显示
   const blocks = useSelectedBlocks()
@@ -36,16 +38,57 @@ export function CommentToolbarButton() {
     if (selection.rangeCount > 0) {
       const range = selection.getRangeAt(0)
       const rect = range.getBoundingClientRect()
-      const blockElement = range.startContainer.parentElement?.closest('[data-id]')
+      const existingCommentNodes = Array.from(document.querySelectorAll('[data-comment-thread-id]'))
+
+      if (existingCommentNodes.some((node) => {
+        try {
+          return range.intersectsNode(node)
+        } catch {
+          return false
+        }
+      })) {
+        addToast({ title: '暂不支持在已有评论范围上继续叠加评论', color: 'warning' })
+        return
+      }
+
+      const startBlockElement = range.startContainer.parentElement?.closest('[data-id]')
+      const endBlockElement = range.endContainer.parentElement?.closest('[data-id]')
+      const sameBlock = Boolean(startBlockElement && endBlockElement && startBlockElement === endBlockElement)
+      const blockElement = sameBlock ? startBlockElement : null
+      const threadId = generateId()
+      let startOffset: number | undefined
+      let endOffset: number | undefined
       if (blockElement) {
         blockId = blockElement.getAttribute('data-id') || undefined
+        try {
+          const blockRange = document.createRange()
+          blockRange.selectNodeContents(blockElement)
+
+          const startRange = blockRange.cloneRange()
+          startRange.setEnd(range.startContainer, range.startOffset)
+          startOffset = startRange.toString().length
+
+          const endRange = blockRange.cloneRange()
+          endRange.setEnd(range.endContainer, range.endOffset)
+          endOffset = endRange.toString().length
+        } catch {
+          startOffset = undefined
+          endOffset = undefined
+        }
       }
+
+      editor.addStyles({
+        commentThread: encodeCommentThreadStyleValue(threadId, false),
+      } as any)
 
       // 通过自定义事件触发评论浮层
       window.dispatchEvent(new CustomEvent('editor-comment', { 
         detail: { 
+          threadId,
           text, 
           blockId,
+          startOffset,
+          endOffset,
           position: {
             top: rect.bottom + 8,
             left: Math.min(rect.left, window.innerWidth - 320),

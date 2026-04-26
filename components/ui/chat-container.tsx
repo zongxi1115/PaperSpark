@@ -26,7 +26,7 @@ function ChatContainerRoot({
   return (
     <StickToBottom
       className={cn("flex overflow-y-auto", className)}
-      resize="smooth"
+      resize="instant"
       initial="instant"
       role="log"
       {...props}

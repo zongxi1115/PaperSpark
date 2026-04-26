@@ -1,6 +1,7 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { DocumentVersion } from './types'
 import { getJSON, removeItem, setJSON } from './storage/StorageUtils'
+import { emitWorkspaceBridgeChanged } from './workspaceBridgeEvents'
 
 const DB_NAME = 'PaperReaderDocumentVersions'
 const LEGACY_VERSIONS_KEY = 'document_versions'
@@ -127,6 +128,7 @@ export async function saveVersion(version: DocumentVersion): Promise<void> {
     const allVersions = getLegacyVersions().filter(existing => existing.id !== version.id)
     allVersions.push(version)
     setLegacyVersions(trimLegacyVersions(allVersions, version.documentId))
+    emitWorkspaceBridgeChanged('document-versions-changed')
     return
   }
 
@@ -137,6 +139,7 @@ export async function saveVersion(version: DocumentVersion): Promise<void> {
     await db.versions.put(version)
     await trimIndexedDbVersions(version.documentId)
   })
+  emitWorkspaceBridgeChanged('document-versions-changed')
 }
 
 export async function deleteVersion(versionId: string): Promise<void> {
@@ -145,11 +148,13 @@ export async function deleteVersion(versionId: string): Promise<void> {
   if (!hasIndexedDb()) {
     const filtered = getLegacyVersions().filter(version => version.id !== versionId)
     setLegacyVersions(filtered)
+    emitWorkspaceBridgeChanged('document-versions-changed')
     return
   }
 
   await ensureReady()
   await getDb().versions.delete(versionId)
+  emitWorkspaceBridgeChanged('document-versions-changed')
 }
 
 export async function deleteVersionsByDocumentId(documentId: string): Promise<void> {
@@ -158,11 +163,13 @@ export async function deleteVersionsByDocumentId(documentId: string): Promise<vo
   if (!hasIndexedDb()) {
     const filtered = getLegacyVersions().filter(version => version.documentId !== documentId)
     setLegacyVersions(filtered)
+    emitWorkspaceBridgeChanged('document-versions-changed')
     return
   }
 
   await ensureReady()
   await getDb().versions.where('documentId').equals(documentId).delete()
+  emitWorkspaceBridgeChanged('document-versions-changed')
 }
 
 export async function getVersionById(versionId: string): Promise<DocumentVersion | null> {

@@ -1,5 +1,7 @@
 'use client'
 
+import { emitWorkspaceBridgeChanged } from './workspaceBridgeEvents'
+
 const DB_NAME = 'paper_reader_uploads'
 const DB_VERSION = 1
 const STORE_NAME = 'files'
@@ -75,6 +77,7 @@ export async function storeFile(file: File): Promise<{ url: string; id: string }
     tx.objectStore(STORE_NAME).put(record)
   })
 
+  emitWorkspaceBridgeChanged('local-files-changed')
   return { id, url: toLocalFileUrl(id) }
 }
 
@@ -102,4 +105,3 @@ export async function resolveLocalFileUrl(url: string): Promise<string> {
   objectUrlCache.set(id, objectUrl)
   return objectUrl
 }
-

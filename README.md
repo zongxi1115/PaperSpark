@@ -436,50 +436,40 @@ paper_reader/
 | 图谱可视化 | @xyflow/react |
 | 样式系统 | Tailwind CSS v4 |
 
-## CLI 数据快照
+## CLI 实时桥接
 
-为了方便其他 AI 工具直接读取 PaperSpark 中的本地数据，项目现在提供了“快照导出 + CLI 查询”这一套链路。
+为了方便其他 AI 工具直接读取 PaperSpark 中的本地数据，项目现在提供了“浏览器自动桥接到本地服务 + CLI 查询接口”这一套链路。
 
-### 1. 导出工作区快照
+### 1. 保持应用运行
 
-打开应用的设置页，在“CLI 数据快照”卡片中点击“同步到本地服务”。
+启动 PaperSpark 后，应用会在页面打开时自动把浏览器里的工作区数据桥接到本地 Next 服务。
 
-- 这会把浏览器里的本地数据同步到运行中的 Next 服务
-- CLI 后续可直接通过 HTTP 调用服务，不需要依赖 `pnpm`
-- 适合本地已经跑着 `pnpm dev` 或部署好的场景
+- CLI 默认直接调用 `http://127.0.0.1:3000/api/workspace-cli/query`
+- 不需要再手动指定快照目录
+- 如果桥接还没准备好，可以在设置页的“CLI 实时桥接”卡片里点击“立即同步”
 
 示例：
 
 ```powershell
-.\paperspark-data.ps1 summary --server http://127.0.0.1:3000
-.\paperspark-data.ps1 list knowledge --server http://127.0.0.1:3000
-.\paperspark-data.ps1 get knowledge <knowledgeId> --field immersive.fullText --raw --server http://127.0.0.1:3000
-.\paperspark-data.ps1 search "transformer" --server http://127.0.0.1:3000
+.\paperspark-data.ps1 summary
+.\paperspark-data.ps1 list knowledge
+.\paperspark-data.ps1 get knowledge <knowledgeId> --field immersive.fullText --raw
+.\paperspark-data.ps1 search "transformer"
 ```
 
-服务端同步后的原始数据接口为：
+相关接口：
 
 ```text
+GET /api/workspace-cli/status
+POST /api/workspace-cli/query
 GET /api/workspace-cli/snapshot
 POST /api/workspace-cli/snapshot
 ```
 
-### 2. 导出 JSON 快照
-
-如果不想依赖运行中的服务，也可以点击“导出 JSON 快照”。
-
-- 导出的快照会统一打包以下内容：
-  - 文档与版本历史
-  - 知识库元数据
-  - 沉浸式阅读缓存中的全文、页面信息、导读、翻译、批注
-  - 资产库与随记
-  - 助手会话、便签与知识图谱
-- 建议将文件保存为 `out/paperspark-workspace-snapshot.json`
-
 ### 2. 使用 CLI 查询
 
 ```bash
-# 查看快照总体统计
+# 查看桥接总体统计
 pnpm data:cli summary
 
 # 列出所有知识库条目
@@ -495,7 +485,12 @@ pnpm data:cli get knowledge <knowledgeId> --field immersive.fullText --raw
 pnpm data:cli search "transformer"
 ```
 
-如果快照不在默认位置，可显式指定：
+### 3. 导出离线备份
+
+如果你明确需要离线 JSON 备份，也可以在设置页点击“导出离线备份”。
+
+- 备份文件名默认是 `paperspark-workspace-snapshot.json`
+- CLI 只有在显式传入 `--snapshot` 时，才会读取本地 JSON 备份文件
 
 ```bash
 pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.json

@@ -7,6 +7,7 @@ import type {
   KnowledgeRelationType
 } from './types'
 import { getJSON, setJSON } from './storage/StorageUtils'
+import { emitWorkspaceBridgeChanged } from './workspaceBridgeEvents'
 
 const STORAGE_KEY = 'knowledge_graph'
 
@@ -32,6 +33,7 @@ export function saveKnowledgeGraph(graph: KnowledgeGraph): void {
 
   try {
     setJSON(STORAGE_KEY, graph)
+    emitWorkspaceBridgeChanged('knowledge-graph-changed')
   } catch (error) {
     console.error('Failed to save knowledge graph:', error)
   }

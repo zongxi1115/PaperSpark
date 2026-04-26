@@ -4,6 +4,7 @@ import { extractInlineText } from './agentDocument'
 import { normalizeAgent, normalizeAgents, REVIEWER_AGENT_ID } from './agents'
 import { getStorage } from './storage/StorageFactory'
 import { getJSON, setJSON, getString, setString, removeItem as removeStorageItem } from './storage/StorageUtils'
+import { emitWorkspaceBridgeChanged } from './workspaceBridgeEvents'
 
 const DOCUMENTS_KEY = 'documents'
 const SETTINGS_KEY = 'settings'
@@ -16,6 +17,7 @@ function isBrowser() {
 function emitStorageEvent(eventName: string) {
   if (!isBrowser()) return
   window.dispatchEvent(new Event(eventName))
+  emitWorkspaceBridgeChanged(eventName)
 }
 
 export function getDocuments(): AppDocument[] {
@@ -88,6 +90,7 @@ export function getSettings(): AppSettings {
 export function saveSettings(settings: AppSettings): void {
   if (!isBrowser()) return
   setJSON(SETTINGS_KEY, settings)
+  emitStorageEvent('settings-changed')
 }
 
 // 根据模型 ID 获取模型配置
@@ -154,6 +157,7 @@ export function getLastDocId(): string | null {
 export function setLastDocId(id: string): void {
   if (!isBrowser()) return
   setString(LAST_DOC_KEY, id)
+  emitStorageEvent('last-doc-changed')
 }
 
 export const generateId = () => Math.random().toString(36).substring(2, 9)
@@ -218,11 +222,13 @@ export function getZoteroConfig(): ZoteroConfig | null {
 export function saveZoteroConfig(config: ZoteroConfig): void {
   if (!isBrowser()) return
   setJSON(ZOTERO_CONFIG_KEY, config)
+  emitStorageEvent('zotero-config-changed')
 }
 
 export function clearZoteroConfig(): void {
   if (!isBrowser()) return
   removeStorageItem(ZOTERO_CONFIG_KEY)
+  emitStorageEvent('zotero-config-changed')
 }
 
 // 随记想法存储
@@ -236,6 +242,7 @@ export function getThoughts(): Thought[] {
 export function saveThoughts(thoughts: Thought[]): void {
   if (!isBrowser()) return
   setJSON(THOUGHTS_KEY, thoughts)
+  emitStorageEvent('thoughts-changed')
 }
 
 export function getThought(id: string): Thought | null {
@@ -386,6 +393,7 @@ export function getConversations(): AssistantConversation[] {
 export function saveConversations(conversations: AssistantConversation[]): void {
   if (!isBrowser()) return
   setJSON(CONVERSATIONS_KEY, conversations)
+  emitStorageEvent('conversations-changed')
 }
 
 export function getConversation(id: string): AssistantConversation | null {
@@ -428,6 +436,7 @@ export function getAssistantNotes(): AssistantNote[] {
 export function saveAssistantNotes(notes: AssistantNote[]): void {
   if (!isBrowser()) return
   setJSON(NOTES_KEY, notes)
+  emitStorageEvent('assistant-notes-changed')
 }
 
 export function addAssistantNote(note: Omit<AssistantNote, 'id' | 'createdAt' | 'updatedAt'>): AssistantNote {
@@ -504,6 +513,7 @@ export function getAssetTypes(): AssetType[] {
 export function saveAssetTypes(types: AssetType[]): void {
   if (!isBrowser()) return
   setJSON(ASSET_TYPES_KEY, types)
+  emitStorageEvent('asset-types-changed')
 }
 
 export function getAssetType(id: string): AssetType | null {
@@ -538,6 +548,7 @@ export function getAssets(): AssetItem[] {
 export function saveAssets(assets: AssetItem[]): void {
   if (!isBrowser()) return
   setJSON(ASSETS_KEY, assets)
+  emitStorageEvent('assets-changed')
 }
 
 export function getAsset(id: string): AssetItem | null {

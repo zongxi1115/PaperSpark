@@ -1,31 +1,25 @@
-import fs from 'node:fs/promises'
-import path from 'node:path'
 import { NextResponse } from 'next/server'
-import { DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME } from '@/lib/workspaceSnapshot'
-
-const SNAPSHOT_DIR = path.join(process.cwd(), 'out', 'workspace-cli')
-const SNAPSHOT_FILE = path.join(SNAPSHOT_DIR, DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME)
-
-function jsonHeaders() {
-  return {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-  }
-}
+import type { WorkspaceSnapshot } from '@/lib/workspaceSnapshot'
+import {
+  WorkspaceBridgeUnavailableError,
+  isWorkspaceSnapshot,
+  jsonHeaders,
+  readWorkspaceBridgeSnapshot,
+  writeWorkspaceBridgeSnapshot,
+} from '@/lib/server/workspaceBridge'
 
 export async function GET() {
   try {
-    const raw = await fs.readFile(SNAPSHOT_FILE, 'utf8')
-    return new NextResponse(raw, { headers: jsonHeaders() })
+    const record = await readWorkspaceBridgeSnapshot()
+    return new NextResponse(record.raw, { headers: jsonHeaders() })
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException | undefined)?.code
-    if (code === 'ENOENT') {
+    if (error instanceof WorkspaceBridgeUnavailableError) {
       return NextResponse.json(
         {
-          error: '尚未同步 CLI 快照到服务端',
-          message: '请先在设置页点击“同步到本地服务”',
+          error: error.message,
+          message: '请先保持 PaperSpark 页面打开几秒钟，等待自动桥接，或在设置页点击“立即同步”。',
         },
-        { status: 404, headers: jsonHeaders() },
+        { status: error.status, headers: jsonHeaders() },
       )
     }
 
@@ -40,34 +34,21 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const snapshot = await request.json() as {
-      schemaVersion?: unknown
-      exportedAt?: unknown
-      data?: unknown
-      stats?: unknown
-    }
-
-    if (
-      !snapshot ||
-      typeof snapshot !== 'object' ||
-      typeof snapshot.schemaVersion !== 'number' ||
-      typeof snapshot.exportedAt !== 'string' ||
-      !snapshot.data ||
-      typeof snapshot.data !== 'object'
-    ) {
+    const snapshot = await request.json() as WorkspaceSnapshot
+    if (!isWorkspaceSnapshot(snapshot)) {
       return NextResponse.json(
-        { error: '无效的快照数据' },
+        { error: '无效的工作区桥接数据' },
         { status: 400, headers: jsonHeaders() },
       )
     }
 
-    await fs.mkdir(SNAPSHOT_DIR, { recursive: true })
-    await fs.writeFile(SNAPSHOT_FILE, JSON.stringify(snapshot, null, 2), 'utf8')
+    const result = await writeWorkspaceBridgeSnapshot(snapshot)
 
     return NextResponse.json(
       {
         success: true,
-        filePath: SNAPSHOT_FILE,
+        filePath: result.filePath,
+        syncedAt: result.syncedAt,
         exportedAt: snapshot.exportedAt,
         schemaVersion: snapshot.schemaVersion,
         stats: snapshot.stats ?? null,

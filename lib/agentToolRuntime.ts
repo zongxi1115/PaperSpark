@@ -2,7 +2,8 @@
 
 import { isAgentReviewComment } from './agents'
 import { getEditor } from './editorContext'
-import { getLastDocId, getDocumentComments, replaceDocumentCommentsByAgent } from './storage'
+import { getDocumentCommentsByAgent, getLastDocId, getDocumentComments, replaceDocumentCommentsByAgent } from './storage'
+import { applyCommentThreadMark, removeCommentThreadMarks } from './commentStyles'
 import { resolveCommentRangeInBlock } from '@/lib/comments/commentAnchors'
 import type { Agent } from './types'
 import type { AgentDocumentCommentOutput } from './agentTooling'
@@ -38,6 +39,10 @@ export function applyAgentDocumentComments(params: {
   }
 
   const editor = getEditor()
+  const capabilityKey = params.capabilityId || 'document_comment'
+  const previousAgentComments = getDocumentCommentsByAgent(documentId, params.agent.id, capabilityKey)
+    .filter(comment => !comment.parentId)
+
   const comments: EditorComment[] = (params.toolOutput.comments || []).map((item) => {
     const block = item.blockId ? editor?.getBlock(item.blockId) : undefined
     const range = resolveCommentRangeInBlock(block, {
@@ -55,7 +60,7 @@ export function applyAgentDocumentComments(params: {
       source: 'agent',
       agentId: params.agent.id,
       agentTitle: params.agent.title,
-      capabilityId: params.capabilityId || 'document_comment',
+      capabilityId: capabilityKey,
       severity: item.severity || 'warning',
       tone: 'red',
       createdAt: new Date().toISOString(),
@@ -63,7 +68,15 @@ export function applyAgentDocumentComments(params: {
     }
   })
 
-  replaceDocumentCommentsByAgent(documentId, params.agent.id, comments, params.capabilityId || 'document_comment')
+  previousAgentComments.forEach((comment) => {
+    removeCommentThreadMarks(comment.id)
+  })
+
+  comments.forEach((comment) => {
+    applyCommentThreadMark(comment)
+  })
+
+  replaceDocumentCommentsByAgent(documentId, params.agent.id, comments, capabilityKey)
   syncAgentCommentHighlights(documentId)
 
   return { success: true, count: comments.length, documentId }

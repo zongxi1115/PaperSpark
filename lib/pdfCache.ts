@@ -2,6 +2,7 @@
 
 import Dexie, { type EntityTable } from 'dexie'
 import type { PDFDocumentCache, PDFPageCache, TranslationCache, TextBlock, PDFAnnotation, GuideCache, VectorDocument } from './types'
+import { emitWorkspaceBridgeChanged } from './workspaceBridgeEvents'
 
 // PDF 文件缓存（存储原始 PDF blob）
 interface PDFFileCache {
@@ -34,6 +35,10 @@ db.version(5).stores({
   vectors: 'id, documentId, blockId',
 })
 
+function notifyWorkspaceCacheChanged() {
+  emitWorkspaceBridgeChanged('immersive-cache-changed')
+}
+
 // ============ PDF 文件缓存操作 ============
 
 /**
@@ -47,6 +52,7 @@ export async function savePDFFile(id: string, blob: Blob, fileName: string): Pro
     size: blob.size,
     cachedAt: new Date().toISOString(),
   })
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -69,6 +75,7 @@ export async function hasPDFFileCache(id: string): Promise<boolean> {
  */
 export async function deletePDFFile(id: string): Promise<void> {
   await db.files.delete(id)
+  notifyWorkspaceCacheChanged()
 }
 
 // ============ 文档缓存操作 ============
@@ -78,6 +85,7 @@ export async function deletePDFFile(id: string): Promise<void> {
  */
 export async function savePDFDocument(doc: PDFDocumentCache): Promise<void> {
   await db.documents.put(doc)
+  notifyWorkspaceCacheChanged()
 }
 
 export async function updatePDFDocument(id: string, updates: Partial<PDFDocumentCache>): Promise<void> {
@@ -85,6 +93,7 @@ export async function updatePDFDocument(id: string, updates: Partial<PDFDocument
     ...updates,
     updatedAt: new Date().toISOString(),
   })
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -113,6 +122,7 @@ export async function deletePDFDocument(id: string): Promise<void> {
     // 删除文档
     await db.documents.delete(id)
   })
+  notifyWorkspaceCacheChanged()
 }
 
 // ============ 页面缓存操作 ============
@@ -122,6 +132,7 @@ export async function deletePDFDocument(id: string): Promise<void> {
  */
 export async function savePDFPages(pages: PDFPageCache[]): Promise<void> {
   await db.pages.bulkPut(pages)
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -148,6 +159,7 @@ export async function updatePageBlocks(pageId: string, blocks: TextBlock[]): Pro
       blocks, 
       updatedAt: new Date().toISOString() 
     })
+    notifyWorkspaceCacheChanged()
   }
 }
 
@@ -158,6 +170,7 @@ export async function updatePageBlocks(pageId: string, blocks: TextBlock[]): Pro
  */
 export async function saveTranslation(translation: TranslationCache): Promise<void> {
   await db.translations.put(translation)
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -172,6 +185,7 @@ export async function getTranslation(documentId: string): Promise<TranslationCac
  */
 export async function deleteTranslation(documentId: string): Promise<void> {
   await db.translations.where('documentId').equals(documentId).delete()
+  notifyWorkspaceCacheChanged()
 }
 
 // ============ 工具函数 ============
@@ -197,6 +211,7 @@ export async function clearAllCache(): Promise<void> {
   await db.documents.clear()
   await db.pages.clear()
   await db.translations.clear()
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -228,6 +243,7 @@ export async function getCacheStats(): Promise<{
  */
 export async function saveAnnotation(annotation: PDFAnnotation): Promise<void> {
   await db.annotations.put(annotation)
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -262,6 +278,7 @@ export async function updateAnnotation(id: string, updates: Partial<PDFAnnotatio
     ...updates,
     updatedAt: new Date().toISOString(),
   })
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -269,6 +286,7 @@ export async function updateAnnotation(id: string, updates: Partial<PDFAnnotatio
  */
 export async function deleteAnnotation(id: string): Promise<void> {
   await db.annotations.delete(id)
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -276,6 +294,7 @@ export async function deleteAnnotation(id: string): Promise<void> {
  */
 export async function deleteAnnotationsByDocumentId(documentId: string): Promise<void> {
   await db.annotations.where('documentId').equals(documentId).delete()
+  notifyWorkspaceCacheChanged()
 }
 
 // ============ 全文内容输出 ============
@@ -381,6 +400,7 @@ export async function getStructuredContentByKnowledgeId(knowledgeItemId: string)
  */
 export async function saveGuide(guide: GuideCache): Promise<void> {
   await db.guides.put(guide)
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -409,6 +429,7 @@ export async function updateGuide(id: string, updates: Partial<GuideCache>): Pro
     ...updates,
     updatedAt: new Date().toISOString(),
   })
+  notifyWorkspaceCacheChanged()
 }
 
 /**
@@ -416,6 +437,7 @@ export async function updateGuide(id: string, updates: Partial<GuideCache>): Pro
  */
 export async function deleteGuide(documentId: string): Promise<void> {
   await db.guides.where('documentId').equals(documentId).delete()
+  notifyWorkspaceCacheChanged()
 }
 
 // ============ RAG 向量缓存操作 ============
@@ -431,6 +453,7 @@ export async function saveVectorDocuments(documentId: string, vectors: VectorDoc
       })),
     )
   })
+  notifyWorkspaceCacheChanged()
 }
 
 export async function getVectorDocumentsByDocumentId(documentId: string): Promise<VectorDocument[]> {
@@ -439,6 +462,7 @@ export async function getVectorDocumentsByDocumentId(documentId: string): Promis
 
 export async function deleteVectorDocumentsByDocumentId(documentId: string): Promise<void> {
   await db.vectors.where('documentId').equals(documentId).delete()
+  notifyWorkspaceCacheChanged()
 }
 
 export async function hasVectorDocuments(documentId: string): Promise<boolean> {
@@ -472,6 +496,7 @@ export async function deleteKnowledgeItemCache(knowledgeItemId: string): Promise
       await db.documents.delete(doc.id)
     }
   })
+  notifyWorkspaceCacheChanged()
 }
 
 export { db }

@@ -125,62 +125,12 @@ function getAssistantCheckpointById(id: string): AssistantDocCheckpoint | null {
   return getAssistantCheckpoints().find(item => item.id === id) ?? null
 }
 
-type StreamingToken = {
-  value: string
-  isWhitespace: boolean
-}
-
-function tokenizeStreamingText(input: string): StreamingToken[] {
-  if (!input) return []
-
-  if (typeof Intl !== 'undefined' && 'Segmenter' in Intl) {
-    try {
-      const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' })
-      const tokens: StreamingToken[] = []
-      for (const segment of segmenter.segment(input)) {
-        tokens.push({
-          value: segment.segment,
-          isWhitespace: /^\s+$/.test(segment.segment),
-        })
-      }
-      return tokens
-    } catch {
-      // fall through to regex tokenizer
-    }
-  }
-
-  return (
-    input.match(/\s+|[A-Za-z0-9_]+|[\u4e00-\u9fff]|[^\sA-Za-z0-9_\u4e00-\u9fff]/g)?.map(part => ({
-      value: part,
-      isWhitespace: /^\s+$/.test(part),
-    })) ?? []
-  )
-}
-
 function StreamingTokenizedContent({ text }: { text: string }) {
-  const tokens = useMemo(() => tokenizeStreamingText(text), [text])
-
   if (!text) return null
 
   return (
     <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-      {tokens.map((token, index) => {
-        if (token.isWhitespace) {
-          return <span key={`ws-${index}`}>{token.value}</span>
-        }
-
-        return (
-          <motion.span
-            key={`tk-${index}`}
-            initial={{ opacity: 0, y: 2, filter: 'blur(8px)' }}
-            animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-            transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-            style={{ display: 'inline-block', willChange: 'opacity, transform, filter' }}
-          >
-            {token.value}
-          </motion.span>
-        )
-      })}
+      {text}
     </div>
   )
 }
@@ -2425,14 +2375,13 @@ export function AssistantChatPanel() {
               </div>
             </motion.div>
               ) : (
-                <AnimatePresence mode="popLayout">
+                <AnimatePresence initial={false}>
                   {messages.map((message, idx) => (
                 <motion.div 
                   key={message.id}
                   ref={(el) => {
                     if (el) messageRefs.current.set(message.id, el)
                   }}
-                  layout
                   initial={{ opacity: 0, y: 16, scale: 0.97 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   transition={{ duration: 0.3, ease: [0.25, 0.46, 0.45, 0.94] }}

@@ -220,6 +220,7 @@ export async function saveWorkspaceSnapshotToDisk(snapshot?: WorkspaceSnapshot):
 export async function syncWorkspaceSnapshotToServer(snapshot?: WorkspaceSnapshot): Promise<{
   filePath: string
   exportedAt: string
+  syncedAt?: string
   stats: WorkspaceSnapshot['stats'] | null
 }> {
   const resolvedSnapshot = snapshot || await buildWorkspaceSnapshot()
@@ -239,7 +240,48 @@ export async function syncWorkspaceSnapshotToServer(snapshot?: WorkspaceSnapshot
   return {
     filePath: typeof payload?.filePath === 'string' ? payload.filePath : '',
     exportedAt: typeof payload?.exportedAt === 'string' ? payload.exportedAt : resolvedSnapshot.exportedAt,
+    syncedAt: typeof payload?.syncedAt === 'string' ? payload.syncedAt : undefined,
     stats: payload?.stats ?? null,
+  }
+}
+
+export async function getWorkspaceBridgeStatus(): Promise<{
+  available: boolean
+  filePath?: string | null
+  syncedAt?: string | null
+  exportedAt?: string | null
+  ageMs?: number | null
+  origin?: string | null
+  schemaVersion?: number | null
+  stats?: WorkspaceSnapshot['stats'] | null
+  sections?: string[]
+  message?: string
+  error?: string
+}> {
+  const response = await fetch('/api/workspace-cli/status', {
+    headers: {
+      Accept: 'application/json',
+    },
+    cache: 'no-store',
+  })
+
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    throw new Error(payload?.error || '读取工作区桥接状态失败')
+  }
+
+  return payload as {
+    available: boolean
+    filePath?: string | null
+    syncedAt?: string | null
+    exportedAt?: string | null
+    ageMs?: number | null
+    origin?: string | null
+    schemaVersion?: number | null
+    stats?: WorkspaceSnapshot['stats'] | null
+    sections?: string[]
+    message?: string
+    error?: string
   }
 }
 

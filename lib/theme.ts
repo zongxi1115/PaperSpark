@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback } from 'react'
 import { getString, setString } from './storage/StorageUtils'
+import { emitWorkspaceBridgeChanged } from './workspaceBridgeEvents'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 
@@ -27,6 +28,7 @@ function getStoredTheme(): ThemeMode {
 function storeTheme(theme: ThemeMode) {
   if (typeof window === 'undefined') return
   setString(THEME_STORAGE_KEY, theme)
+  emitWorkspaceBridgeChanged('theme-changed')
 }
 
 // 应用主题到 DOM

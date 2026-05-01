@@ -539,6 +539,8 @@ pnpm data:cli summary --snapshot D:\\path\\to\\paperspark-workspace-snapshot.jso
 - 允许：学习、研究、个人使用、署名转载
 - 禁止：商业化使用、付费分发、集成至商业产品
 
+未经作者授权下，无实质性重构将本项目的**代码**用于赛事或学术提交（使用该平台产出内容等场景除外），**保留追责权利**。
+
 详见 [LICENSE](LICENSE)。
 
 ## LaTeX 导出

@@ -149,7 +149,8 @@ if _image_counter > 0:
 
     // 运行 Python 脚本
     const result = await new Promise<RunResult>((resolve) => {
-      const proc = spawn('python', [scriptFile], {
+      const pythonExecutable = process.env.PAPERSPARK_PYTHON_PATH || 'python'
+      const proc = spawn(pythonExecutable, [scriptFile], {
         cwd: outputDir,
         env: {
           ...process.env,

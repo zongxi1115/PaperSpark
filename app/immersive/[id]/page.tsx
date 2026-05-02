@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Button, Tooltip, Skeleton, Progress, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, useDisclosure, addToast } from '@heroui/react'
 import { Icon } from '@iconify/react'
-import { getKnowledgeItem, getSettings, getSelectedSmallModel, updateKnowledgeItem, deleteKnowledgeItem, getEmbeddingModelConfig } from '@/lib/storage'
+import { getKnowledgeItem, getSettings, getAdvancedParseProviderConfig, getSelectedSmallModel, updateKnowledgeItem, deleteKnowledgeItem, getEmbeddingModelConfig } from '@/lib/storage'
 import {
   getPDFDocumentByKnowledgeId,
   savePDFDocument,
@@ -20,6 +20,7 @@ import {
   getFullTextByKnowledgeId,
   deleteKnowledgeItemCache,
 } from '@/lib/pdfCache'
+import { isAdvancedParserSource, normalizePDFParserSource } from '@/lib/documentParseProviders'
 import PDFViewer from '@/components/PDF/PDFViewer'
 import HTMLReader from '@/components/PDF/HTMLReader'
 import AIGuidePanel from '@/components/Guide/AIGuidePanel'
@@ -27,7 +28,7 @@ import ImmersiveChatPanel from '@/components/Assistant/ImmersiveChatPanel'
 import ImmersiveCanvasPanel from '@/components/Assistant/ImmersiveCanvasPanel'
 import type { KnowledgeItem, TextBlock, PDFAnnotation, TranslationStreamEvent, HighlightColor, TranslationBlockPayload, GuideFocusTarget } from '@/lib/types'
 import { HIGHLIGHT_COLORS } from '@/lib/types'
-import { parsePDFWithSurya } from '@/lib/suryaParser'
+import { parsePDFWithAdvancedProvider } from '@/lib/suryaParser'
 import { indexKnowledgeForRAG, deleteKnowledgeVectors } from '@/lib/rag'
 
 function attachPageMetrics(blocks: TextBlock[], pageWidth: number, pageHeight: number) {
@@ -352,12 +353,12 @@ export default function ImmersiveReaderPage() {
       ),
     )
     const missingPictureBlocks =
-      existingDoc?.parser === 'surya' &&
+      isAdvancedParserSource(existingDoc?.parser) &&
       existingDoc?.parseStatus === 'completed' &&
       Number(existingDoc?.structureCounts?.Picture || 0) > 0 &&
       pictureBlockIds.size === 0
     const hasCompletedSuryaCache =
-      existingDoc?.parser === 'surya' &&
+      isAdvancedParserSource(existingDoc?.parser) &&
       existingDoc?.parseStatus === 'completed' &&
       existingPages.length > 0 &&
       !missingPictureBlocks
@@ -372,7 +373,7 @@ export default function ImmersiveReaderPage() {
     const extractedCachedReferences = extractReferencesFromBlocks(cachedBlocks)
 
     if (existingDoc) {
-      if (existingDoc.parser === 'surya') {
+      if (isAdvancedParserSource(existingDoc.parser)) {
         const translation = await getTranslation(knowledgeId)
         if (translation) {
           const visibleBlocks = translation.blocks.filter(block => !pictureBlockIds.has(block.blockId))
@@ -502,9 +503,11 @@ export default function ImmersiveReaderPage() {
       }
 
       const now = new Date().toISOString()
+      const settings = getSettings()
+      const { providerId, baseUrl: providerBaseUrl, apiKey: providerApiKey, modelVersion: providerModelVersion } = getAdvancedParseProviderConfig(settings)
       if (existingDoc) {
         await updatePDFDocument(knowledgeId, {
-          parser: 'surya',
+          parser: normalizePDFParserSource(providerId),
           parseStatus: 'processing',
           parseError: '',
         })
@@ -515,18 +518,22 @@ export default function ImmersiveReaderPage() {
           fileName,
           pageCount: existingPages.length,
           metadata: fallbackMetadata,
-          parser: 'surya',
+          parser: normalizePDFParserSource(providerId),
           parseStatus: 'processing',
           parsedAt: now,
           updatedAt: now,
         })
       }
 
-      const metadataModelConfig = getSelectedSmallModel(getSettings())
-      const result = await parsePDFWithSurya({
+      const metadataModelConfig = getSelectedSmallModel(settings)
+      const result = await parsePDFWithAdvancedProvider({
         documentId: knowledgeId,
         fileBlob,
         fileName,
+        providerId,
+        baseUrl: providerBaseUrl,
+        apiKey: providerApiKey,
+        modelVersion: providerModelVersion,
         keepOutputs: false,
         includeMetadata: Boolean(metadataModelConfig?.apiKey && metadataModelConfig?.modelName),
         modelConfig: metadataModelConfig || undefined,
@@ -539,7 +546,7 @@ export default function ImmersiveReaderPage() {
 
       const extractedReferences = extractReferencesFromBlocks(allBlocks)
 
-      if (existingDoc?.parser !== 'surya') {
+      if (!isAdvancedParserSource(existingDoc?.parser)) {
         await deleteTranslation(knowledgeId)
         setHasTranslation(false)
         setTranslatedBlocks(new Map())
@@ -562,7 +569,7 @@ export default function ImmersiveReaderPage() {
         fileName,
         pageCount: result.pages.length,
         metadata: mergedMetadata,
-        parser: 'surya',
+        parser: normalizePDFParserSource(providerId),
         parseStatus: 'completed',
         parseError: '',
         fullText: result.fullText,
@@ -613,7 +620,7 @@ export default function ImmersiveReaderPage() {
       console.error('Process PDF error:', err)
       setSuryaReady(false)
       await updatePDFDocument(knowledgeId, {
-        parser: 'surya',
+        parser: normalizePDFParserSource(getAdvancedParseProviderConfig(getSettings()).providerId),
         parseStatus: 'failed',
         parseError: err instanceof Error ? err.message : 'Surya 解析失败',
       })

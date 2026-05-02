@@ -3,16 +3,14 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { extractMetadata, generateSummary } from '@/lib/ai'
+import { DEFAULT_ADVANCED_PARSE_PROVIDER } from '@/lib/documentParseProviders'
+import { getAdvancedParseServiceUrl, normalizeAdvancedParseProviderId } from '@/lib/server/advancedParseProviderRuntime'
 import { resolveRuntimeOutPath } from '@/lib/server/runtimePaths'
-import type { ModelConfig } from '@/lib/types'
+import type { AdvancedParseProviderId, ModelConfig } from '@/lib/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-const SURYA_SERVICE_URL =
-  process.env.SURYA_OCR_SERVICE_URL ||
-  process.env.SURYA_SERVICE_URL ||
-  'http://127.0.0.1:8765'
 const SURYA_BINDING_DIR = resolveRuntimeOutPath('surya')
 const SURYA_BINDING_FILE = path.join(SURYA_BINDING_DIR, 'job-bindings.json')
 
@@ -20,6 +18,8 @@ interface SuryaJobBinding {
   fingerprint: string
   jobId: string
   fileName: string
+  providerId: AdvancedParseProviderId
+  baseUrl?: string
   pageRange?: string
   outputName?: string
   status: 'queued' | 'processing' | 'completed' | 'failed'
@@ -80,6 +80,8 @@ interface SuryaJobResultResponse extends SuryaJobStatusResponse {
 
 interface SuryaResultRequest {
   jobId: string
+  providerId?: AdvancedParseProviderId
+  baseUrl?: string
   includeSummary?: boolean
   includeMetadata?: boolean
   modelConfig?: ModelConfig
@@ -153,12 +155,16 @@ function removeBindingByFingerprint(store: SuryaJobBindingStore, fingerprint: st
 
 async function buildSubmissionFingerprint(params: {
   file: File
+  providerId: AdvancedParseProviderId
+  baseUrl?: string
   pageRange?: string
   outputName?: string
 }) {
   const contentBuffer = Buffer.from(await params.file.arrayBuffer())
   const fileContentHash = createHash('sha256').update(contentBuffer).digest('hex')
   const key = [
+    params.providerId,
+    params.baseUrl || '',
     params.file.name,
     String(params.file.size),
     params.file.type || '',
@@ -196,8 +202,14 @@ async function syncBindingStatusByJobId(jobId: string, payload: Partial<SuryaJob
   })
 }
 
-async function proxyToSurya(path: string, init?: RequestInit) {
-  return fetch(`${SURYA_SERVICE_URL}${path}`, {
+async function proxyToSurya(
+  providerId: AdvancedParseProviderId,
+  pathname: string,
+  init?: RequestInit,
+  explicitBaseUrl?: string,
+) {
+  const serviceUrl = getAdvancedParseServiceUrl(providerId, explicitBaseUrl)
+  return fetch(`${serviceUrl}${pathname}`, {
     cache: 'no-store',
     ...init,
   })
@@ -210,6 +222,9 @@ async function handleJobSubmission(request: NextRequest) {
   if (!(file instanceof File)) {
     return NextResponse.json({ error: '缺少 PDF 文件' }, { status: 400 })
   }
+
+  const providerId = normalizeAdvancedParseProviderId(form.get('providerId') as string | null | undefined)
+  const baseUrl = typeof form.get('baseUrl') === 'string' ? String(form.get('baseUrl')).trim() : ''
 
   const upstreamForm = new FormData()
   upstreamForm.set('file', file)
@@ -233,6 +248,8 @@ async function handleJobSubmission(request: NextRequest) {
   const normalizedOutputName = typeof outputName === 'string' && outputName.trim() ? outputName.trim() : undefined
   const fingerprint = await buildSubmissionFingerprint({
     file,
+    providerId,
+    baseUrl,
     pageRange: normalizedPageRange,
     outputName: normalizedOutputName,
   })
@@ -240,7 +257,12 @@ async function handleJobSubmission(request: NextRequest) {
   const bindingStore = await readBindingStore()
   const existingBinding = bindingStore.byFingerprint[fingerprint]
   if (existingBinding) {
-    const statusResponse = await proxyToSurya(`/jobs/${existingBinding.jobId}`)
+    const statusResponse = await proxyToSurya(
+      existingBinding.providerId || DEFAULT_ADVANCED_PARSE_PROVIDER,
+      `/jobs/${existingBinding.jobId}`,
+      undefined,
+      existingBinding.baseUrl,
+    )
     const statusPayload = await statusResponse.json().catch(() => null) as SuryaJobStatusResponse | null
 
     if (statusResponse.ok && statusPayload?.job_id) {
@@ -269,10 +291,10 @@ async function handleJobSubmission(request: NextRequest) {
     }
   }
 
-  const parseResponse = await proxyToSurya('/jobs', {
+  const parseResponse = await proxyToSurya(providerId, '/jobs', {
     method: 'POST',
     body: upstreamForm,
-  })
+  }, baseUrl)
 
   const payload = await parseResponse.json().catch(() => null)
   if (!parseResponse.ok) {
@@ -288,6 +310,8 @@ async function handleJobSubmission(request: NextRequest) {
       fingerprint,
       jobId: payload.job_id,
       fileName: file.name,
+      providerId,
+      baseUrl,
       pageRange: normalizedPageRange,
       outputName: normalizedOutputName,
       status: payload.status === 'failed' ? 'failed' : (payload.status || 'queued'),
@@ -313,7 +337,13 @@ async function handleJobResult(request: NextRequest) {
     return NextResponse.json({ error: '缺少 jobId' }, { status: 400 })
   }
 
-  const resultResponse = await proxyToSurya(`/jobs/${body.jobId}/result`)
+  const bindingStore = await readBindingStore()
+  const bindingFingerprint = bindingStore.byJobId[body.jobId]
+  const binding = bindingFingerprint ? bindingStore.byFingerprint[bindingFingerprint] : null
+  const providerId = normalizeAdvancedParseProviderId(body.providerId || binding?.providerId)
+  const baseUrl = body.baseUrl?.trim() || binding?.baseUrl
+
+  const resultResponse = await proxyToSurya(providerId, `/jobs/${body.jobId}/result`, undefined, baseUrl)
   const payload = await resultResponse.json().catch(() => null) as SuryaJobResultResponse | null
 
   if (!resultResponse.ok && resultResponse.status !== 202) {
@@ -372,7 +402,14 @@ export async function GET(request: NextRequest) {
     }
 
     const upstreamPath = includeResult ? `/jobs/${jobId}/result` : `/jobs/${jobId}`
-    const response = await proxyToSurya(upstreamPath)
+    const bindingStore = await readBindingStore()
+    const bindingFingerprint = bindingStore.byJobId[jobId]
+    const binding = bindingFingerprint ? bindingStore.byFingerprint[bindingFingerprint] : null
+    const providerId = normalizeAdvancedParseProviderId(
+      request.nextUrl.searchParams.get('providerId') || binding?.providerId,
+    )
+    const baseUrl = request.nextUrl.searchParams.get('baseUrl')?.trim() || binding?.baseUrl
+    const response = await proxyToSurya(providerId, upstreamPath, undefined, baseUrl)
     const payload = await response.json().catch(() => null) as SuryaJobStatusResponse | null
 
     if (!includeResult && payload?.job_id) {

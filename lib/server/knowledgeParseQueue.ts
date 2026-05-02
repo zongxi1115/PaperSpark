@@ -1,14 +1,12 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { extractMetadata } from '@/lib/ai'
+import { normalizePDFParserSource } from '@/lib/documentParseProviders'
+import { getAdvancedParseServiceUrl, normalizeAdvancedParseProviderId } from '@/lib/server/advancedParseProviderRuntime'
+import { fetchMineruResult, getMineruJobStatus, submitMineruJob } from '@/lib/server/mineruService'
 import { resolveRuntimeOutPath } from '@/lib/server/runtimePaths'
 import { normalizeSuryaParseResult } from '@/lib/suryaParser'
-import type { KnowledgeItem, ModelConfig, PDFDocumentCache, PDFMetadata, PDFPageCache } from '@/lib/types'
-
-const SURYA_SERVICE_URL =
-  process.env.SURYA_OCR_SERVICE_URL ||
-  process.env.SURYA_SERVICE_URL ||
-  'http://127.0.0.1:8765'
+import type { AdvancedParseProviderId, KnowledgeItem, ModelConfig, PDFDocumentCache, PDFMetadata, PDFPageCache } from '@/lib/types'
 const QUEUE_DIR = resolveRuntimeOutPath('knowledge-parse-queue')
 const QUEUE_STORE_FILE = path.join(QUEUE_DIR, 'queue.json')
 const QUEUE_FILES_DIR = path.join(QUEUE_DIR, 'files')
@@ -22,6 +20,7 @@ export interface KnowledgeParseTaskSummary {
   knowledgeItemId: string
   title: string
   fileName: string
+  providerId: AdvancedParseProviderId
   sourceType: KnowledgeItem['sourceType']
   status: KnowledgeParseTaskStatus
   stage?: string
@@ -40,6 +39,9 @@ export interface KnowledgeParseTaskSummary {
 interface KnowledgeParseTaskStored extends KnowledgeParseTaskSummary {
   remoteUrl?: string
   localFilePath?: string
+  providerBaseUrl?: string
+  providerApiKey?: string
+  providerModelVersion?: string
   metadataModelConfig?: ModelConfig | null
   itemSnapshot: Pick<KnowledgeItem, 'id' | 'title' | 'authors' | 'abstract' | 'year' | 'journal'>
 }
@@ -54,6 +56,10 @@ interface EnqueueTaskInput {
   taskId: string
   title: string
   fileName: string
+  providerId: AdvancedParseProviderId
+  providerBaseUrl?: string
+  providerApiKey?: string
+  providerModelVersion?: string
   sourceType: KnowledgeItem['sourceType']
   remoteUrl?: string
   file?: File
@@ -105,6 +111,16 @@ function createEmptyStore(): KnowledgeParseQueueStore {
   }
 }
 
+function normalizeStoredTask(task: KnowledgeParseTaskStored): KnowledgeParseTaskStored {
+  return {
+    ...task,
+    providerId: normalizeAdvancedParseProviderId(task.providerId),
+    providerBaseUrl: task.providerBaseUrl?.trim() || undefined,
+    providerApiKey: task.providerApiKey?.trim() || undefined,
+    providerModelVersion: task.providerModelVersion?.trim() || undefined,
+  }
+}
+
 async function ensureQueueDirs() {
   await fs.mkdir(QUEUE_FILES_DIR, { recursive: true })
   await fs.mkdir(QUEUE_RESULTS_DIR, { recursive: true })
@@ -115,7 +131,13 @@ async function readQueueStore() {
     const raw = await fs.readFile(QUEUE_STORE_FILE, 'utf8')
     const parsed = JSON.parse(raw) as Partial<KnowledgeParseQueueStore>
     if (parsed.version === 1 && parsed.tasks && typeof parsed.tasks === 'object') {
-      return parsed as KnowledgeParseQueueStore
+      const normalizedTasks = Object.fromEntries(
+        Object.entries(parsed.tasks).map(([taskId, task]) => [taskId, normalizeStoredTask(task as KnowledgeParseTaskStored)]),
+      )
+      return {
+        ...(parsed as KnowledgeParseQueueStore),
+        tasks: normalizedTasks,
+      }
     }
     return createEmptyStore()
   } catch (error) {
@@ -146,6 +168,7 @@ function toSummary(task: KnowledgeParseTaskStored): KnowledgeParseTaskSummary {
     knowledgeItemId: task.knowledgeItemId,
     title: task.title,
     fileName: task.fileName,
+    providerId: task.providerId,
     sourceType: task.sourceType,
     status: task.status,
     stage: task.stage,
@@ -209,8 +232,14 @@ async function resolvePdfBuffer(task: KnowledgeParseTaskStored) {
   }
 }
 
-async function proxyToSurya(pathname: string, init?: RequestInit) {
-  return fetch(`${SURYA_SERVICE_URL}${pathname}`, {
+async function proxyToProvider(
+  providerId: AdvancedParseProviderId,
+  pathname: string,
+  init?: RequestInit,
+  providerBaseUrl?: string,
+) {
+  const serviceUrl = getAdvancedParseServiceUrl(providerId, providerBaseUrl)
+  return fetch(`${serviceUrl}${pathname}`, {
     cache: 'no-store',
     ...init,
   })
@@ -235,10 +264,10 @@ async function submitToSurya(task: KnowledgeParseTaskStored, fileBuffer: Buffer)
   form.set('output_name', task.knowledgeItemId)
   form.set('keep_outputs', 'false')
 
-  const response = await proxyToSurya('/jobs', {
+  const response = await proxyToProvider(task.providerId, '/jobs', {
     method: 'POST',
     body: form,
-  })
+  }, task.providerBaseUrl)
 
   const payload = await response.json().catch(() => null) as SuryaJobStatusResponse | null
   if (!response.ok || !payload?.job_id) {
@@ -248,11 +277,57 @@ async function submitToSurya(task: KnowledgeParseTaskStored, fileBuffer: Buffer)
   return payload
 }
 
-async function pollSuryaTask(taskId: string, jobId: string) {
+async function submitToAdvancedProvider(task: KnowledgeParseTaskStored, fileBuffer: Buffer) {
+  if (task.providerId === 'mineru') {
+    return submitMineruJob({
+      fileBuffer,
+      fileName: task.fileName,
+      documentId: task.knowledgeItemId,
+      config: {
+        baseUrl: task.providerBaseUrl,
+        apiKey: task.providerApiKey || '',
+        modelVersion: task.providerModelVersion,
+      },
+    })
+  }
+
+  return submitToSurya(task, fileBuffer)
+}
+
+async function pollAdvancedTask(taskId: string, jobId: string) {
+  const store = await readQueueStore()
+  const task = store.tasks[taskId]
+  const providerId = normalizeAdvancedParseProviderId(task?.providerId)
+  const providerBaseUrl = task?.providerBaseUrl
+
   while (true) {
-    const response = await proxyToSurya(`/jobs/${jobId}`)
-    const payload = await response.json().catch(() => null) as SuryaJobStatusResponse | null
-    if (!response.ok || !payload?.status) {
+    let payload: SuryaJobStatusResponse | null = null
+
+    if (providerId === 'mineru') {
+      const statusPayload = await getMineruJobStatus({
+        jobId,
+        config: {
+          baseUrl: providerBaseUrl,
+          apiKey: task?.providerApiKey || '',
+          modelVersion: task?.providerModelVersion,
+        },
+      })
+      payload = {
+        success: true,
+        job_id: statusPayload.job_id,
+        status: statusPayload.status,
+        stage: statusPayload.stage,
+        error: statusPayload.error,
+      }
+    } else {
+      const response = await proxyToProvider(providerId, `/jobs/${jobId}`, undefined, providerBaseUrl)
+      payload = await response.json().catch(() => null) as SuryaJobStatusResponse | null
+      if (!response.ok || !payload?.status) {
+        throw new Error(payload?.error || '轮询解析状态失败')
+      }
+    }
+
+    if (!payload?.status) {
       throw new Error(payload?.error || '轮询解析状态失败')
     }
 
@@ -274,8 +349,8 @@ async function pollSuryaTask(taskId: string, jobId: string) {
   }
 }
 
-async function fetchSuryaResult(jobId: string) {
-  const response = await proxyToSurya(`/jobs/${jobId}/result`)
+async function fetchSuryaResult(task: KnowledgeParseTaskStored, jobId: string) {
+  const response = await proxyToProvider(task.providerId, `/jobs/${jobId}/result`, undefined, task.providerBaseUrl)
   const payload = await response.json().catch(() => null) as SuryaJobResultResponse | null
   if (!response.ok || payload?.status === 'failed') {
     throw new Error(payload?.error || '获取解析结果失败')
@@ -284,6 +359,37 @@ async function fetchSuryaResult(jobId: string) {
     throw new Error('未获取到解析结果')
   }
   return payload
+}
+
+async function fetchAdvancedResult(task: KnowledgeParseTaskStored, jobId: string) {
+  if (task.providerId === 'mineru') {
+    const payload = await fetchMineruResult({
+      jobId,
+      fileName: task.fileName,
+      config: {
+        baseUrl: task.providerBaseUrl,
+        apiKey: task.providerApiKey || '',
+        modelVersion: task.providerModelVersion,
+      },
+    })
+
+    if (payload.status === 'failed') {
+      throw new Error(payload.error || '获取 MinerU 解析结果失败')
+    }
+    if (!('parsed' in payload) || !payload.parsed) {
+      throw new Error('未获取到 MinerU 解析结果')
+    }
+
+    return {
+      success: true,
+      job_id: payload.job_id,
+      status: payload.status,
+      stage: payload.stage,
+      parsed: payload.parsed,
+    } as SuryaJobResultResponse
+  }
+
+  return fetchSuryaResult(task, jobId)
 }
 
 async function processTask(task: KnowledgeParseTaskStored) {
@@ -300,12 +406,12 @@ async function processTask(task: KnowledgeParseTaskStored) {
   const { buffer, fileName } = await resolvePdfBuffer(task)
   await updateTask(task.id, { stage: '提交解析任务' })
 
-  const submitPayload = await submitToSurya(task, buffer)
+  const submitPayload = await submitToAdvancedProvider(task, buffer)
   await updateTask(task.id, { stage: submitPayload.stage || '排队解析' })
-  await pollSuryaTask(task.id, submitPayload.job_id as string)
+  await pollAdvancedTask(task.id, submitPayload.job_id as string)
 
   await updateTask(task.id, { stage: '整理解析结果' })
-  const resultPayload = await fetchSuryaResult(submitPayload.job_id as string)
+  const resultPayload = await fetchAdvancedResult(task, submitPayload.job_id as string)
   const metadataResult = task.metadataModelConfig
     ? await extractMetadata(resultPayload.parsed.full_text || '', task.metadataModelConfig, fileName)
     : { success: false, metadata: undefined }
@@ -334,7 +440,7 @@ async function processTask(task: KnowledgeParseTaskStored) {
       fileName,
       pageCount: parseResult.pages.length,
       metadata: mergedMetadata,
-      parser: 'surya',
+      parser: normalizePDFParserSource(task.providerId),
       parseStatus: 'completed',
       parseError: '',
       fullText: parseResult.fullText,
@@ -427,6 +533,10 @@ export async function enqueueKnowledgeParseTask(input: EnqueueTaskInput) {
     knowledgeItemId: input.itemSnapshot.id,
     title: input.title,
     fileName: input.fileName,
+    providerId: input.providerId,
+    providerBaseUrl: input.providerBaseUrl,
+    providerApiKey: input.providerApiKey,
+    providerModelVersion: input.providerModelVersion,
     sourceType: input.sourceType,
     remoteUrl: input.remoteUrl,
     localFilePath,

@@ -1,6 +1,6 @@
-import type { ModelConfig, PDFMetadata, PDFPageCache, TextBlock, TextBlockType, TextStyle } from './types'
+import type { AdvancedParseProviderId, ModelConfig, PDFMetadata, PDFPageCache, TextBlock, TextBlockType, TextStyle } from './types'
 
-interface SuryaLayoutRegion {
+export interface StructuredLayoutRegion {
   label: string
   confidence?: number
   position: number
@@ -10,26 +10,26 @@ interface SuryaLayoutRegion {
   text: string
 }
 
-interface SuryaParsedPage {
+export interface StructuredParsedPage {
   page: number
   image_bbox: number[]
   full_text: string
   structure_counts: Record<string, number>
-  layout_regions: SuryaLayoutRegion[]
+  layout_regions: StructuredLayoutRegion[]
 }
 
-interface SuryaParsedDocument {
+export interface StructuredParsedDocument {
   document_name: string
   page_count: number
   full_text: string
   structure_counts: Record<string, number>
-  pages: SuryaParsedPage[]
+  pages: StructuredParsedPage[]
   artifacts?: Record<string, string>
 }
 
 interface SuryaProxyResponse {
   success: boolean
-  parsed: SuryaParsedDocument
+  parsed: StructuredParsedDocument
   metadata?: {
     success: boolean
     metadata?: PDFMetadata
@@ -111,7 +111,7 @@ function mapSuryaLabelToTextBlockType(label: string, text: string, pageNum: numb
   }
 }
 
-function buildStyle(region: SuryaLayoutRegion, blockType: TextBlockType): TextStyle {
+function buildStyle(region: StructuredLayoutRegion, blockType: TextBlockType): TextStyle {
   const bboxHeight = Math.max(12, region.bbox[3] - region.bbox[1])
   const lineCount = Math.max(region.line_count || 1, 1)
   const estimatedLineHeight = bboxHeight / lineCount
@@ -130,7 +130,7 @@ function regionToBlock(
   pageNum: number,
   pageWidth: number,
   pageHeight: number,
-  region: SuryaLayoutRegion,
+  region: StructuredLayoutRegion,
 ): TextBlock | null {
   const text = normalizeText(region.text)
   const isPictureRegion = region.label === 'Picture'
@@ -206,7 +206,7 @@ async function fetchWithExponentialBackoff(
 
 async function submitSuryaJob(form: FormData) {
   const response = await fetchWithExponentialBackoff(
-    '/api/pdf/surya',
+    '/api/pdf/advanced',
     {
       method: 'POST',
       body: form,
@@ -222,12 +222,26 @@ async function submitSuryaJob(form: FormData) {
   return await response.json() as SuryaJobSubmissionResponse
 }
 
-async function pollSuryaJob(jobId: string) {
+async function pollSuryaJob(params: {
+  jobId: string
+  providerId?: AdvancedParseProviderId
+  baseUrl?: string
+  apiKey?: string
+  modelVersion?: string
+}) {
   const startedAt = Date.now()
 
   while (true) {
+    const searchParams = new URLSearchParams({
+      jobId: params.jobId,
+    })
+    if (params.providerId) searchParams.set('providerId', params.providerId)
+    if (params.baseUrl?.trim()) searchParams.set('baseUrl', params.baseUrl.trim())
+    if (params.apiKey?.trim()) searchParams.set('apiKey', params.apiKey.trim())
+    if (params.modelVersion?.trim()) searchParams.set('modelVersion', params.modelVersion.trim())
+
     const response = await fetchWithExponentialBackoff(
-      `/api/pdf/surya?jobId=${encodeURIComponent(jobId)}`,
+      `/api/pdf/advanced?${searchParams.toString()}`,
       {
         cache: 'no-store',
       },
@@ -261,18 +275,26 @@ async function pollSuryaJob(jobId: string) {
 
 async function fetchSuryaResult(params: {
   jobId: string
+  providerId?: AdvancedParseProviderId
+  baseUrl?: string
+  apiKey?: string
+  modelVersion?: string
   includeMetadata?: boolean
   includeSummary?: boolean
   modelConfig?: ModelConfig
   fileName: string
 }) {
   const response = await fetchWithExponentialBackoff(
-    '/api/pdf/surya',
+    '/api/pdf/advanced',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jobId: params.jobId,
+        providerId: params.providerId,
+        baseUrl: params.baseUrl,
+        apiKey: params.apiKey,
+        modelVersion: params.modelVersion,
         includeMetadata: params.includeMetadata,
         includeSummary: params.includeSummary,
         modelConfig: params.modelConfig,
@@ -296,7 +318,7 @@ async function fetchSuryaResult(params: {
 
 export function normalizeSuryaParseResult(
   documentId: string,
-  parsed: SuryaParsedDocument,
+  parsed: StructuredParsedDocument,
   metadata?: Partial<PDFMetadata>,
 ): SuryaParseResult {
   const pages: PDFPageCache[] = parsed.pages.map(page => {
@@ -328,10 +350,14 @@ export function normalizeSuryaParseResult(
   }
 }
 
-export async function parsePDFWithSurya(params: {
+export async function parsePDFWithAdvancedProvider(params: {
   documentId: string
   fileBlob: Blob
   fileName: string
+  providerId: AdvancedParseProviderId
+  baseUrl?: string
+  apiKey?: string
+  modelVersion?: string
   pageRange?: string
   keepOutputs?: boolean
   includeMetadata?: boolean
@@ -346,16 +372,37 @@ export async function parsePDFWithSurya(params: {
   form.set('file', file)
   form.set('outputName', params.documentId)
   form.set('keepOutputs', params.keepOutputs ? 'true' : 'false')
+  form.set('providerId', params.providerId)
+
+  if (params.baseUrl?.trim()) {
+    form.set('baseUrl', params.baseUrl.trim())
+  }
+  if (params.apiKey?.trim()) {
+    form.set('apiKey', params.apiKey.trim())
+  }
+  if (params.modelVersion?.trim()) {
+    form.set('modelVersion', params.modelVersion.trim())
+  }
 
   if (params.pageRange) {
     form.set('pageRange', params.pageRange)
   }
 
   const submitted = await submitSuryaJob(form)
-  await pollSuryaJob(submitted.job_id)
+  await pollSuryaJob({
+    jobId: submitted.job_id,
+    providerId: params.providerId,
+    baseUrl: params.baseUrl,
+    apiKey: params.apiKey,
+    modelVersion: params.modelVersion,
+  })
 
   const payload = await fetchSuryaResult({
     jobId: submitted.job_id,
+    providerId: params.providerId,
+    baseUrl: params.baseUrl,
+    apiKey: params.apiKey,
+    modelVersion: params.modelVersion,
     includeMetadata: params.includeMetadata,
     includeSummary: params.includeSummary,
     modelConfig: params.modelConfig,
@@ -367,4 +414,20 @@ export async function parsePDFWithSurya(params: {
     payload.parsed,
     payload.metadata?.metadata,
   )
+}
+
+export async function parsePDFWithSurya(params: {
+  documentId: string
+  fileBlob: Blob
+  fileName: string
+  pageRange?: string
+  keepOutputs?: boolean
+  includeMetadata?: boolean
+  includeSummary?: boolean
+  modelConfig?: ModelConfig
+}): Promise<SuryaParseResult> {
+  return parsePDFWithAdvancedProvider({
+    ...params,
+    providerId: 'surya-local',
+  })
 }

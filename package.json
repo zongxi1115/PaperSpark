@@ -115,6 +115,13 @@
         "allowToChangeInstallationDirectory": true
       },
       "artifactName": "PaperSpark-${version}-setup.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "artifactName": "PaperSpark-${version}-mac-${arch}.${ext}"
     }
   }
 }

@@ -141,11 +141,65 @@ jobs:
 
           gh release upload $env:RELEASE_TAG $assets --clobber
 
+  build-electron-macos:
+    name: Build Electron macOS Assets
+    needs: release
+    if: needs.release.outputs.released == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.release.outputs.version }}
+      RELEASE_TAG: v${{ needs.release.outputs.version }}
+      CSC_IDENTITY_AUTO_DISCOVERY: false
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: refs/tags/v${{ needs.release.outputs.version }}
+          fetch-depth: 0
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build Next standalone bundle
+        run: pnpm build
+
+      - name: Prepare Electron bundle resources
+        run: pnpm desktop:build
+
+      - name: Build Electron macOS packages
+        run: pnpm exec electron-builder --mac dmg zip
+
+      - name: Verify macOS release assets
+        run: |
+          ls -lah release/electron
+          test -f "release/electron/PaperSpark-${RELEASE_VERSION}-mac-arm64.dmg" || test -f "release/electron/PaperSpark-${RELEASE_VERSION}-mac-x64.dmg" || test -f "release/electron/PaperSpark-${RELEASE_VERSION}-mac-universal.dmg"
+
+      - name: Upload macOS assets to GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${RELEASE_TAG}" release/electron/*.dmg release/electron/*-mac-*.zip --clobber
+
   deploy-production:
     name: Deploy to Vercel
     needs:
       - release
       - build-electron-windows
+      - build-electron-macos
     if: needs.release.outputs.released == 'true'
     runs-on: ubuntu-latest
     steps:

@@ -49,6 +49,7 @@ PaperSpark 面向科研与高阶学习场景，提供从文献导入、沉浸式
 - 支持多智能体切换，适配不同任务（检索、改写、纠错、结构化输出等）。
 - 支持引用知识库、引用资产库、快速笔记与会话历史回溯。
 - 支持代码块运行反馈与结果回填，便于实验性分析任务。
+- 若接入本地或云端 Python 引擎，可进一步解锁在线 Python 执行、绘图与更复杂的实验性工作流。
 
 ### 4) 写作编辑与公式能力
 
@@ -202,158 +203,103 @@ PaperSpark 面向科研与高阶学习场景，提供从文献导入、沉浸式
 
 ## 快速开始
 
-
 建议移步到 [https://docs.paper.062679.xyz](https://docs.paper.062679.xyz) 查看最新的部署教程和使用文档。(目前正在火速建设中)
 
-### 方式一：Modal 云部署（最推荐）
+### 当前产品结构
 
-适合希望获得更稳定 OCR 性能、较低本地环境负担，同时又不想自己长期维护 GPU 服务的用户。
+PaperSpark 现在更适合被理解为：**一个主应用 + 可选解析/运行引擎**。
 
-> [!NOTE]
-> 首次使用 Surya OCR 时需要下载模型并建立缓存，启动时间会明显更长，请耐心等待。Docker GPU、本地 GPU 等其他方案第一次启动也存在同样现象。
-> 按 2026-03-26 的 Modal 公开价格粗略估算，首次模型下载与冷启动完成一次解析的成本大约在 `$0.1` 左右；缓存建立后，20 页 PDF 单次解析成本通常约 `$0.05`。
-> 实际成本会受 PDF 页数、版面复杂度、请求间隔、模型缓存命中情况和 Modal GPU 单价变化影响。
+- 主应用：负责知识库、沉浸式阅读、编辑器、助手、图谱、导出等核心体验。
+- `pdfjs` 基础解析：默认内置，无需 Python，提供最基础的 PDF 文本读取与兼容能力。
+- Python 引擎：可选接入本地或云端，负责更重的 OCR、版面分析、代码执行、绘图等能力。
+- MinerU 云端解析：独立于 Python，可直接作为高级文档解析 provider 使用。
+
+### 你可以怎么使用
+
+#### 1. 纯主应用模式
+
+适合先体验产品主体，不折腾 Python 环境。
+
+- 可用：知识库、编辑器、AI 助手、基础 PDF 读取、导出、图谱等。
+- 解析：走内置 `pdfjs` 基础解析。
+- 不足：高级 OCR、复杂版面恢复、把本机 Python 当作运行引擎、在线执行 Python 代码都无法完整使用。
+
+#### 2. 主应用 + 本地 Python
+
+适合希望逐步增强本地能力的用户。
+
+- 如果你只配置了较轻量的 Python 环境：
+  - 可以逐步承担简单的绘图、实验性脚本、部分本地工具调用等任务。
+  - 更适合做“本地辅助运行环境”。
+- 如果你把 Python 依赖装全：
+  - 可以进一步作为你的**本地高级引擎**。
+  - 可承接 Surya OCR、本地结构化解析、更多代码执行与图像/图表生成工作流。
+
+> [!IMPORTANT]
+> 没有 Python 时，最明显缺失的一类能力就是**在线运行 Python 代码**。  
+> MinerU 可以解决“云端文档解析”问题，但它不能替代“本地/云端 Python 运行时”本身。
+
+#### 3. 主应用 + 云端 Python / 云端解析
+
+适合不想在本地长期维护重依赖，但又希望保留高级解析能力的用户。
+
+- Surya 可以部署到 Modal 等云平台，作为远端 Python 解析引擎。
+- MinerU 可以直接作为云端解析 provider 使用，不依赖本地 Python。
+- 主应用本身仍然只需要正常启动，配置 provider 即可切换高级解析来源。
+
+### 推荐理解方式
+
+你可以把当前能力分成三层：
+
+| 层级 | 作用 | 是否依赖 Python |
+| --- | --- | --- |
+| 主应用 | 阅读、写作、知识库、助手、导出 | 否 |
+| 基础解析 `pdfjs` | 最基础的 PDF 文本兼容读取 | 否 |
+| 高级解析 / 运行引擎 | Surya 本地、Surya 云端、MinerU 云端、代码执行 | 部分依赖 |
+
+其中：
+
+- `surya-local`：本地 Python 引擎
+- `surya-modal`：部署到 Modal 的 Python 引擎
+- `mineru`：独立云端解析 provider，不依赖本地 Python
+
+### 最小启动
 
 #### 环境要求
 
 - Node.js 18+
 - pnpm 8+
-- Python 3.10+（推荐直接使用 conda base 环境）
-- 一个可用的 Modal 账号
 
-#### 部署步骤
+#### 启动主应用
 
 ```bash
-# 1. 克隆项目
 git clone https://github.com/zongxi1115/paperspark.git
 cd paperspark
-
-# 2. 复制本地环境变量示例
 cp .env.local.example .env.local
-
-# 3. 安装前端依赖
 pnpm install
-
-# 4. 在 conda base 环境安装 modal CLI
-python -m pip install -r services/surya_ocr_service/requirements-modal.txt
-
-# 5. 首次登录 modal
-python -m modal setup
-
-# 6. 部署 Surya OCR 微服务
-python -m modal deploy services/surya_ocr_service/modal_service.py
-```
-
-部署成功后，终端会打印一个类似下面的地址：
-
-```text
-https://your-name--paperspark-surya-web-app.modal.run
-```
-
-把它填入 `.env.local` 里的以下 4 个变量：
-
-```env
-SURYA_OCR_SERVICE_URL=https://your-name--paperspark-surya-web-app.modal.run
-SURYA_SERVICE_URL=https://your-name--paperspark-surya-web-app.modal.run
-NEXT_PUBLIC_SURYA_SERVICE_URL=https://your-name--paperspark-surya-web-app.modal.run
-NEXT_PUBLIC_SURYA_OCR_SERVICE_URL=https://your-name--paperspark-surya-web-app.modal.run
-```
-
-然后启动前端：
-
-```bash
 pnpm dev
 ```
 
 默认访问地址为 `http://localhost:3000`。
 
-#### 推荐配置
-
-- 默认 GPU：`L4`
-- 默认执行后端：`python`（直接调用 Surya predictor，而不是反复启动 CLI）
-- 默认空闲缩容窗口：`2s`
-- 默认模型缓存：使用 Modal Volume 持久化
-
-更完整的 Modal 部署细节见 [services/surya_ocr_service/MODAL.md](services/surya_ocr_service/MODAL.md)。
+此时即使你**没有 Python**，也可以先使用主应用的大部分能力，只是高级解析与 Python 运行能力会受限。
 
 ---
 
-### 方式二：Docker 部署
+### 可选能力一：接入本地 Python
 
-适合快速体验和生产环境部署。
-
-首次接触 Docker 的用户建议先看完整部署教程：`deploy/README.md`
+适合想把机器逐步升级为本地引擎的用户。
 
 #### 环境要求
 
-- Docker Desktop（Windows/macOS）或 Docker Engine（Linux）
-- 如需 GPU 加速：NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+- Python 3.10+
+- 推荐 `conda`
 
-#### 一键启动
-
-```bash
-# 1. 下载 deploy 目录
-git clone https://github.com/zongxi1115/paperspark.git
-cd paperspark/deploy
-
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env 填写你的 AI API Key
-
-# 3. 启动服务
-docker-compose up -d
-
-# 4. 访问应用
-# 打开浏览器 http://localhost:3000
-```
-
-#### GPU 版本
-
-```bash
-# 验证 GPU 可用
-docker run --gpus all nvidia/cuda:12.1-base nvidia-smi
-
-# 启动 GPU 版本
-docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
-```
-
-#### 镜像版本说明
-
-| 镜像 | 说明 |
-| --- | --- |
-| `xiaozongxi/paperspark-nextjs:latest` | Next.js 前端 |
-| `xiaozongxi/paperspark-surya:cpu` | OCR 后端 CPU 版本 |
-| `xiaozongxi/paperspark-surya:gpu-cu126` | OCR 后端 CUDA 12.6 版本 |
-
----
-
-### 方式三：本地构建
-
-适合开发者二次开发和调试。
-
-#### 环境要求
-
-- Node.js 18+
-- pnpm 8+
-- Python 3.10+（用于微服务，不安装将仅支持编辑器基础编写和文档导出功能）
-
-#### 安装与运行
-
-```bash
-cp .env.local.example .env.local
-pnpm install
-pnpm dev
-```
-
-默认访问地址为 http://localhost:3000。
-
-#### 微服务依赖安装
+#### 启动本地 Surya / Python 服务
 
 ```bash
 python scripts/start_surya_service.py
 ```
-
-#### 微服务启动路径
 
 启动器会交互提示安装依赖与 CPU/GPU 版本选择，并实时输出安装与启动日志。
 
@@ -374,19 +320,133 @@ chmod +x scripts/start-surya-service.sh
 ./scripts/start-surya-service.sh --accelerator cpu
 ```
 
-默认服务地址为 http://127.0.0.1:8765。
+默认服务地址为 `http://127.0.0.1:8765`。
+
+在应用设置页中，把高级解析 provider 选择为 `surya-local`，并填写：
 
 ```env
 SURYA_OCR_SERVICE_URL=http://127.0.0.1:8765
+SURYA_SERVICE_URL=http://127.0.0.1:8765
+NEXT_PUBLIC_SURYA_SERVICE_URL=http://127.0.0.1:8765
+NEXT_PUBLIC_SURYA_OCR_SERVICE_URL=http://127.0.0.1:8765
 ```
 
-#### GPU 
+#### 适合什么人
 
-- 推荐在支持 CUDA 的环境中运行微服务，以获得更快的文档解析与推理速度。
+- 只想让本机承担部分绘图/运行任务的用户
+- 想把本机进一步升级为完整解析引擎的用户
+- 开发者、本地调试、二次开发场景
+
+#### GPU 说明
+
+- 推荐在支持 CUDA 的环境中运行，以获得更快的文档解析与推理速度。
 - 启动器会按你的选择自动安装匹配通道的 PyTorch（支持 `cu118`/`cu121`/`cu124`/`cu126`）。
 - 若无 GPU，会自动以 CPU 方式运行，但大文件处理耗时会明显增加。
-- 后续将考虑找到surya-ocr的更轻量级替代方案，以降低对 GPU 的依赖。
 - 仓库已补充 ARM64 Docker 打包工作流，CPU 版 Surya 与 Next.js 镜像可额外发布为 ARM 标签。
+
+---
+
+### 可选能力二：接入云端 Python 引擎（Modal）
+
+适合希望把 Surya 这类重依赖迁移到远端的用户。
+
+> [!NOTE]
+> 首次使用 Surya OCR 时需要下载模型并建立缓存，启动时间会明显更长，请耐心等待。  
+> 按 2026-03-26 的 Modal 公开价格粗略估算，首次模型下载与冷启动完成一次解析的成本大约在 `$0.1` 左右；缓存建立后，20 页 PDF 单次解析成本通常约 `$0.05`。  
+> 实际成本会受 PDF 页数、版面复杂度、请求间隔、模型缓存命中情况和 Modal GPU 单价变化影响。
+
+#### 环境要求
+
+- Python 3.10+
+- 一个可用的 Modal 账号
+
+#### 部署步骤
+
+```bash
+# 1. 安装 modal CLI
+python -m pip install -r services/surya_ocr_service/requirements-modal.txt
+
+# 2. 首次登录
+python -m modal setup
+
+# 3. 部署 Surya 云端服务
+python -m modal deploy services/surya_ocr_service/modal_service.py
+```
+
+部署成功后，终端会打印一个类似下面的地址：
+
+```text
+https://your-name--paperspark-surya-web-app.modal.run
+```
+
+然后在应用设置页把高级解析 provider 选择为 `surya-modal`，并把地址填入对应 URL。
+
+更完整的 Modal 部署细节见 [services/surya_ocr_service/MODAL.md](services/surya_ocr_service/MODAL.md)。
+
+---
+
+### 可选能力三：接入 MinerU 云端解析
+
+适合希望**不安装本地 Python**、直接使用云端高级文档解析的用户。
+
+#### 特点
+
+- 不依赖本地 Python
+- 作为独立高级解析 provider 使用
+- 适合扫描版、复杂版面、需要更强结构化还原的文档场景
+- 不能替代本地/云端 Python 运行时本身，因此也不能替代在线运行 Python 代码能力
+
+#### 配置方式
+
+在应用设置页中：
+
+1. 把高级解析 provider 选择为 `mineru`
+2. 填写：
+   - `MinerU 服务 URL`
+   - `MinerU API Key`
+   - `MinerU 模型版本`
+
+当前默认接的是 MinerU 精准 API。
+
+参考文档：
+
+- [MinerU API 文档](https://mineru.net/apiManage/docs)
+- [MinerU 输出文件说明](https://opendatalab.github.io/MinerU/reference/output_files/)
+
+---
+
+### Docker 部署
+
+如果你希望把前端与本地 Python 引擎一起容器化，也可以继续使用 Docker。
+
+#### 环境要求
+
+- Docker Desktop（Windows/macOS）或 Docker Engine（Linux）
+- 如需 GPU 加速：NVIDIA GPU + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+
+#### 一键启动
+
+```bash
+git clone https://github.com/zongxi1115/paperspark.git
+cd paperspark/deploy
+cp .env.example .env
+docker-compose up -d
+```
+
+#### GPU 版本
+
+```bash
+docker run --gpus all nvidia/cuda:12.1-base nvidia-smi
+docker-compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+#### 镜像版本说明
+
+| 镜像 | 说明 |
+| --- | --- |
+| `xiaozongxi/paperspark-nextjs:latest` | Next.js 前端 |
+| `xiaozongxi/paperspark-surya:cpu` | 本地 Python 解析引擎 CPU 版 |
+| `xiaozongxi/paperspark-surya:gpu-cu126` | 本地 Python 解析引擎 CUDA 12.6 版 |
 
 ## Have Problems or Want to Contribute?
 

@@ -5,6 +5,9 @@ export interface DesktopPythonCandidate {
   versionLabel: string
   compatible: boolean
   ready: boolean
+  supportsCodeRuntime?: boolean
+  supportsSelfHostedParser?: boolean
+  packageChecks?: Record<string, boolean>
   sourceLabel?: string
   issues: string[]
 }
@@ -19,15 +22,23 @@ export interface PaperSparkDesktopAPI {
   launcher: {
     getState: () => Promise<{
       savedPythonPath: string | null
-      savedDeploymentMode: 'local' | 'cloud'
+      savedDeploymentMode: 'local' | 'cloud' | 'mineru'
+      savedLocalParserEnabled?: boolean
       savedServiceUrl: string
+      savedMineruUrl?: string
+      savedMineruApiKey?: string
+      savedMineruModelVersion?: string
       candidates: DesktopPythonCandidate[]
     }>
     browsePythonPath: () => Promise<DesktopPythonCandidate | null>
     confirmPythonPath: (payload: {
-      mode: 'local' | 'cloud'
+      mode: 'local' | 'cloud' | 'mineru'
       pythonPath?: string | null
+      enableLocalParser?: boolean
       serviceUrl?: string
+      mineruUrl?: string
+      mineruApiKey?: string
+      mineruModelVersion?: string
     }) => Promise<{ ok: true }>
   }
   windowControls: {

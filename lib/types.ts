@@ -137,6 +137,11 @@ export type AppSettings = {
 }
 
 function getDefaultSettings(): AppSettings {
+  const envDefaultProvider = process.env.NEXT_PUBLIC_DEFAULT_ADVANCED_PARSE_PROVIDER
+  const defaultAdvancedProvider: AdvancedParseProviderId =
+    envDefaultProvider === 'surya-modal' || envDefaultProvider === 'mineru' || envDefaultProvider === 'surya-local'
+      ? envDefaultProvider
+      : 'surya-local'
   const defaultProviders: AIProvider[] = [
     {
       id: 'provider-openrouter',
@@ -199,7 +204,7 @@ function getDefaultSettings(): AppSettings {
     // 重排序模型默认配置（可选）
     rerankModel: undefined,
     documentParse: {
-      defaultAdvancedProvider: 'surya-local',
+      defaultAdvancedProvider,
       providers: {
         'surya-local': {
           baseUrl:

@@ -3,15 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PaperSpark - 环境配置</title>
+  <title>PaperSpark 初始配置</title>
   <script src="https://unpkg.com/lucide@latest"></script>
   <style>
     :root {
+      color-scheme: light;
       --color-primary: #6366f1;
       --color-primary-hover: #4f46e5;
-      --color-bg: #f8fafc;
-      --color-surface: rgba(255, 255, 255, 0.85);
-      --color-border: #e2e8f0;
+      --color-primary-light: rgba(99, 102, 241, 0.1);
+      --color-bg: #eef2f7;
+      --color-surface: rgba(255, 255, 255, 0.95);
+      --color-border: #dbe3ee;
       --color-text-main: #0f172a;
       --color-text-muted: #64748b;
       --color-success: #10b981;
@@ -20,11 +22,12 @@
       --color-warning-bg: #fef3c7;
       --color-error: #ef4444;
       --color-error-bg: #fee2e2;
-      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-      --shadow-lg: 0 10px 25px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.02);
-      --radius-xl: 20px;
-      --radius-md: 12px;
-      --radius-sm: 8px;
+      --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.05);
+      --shadow-md: 0 10px 25px rgba(15, 23, 42, 0.08);
+      --shadow-lg: 0 28px 60px rgba(15, 23, 42, 0.14);
+      --radius-xl: 22px;
+      --radius-md: 14px;
+      --radius-sm: 10px;
     }
 
     * {
@@ -38,15 +41,21 @@
       width: 100vw;
       height: 100vh;
       overflow: hidden;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
-      background: var(--color-bg);
-      background-image:
-        radial-gradient(circle at top, rgba(99, 102, 241, 0.06), transparent 32%),
-        radial-gradient(circle at 12% 18%, rgba(16, 185, 129, 0.05), transparent 22%),
-        radial-gradient(circle at 88% 12%, rgba(245, 158, 11, 0.05), transparent 20%);
+      font-family: "Avenir Next", "SF Pro Display", "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at top, rgba(99, 102, 241, 0.08), transparent 34%),
+        radial-gradient(circle at 14% 18%, rgba(16, 185, 129, 0.06), transparent 22%),
+        radial-gradient(circle at 88% 12%, rgba(245, 158, 11, 0.06), transparent 20%),
+        var(--color-bg);
       color: var(--color-text-main);
       display: flex;
       flex-direction: column;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
     }
 
     .titlebar {
@@ -65,8 +74,9 @@
       align-items: center;
       gap: 8px;
       font-size: 13px;
-      font-weight: 600;
+      font-weight: 700;
       color: var(--color-text-muted);
+      letter-spacing: 0.01em;
     }
 
     .brand-dot {
@@ -74,7 +84,7 @@
       height: 10px;
       border-radius: 50%;
       background: var(--color-primary);
-      box-shadow: 0 0 12px var(--color-primary);
+      box-shadow: 0 0 16px rgba(99, 102, 241, 0.7);
     }
 
     .titlebar-actions {
@@ -94,12 +104,13 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: all 0.2s;
+      transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
     }
 
     .win-btn:hover {
-      background: rgba(0, 0, 0, 0.05);
+      background: rgba(15, 23, 42, 0.06);
       color: var(--color-text-main);
+      transform: translateY(-1px);
     }
 
     .win-btn.close:hover {
@@ -112,344 +123,405 @@
       display: flex;
       justify-content: center;
       align-items: center;
-      padding: 24px 22px 28px;
+      padding: 14px 20px 20px;
     }
 
     .setup-card {
       width: 100%;
-      max-width: 720px;
-      height: 100%;
-      max-height: 620px;
-      display: flex;
-      flex-direction: column;
-      gap: 22px;
+      max-width: 920px;
       background: transparent;
       backdrop-filter: none;
       border: 0;
       box-shadow: none;
-      overflow: visible;
+      border-radius: 0;
+      display: flex;
+      flex-direction: column;
+      max-height: 90vh;
+      overflow: hidden;
     }
 
     .card-header {
-      padding: 0;
-      text-align: center;
-      display: grid;
-      justify-items: center;
-      gap: 14px;
+      padding: 18px 4px 18px;
+      background: transparent;
+      border-bottom: 0;
+    }
+
+    .header-top {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 24px;
     }
 
     .python-logo {
-      width: 80px;
-      height: 80px;
+      width: 48px;
+      height: 48px;
+      border-radius: 12px;
+      background: #f8fafc;
+      border: 1px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px;
+      flex-shrink: 0;
     }
 
-    .card-header h1 {
-      font-size: 28px;
-      font-weight: 700;
-      letter-spacing: -0.5px;
+    .python-logo img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
     }
 
-    .card-header p {
-      font-size: 14px;
+    .header-titles {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .header-titles h1 {
+      font-size: clamp(20px, 2.2vw, 24px);
+      font-weight: 750;
+      letter-spacing: -0.03em;
+      margin-bottom: 4px;
+    }
+
+    .header-titles p {
+      font-size: 13px;
       color: var(--color-text-muted);
       line-height: 1.6;
-      max-width: 480px;
-      margin: 0 auto;
+    }
+
+    .stepper-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+      padding-top: 4px;
+    }
+
+    .stepper-line {
+      position: absolute;
+      top: 16px;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: var(--color-border);
+      z-index: 0;
+    }
+
+    .stepper-progress {
+      position: absolute;
+      top: 16px;
+      left: 10%;
+      height: 2px;
+      background: var(--color-primary);
+      z-index: 0;
+      transition: width 0.3s ease;
+    }
+
+    .stepper-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+      z-index: 1;
+      width: 33.33%;
+    }
+
+    .stepper-circle {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #fff;
+      border: 2px solid var(--color-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--color-text-muted);
+      transition: all 0.25s ease;
+    }
+
+    .stepper-title {
+      font-size: 12px;
+      font-weight: 650;
+      color: var(--color-text-muted);
+      transition: color 0.25s ease;
+    }
+
+    .stepper-item.active .stepper-circle {
+      border-color: var(--color-primary);
+      color: var(--color-primary);
+      box-shadow: 0 0 0 4px var(--color-primary-light);
+    }
+
+    .stepper-item.active .stepper-title {
+      color: var(--color-text-main);
+    }
+
+    .stepper-item.completed .stepper-circle {
+      background: var(--color-primary);
+      border-color: var(--color-primary);
+      color: #fff;
     }
 
     .card-body {
       flex: 1;
-      padding: 0;
       overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
+      padding: 8px 4px 18px;
+      position: relative;
     }
 
-    .mode-switch {
+    .step-view {
+      display: none;
+      flex-direction: column;
+      gap: 20px;
+      animation: fadeUp 0.3s ease forwards;
+    }
+
+    .step-view.active {
+      display: flex;
+    }
+
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 750;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .section-title > span {
+      min-width: 0;
+    }
+
+    .btn-sm {
+      font-size: 12px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      background: #fff;
+      border: 1px solid var(--color-border);
+      color: var(--color-text-main);
+      cursor: pointer;
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 4px;
-      border: 1px solid var(--color-border);
-      background: rgba(255, 255, 255, 0.82);
-      border-radius: 999px;
-      width: fit-content;
-      margin: 0 auto 6px;
+      transition: 0.2s ease;
+      white-space: nowrap;
     }
 
-    .mode-switch__btn {
-      border: 0;
-      background: transparent;
-      color: var(--color-text-muted);
-      font-size: 13px;
-      font-weight: 600;
-      padding: 8px 14px;
-      cursor: pointer;
-      border-radius: 999px;
-      transition: background 0.2s, color 0.2s, box-shadow 0.2s;
-    }
-
-    .mode-switch__btn.active {
-      background: #fff;
-      color: var(--color-text-main);
-      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
-    }
-
-    .mode-panel {
-      display: none;
-      border: 1px solid var(--color-border);
-      background: rgba(255, 255, 255, 0.82);
-      padding: 16px 18px;
-    }
-
-    .mode-panel.active {
-      display: block;
-    }
-
-    .cloud-guide {
-      display: grid;
-      gap: 12px;
-    }
-
-    .cloud-guide__title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      font-weight: 700;
-    }
-
-    .cloud-guide__desc {
-      font-size: 13px;
-      line-height: 1.7;
-      color: var(--color-text-muted);
-    }
-
-    .cloud-note {
-      border-left: 3px solid var(--color-warning);
-      padding: 10px 12px;
-      background: rgba(245, 158, 11, 0.08);
-      color: #92400e;
-      font-size: 12px;
-      line-height: 1.6;
-    }
-
-    .steps {
-      display: grid;
-      gap: 8px;
-    }
-
-    .step {
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
-      padding: 10px 12px;
-      border: 1px solid var(--color-border);
-      background: #fff;
-    }
-
-    .step__num {
-      width: 24px;
-      height: 24px;
-      display: inline-grid;
-      place-items: center;
-      border-radius: 999px;
-      background: rgba(99, 102, 241, 0.1);
-      color: var(--color-primary);
-      font-size: 12px;
-      font-weight: 700;
-      flex: 0 0 auto;
-    }
-
-    .step__body {
-      min-width: 0;
-      display: grid;
-      gap: 2px;
-    }
-
-    .step__body strong {
-      font-size: 13px;
-    }
-
-    .step__body span {
-      font-size: 12px;
-      line-height: 1.5;
-      color: var(--color-text-muted);
-    }
-
-    .url-field {
-      display: grid;
-      gap: 8px;
-      margin-top: 2px;
-    }
-
-    .url-field label {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--color-text-muted);
-    }
-
-    .url-input {
-      width: 100%;
-      height: 42px;
-      border: 1px solid var(--color-border);
-      background: #fff;
-      border-radius: 0;
-      padding: 0 12px;
-      font-size: 13px;
-      color: var(--color-text-main);
-      outline: none;
-    }
-
-    .url-input:focus {
-      border-color: var(--color-primary);
-      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.14);
-    }
-
-    .url-help {
-      font-size: 12px;
-      color: var(--color-text-muted);
-      line-height: 1.6;
-    }
-
-    .inline-code {
-      display: block;
-      margin-top: 6px;
-      padding: 10px 12px;
-      border: 1px solid var(--color-border);
-      background: rgba(15, 23, 42, 0.03);
-      color: var(--color-text-main);
-      font-size: 11px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-      word-break: break-all;
-      border-radius: 0;
-    }
-
-    .list-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 4px;
-    }
-
-    .list-title {
-      font-size: 13px;
-      font-weight: 600;
-      color: var(--color-text-muted);
-    }
-
-    .refresh-btn {
-      background: transparent;
-      border: 1px solid transparent;
-      color: var(--color-primary);
-      font-size: 13px;
-      font-weight: 500;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      padding: 6px 10px;
-      border-radius: 10px;
-      transition: background 0.2s;
-    }
-
-    .refresh-btn:hover {
-      background: #eef2ff;
-    }
-
-    .env-item {
-      display: flex;
-      align-items: center;
-      padding: 16px 20px;
-      background: #ffffff;
-      border: 1px solid var(--color-border);
-      border-radius: var(--radius-md);
-      cursor: pointer;
-      transition: all 0.2s ease;
-      position: relative;
-      width: 100%;
-      text-align: left;
-      appearance: none;
-      border-radius: 0;
-    }
-
-    .env-item:hover {
+    .btn-sm:hover {
+      background: #f8fafc;
       border-color: #cbd5e1;
-      box-shadow: var(--shadow-sm);
       transform: translateY(-1px);
     }
 
-    .env-item.active {
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 750;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    .pill.ok {
+      background: var(--color-success-bg);
+      color: var(--color-success);
+    }
+
+    .pill.warn {
+      background: var(--color-warning-bg);
+      color: var(--color-warning);
+    }
+
+    .pill.error {
+      background: var(--color-error-bg);
+      color: var(--color-error);
+    }
+
+    .env-top-bar {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .env-select-wrapper {
+      position: relative;
+      width: 100%;
+    }
+
+    .env-select {
+      width: 100%;
+      min-height: 44px;
+      appearance: none;
+      background: #fff;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-sm);
+      padding: 0 42px 0 14px;
+      font-size: 14px;
+      color: var(--color-text-main);
+      outline: none;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .env-select:focus {
       border-color: var(--color-primary);
-      background: #fbfbfe;
-      box-shadow: 0 0 0 1px var(--color-primary);
+      box-shadow: 0 0 0 3px var(--color-primary-light);
     }
 
-    .env-item.active .deps {
-      display: grid;
-    }
-
-    .env-icon {
+    .select-icon {
+      position: absolute;
+      right: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      pointer-events: none;
       color: var(--color-text-muted);
-      margin-right: 16px;
+    }
+
+    .env-meta {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--color-text-muted);
+      line-height: 1.5;
+    }
+
+    .env-meta strong {
+      color: var(--color-text-main);
+      font-weight: 700;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 16px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: #fff;
+    }
+
+    .toggle-copy {
+      display: grid;
+      gap: 4px;
+    }
+
+    .toggle-copy strong {
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .toggle-copy span {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      line-height: 1.6;
+    }
+
+    .switch {
+      position: relative;
+      width: 46px;
+      height: 26px;
       flex: 0 0 auto;
     }
 
-    .env-item.active .env-icon {
-      color: var(--color-primary);
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+      position: absolute;
     }
 
-    .env-details {
-      flex: 1;
-      min-width: 0;
+    .slider {
+      position: absolute;
+      inset: 0;
+      border-radius: 999px;
+      background: #cbd5e1;
+      transition: 0.2s ease;
+      cursor: pointer;
     }
 
-    .env-name {
+    .slider::before {
+      content: "";
+      position: absolute;
+      width: 20px;
+      height: 20px;
+      left: 3px;
+      top: 3px;
+      background: white;
+      border-radius: 50%;
+      transition: 0.2s ease;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+    }
+
+    .switch input:checked + .slider {
+      background: var(--color-primary);
+    }
+
+    .switch input:checked + .slider::before {
+      transform: translateX(20px);
+    }
+
+    .switch input:disabled + .slider {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .eval-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      overflow: visible;
+      box-shadow: none;
+    }
+
+    .eval-col {
+      padding: 16px 20px;
+    }
+
+    .eval-col:first-child {
+      border-right: 1px solid rgba(219, 227, 238, 0.9);
+      background: rgba(255, 255, 255, 0.6);
+    }
+
+    .eval-header {
+      font-size: 13px;
+      font-weight: 750;
+      color: var(--color-text-main);
+      margin-bottom: 14px;
       display: flex;
       align-items: center;
       gap: 8px;
-      font-size: 15px;
-      font-weight: 600;
-      margin-bottom: 4px;
-      flex-wrap: wrap;
     }
 
-    .env-path {
-      font-size: 12px;
-      color: var(--color-text-muted);
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .env-note {
-      margin-top: 8px;
-      font-size: 12px;
-      line-height: 1.5;
-      color: var(--color-text-muted);
-      white-space: normal;
-    }
-
-    .deps {
-      margin-top: 10px;
-      display: none;
-      gap: 6px;
-    }
-
-    .deps__title {
+    .dep-list,
+    .cap-list {
       display: flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--color-text-muted);
-    }
-
-    .deps__list {
-      display: grid;
-      gap: 6px;
+      flex-direction: column;
+      gap: 10px;
     }
 
     .dep-item {
@@ -457,229 +529,442 @@
       align-items: center;
       justify-content: space-between;
       gap: 12px;
-      padding: 8px 10px;
-      border: 1px solid var(--color-border);
-      background: rgba(255, 255, 255, 0.78);
-      border-radius: 0;
+      font-size: 13px;
     }
 
-    .dep-item__name {
+    .dep-name {
       display: flex;
       align-items: center;
-      gap: 8px;
-      min-width: 0;
-      font-size: 12px;
-      font-weight: 600;
+      gap: 6px;
       color: var(--color-text-main);
+      min-width: 0;
     }
 
-    .dep-item__state {
-      display: inline-flex;
+    .dep-name span {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .dep-status {
+      display: flex;
       align-items: center;
       gap: 4px;
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 650;
       flex-shrink: 0;
     }
 
-    .dep-item__state.ok {
+    .dep-status.ok {
       color: var(--color-success);
     }
 
-    .dep-item__state.missing {
+    .dep-status.miss {
       color: var(--color-error);
     }
 
-    .dep-item__state.warn {
-      color: var(--color-warning);
+    .cap-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
     }
 
-    .status-badge {
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 600;
-      display: inline-flex;
+    .cap-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      display: flex;
       align-items: center;
-      gap: 4px;
+      justify-content: center;
+      flex-shrink: 0;
     }
 
-    .status-badge.ready {
+    .cap-icon.ok {
       background: var(--color-success-bg);
       color: var(--color-success);
     }
 
-    .status-badge.missing {
-      background: var(--color-warning-bg);
-      color: var(--color-warning);
-    }
-
-    .status-badge.error {
+    .cap-icon.miss {
       background: var(--color-error-bg);
       color: var(--color-error);
     }
 
-    .check-icon {
-      display: none;
-      color: var(--color-primary);
-      margin-left: 16px;
-      flex: 0 0 auto;
+    .cap-text {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
     }
 
-    .env-item.active .check-icon {
+    .cap-text strong {
+      font-size: 13px;
+      color: var(--color-text-main);
+    }
+
+    .cap-text span {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      line-height: 1.45;
+    }
+
+    .strategy-list {
+      display: grid;
+      gap: 14px;
+    }
+
+    .strategy-card {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 18px 20px;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      background: #fff;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: left;
+      position: relative;
+    }
+
+    .strategy-card:not(.disabled):hover {
+      border-color: #cbd5e1;
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .strategy-card.active {
+      border-color: var(--color-primary);
+      background: var(--color-primary-light);
+    }
+
+    .strategy-card.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      background: #f8fafc;
+      border-color: var(--color-border);
+      transform: none;
+      box-shadow: none;
+    }
+
+    .strategy-card.disabled::after {
+      content: "不满足条件";
+      position: absolute;
+      right: 20px;
+      top: 20px;
+      font-size: 12px;
+      font-weight: 650;
+      color: var(--color-error);
+    }
+
+    .strategy-icon {
+      width: 44px;
+      height: 44px;
+      border-radius: 12px;
+      background: rgba(15, 23, 42, 0.04);
+      color: var(--color-text-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      transition: all 0.2s ease;
+    }
+
+    .strategy-card.active .strategy-icon {
+      background: #fff;
+      color: var(--color-primary);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .strategy-content {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .strategy-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 6px;
+      flex-wrap: wrap;
+    }
+
+    .strategy-header h4 {
+      font-size: 15px;
+      font-weight: 750;
+      color: var(--color-text-main);
+      margin: 0;
+    }
+
+    .strategy-content p {
+      font-size: 13px;
+      color: var(--color-text-muted);
+      line-height: 1.55;
+      margin: 0;
+    }
+
+    .strategy-radio {
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      border: 2px solid #cbd5e1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      background: #fff;
+    }
+
+    .strategy-card.active .strategy-radio {
+      border-color: var(--color-primary);
+    }
+
+    .radio-inner {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: transparent;
+      transition: 0.2s ease;
+    }
+
+    .strategy-card.active .radio-inner {
+      background: var(--color-primary);
+    }
+
+    .strategy-card.disabled .strategy-radio {
+      display: none;
+    }
+
+    .config-panel {
+      display: none;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      padding: 0;
+      box-shadow: none;
+    }
+
+    .config-panel.active {
       display: block;
+      animation: fadeUp 0.3s ease forwards;
+    }
+
+    .panel-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+      font-weight: 750;
+      margin-bottom: 8px;
+    }
+
+    .panel-desc {
+      font-size: 13px;
+      color: var(--color-text-muted);
+      line-height: 1.6;
+      margin-bottom: 20px;
+    }
+
+    .success-state {
+      text-align: center;
+      padding: 20px 0;
+      display: grid;
+      gap: 14px;
+      justify-items: center;
+    }
+
+    .success-icon-wrapper {
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background: var(--color-success-bg);
+      color: var(--color-success);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto;
+    }
+
+    .success-state h3 {
+      font-size: 18px;
+      font-weight: 750;
+      margin: 0;
+    }
+
+    .success-state p {
+      color: var(--color-text-muted);
+      font-size: 14px;
+      line-height: 1.7;
+      max-width: 540px;
+      margin: 0 auto;
+    }
+
+    .field-group {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+
+    .field-group label {
+      font-size: 13px;
+      font-weight: 650;
+      color: var(--color-text-main);
+    }
+
+    .input-field {
+      width: 100%;
+      min-height: 42px;
+      border: 1px solid var(--color-border);
+      background: #f8fafc;
+      border-radius: var(--radius-sm);
+      padding: 0 14px;
+      font-size: 14px;
+      outline: none;
+      transition: 0.2s ease;
+      color: var(--color-text-main);
+    }
+
+    .input-field:focus {
+      border-color: var(--color-primary);
+      background: #fff;
+      box-shadow: 0 0 0 3px var(--color-primary-light);
+    }
+
+    .input-field[type="password"] {
+      letter-spacing: 0.03em;
+    }
+
+    .code-block {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 12px 16px;
+      border-radius: var(--radius-sm);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      margin-bottom: 20px;
+      line-height: 1.55;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .code-block span {
+      color: #818cf8;
     }
 
     .card-footer {
-      padding: 8px 0 0;
+      padding: 12px 4px 0;
+      background: transparent;
+      border-top: 0;
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 16px;
-      background: transparent;
     }
 
-    .skip-modal {
-      position: fixed;
-      inset: 0;
-      display: none;
-      align-items: center;
-      justify-content: center;
-      background: rgba(15, 23, 42, 0.42);
-      backdrop-filter: blur(8px);
-      z-index: 50;
-      padding: 20px;
-    }
-
-    .skip-modal.open {
-      display: flex;
-    }
-
-    .skip-modal__panel {
-      width: min(460px, 100%);
-      border-radius: 24px;
-      background: rgba(255, 255, 255, 0.96);
-      border: 1px solid rgba(226, 232, 240, 0.9);
-      box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22);
-      overflow: hidden;
-    }
-
-    .skip-modal__header {
-      padding: 22px 24px 0;
-    }
-
-    .skip-modal__title {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 18px;
-      font-weight: 700;
-      color: var(--color-text-main);
-      letter-spacing: -0.02em;
-    }
-
-    .skip-modal__body {
-      padding: 14px 24px 22px;
+    .launch-note {
+      min-height: 20px;
+      font-size: 12px;
+      line-height: 1.5;
       color: var(--color-text-muted);
-      font-size: 14px;
-      line-height: 1.7;
     }
 
-    .skip-modal__footer {
+    .launch-note[data-tone="warning"] {
+      color: #a16207;
+    }
+
+    .launch-note[data-tone="error"] {
+      color: var(--color-error);
+    }
+
+    .buttons-row {
       display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
       justify-content: flex-end;
-      gap: 10px;
-      padding: 0 24px 24px;
-    }
-
-    .btn-flat {
-      background: #ffffff;
-      border: 1px solid var(--color-border);
-      color: var(--color-text-main);
-    }
-
-    .btn-flat:hover {
-      background: #f8fafc;
-      border-color: #cbd5e1;
     }
 
     .btn {
-      height: 44px;
+      height: 40px;
       padding: 0 24px;
-      border-radius: 10px;
+      border-radius: var(--radius-sm);
       font-size: 14px;
-      font-weight: 600;
+      font-weight: 650;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       gap: 8px;
-      transition: all 0.2s;
       border: none;
+      transition: all 0.2s ease;
       white-space: nowrap;
     }
 
     .btn-secondary {
-      background: #ffffff;
+      background: #fff;
       border: 1px solid var(--color-border);
       color: var(--color-text-main);
     }
 
     .btn-secondary:hover {
-      background: #f8fafc;
+      background: #f1f5f9;
       border-color: #cbd5e1;
+      transform: translateY(-1px);
     }
 
     .btn-primary {
       background: var(--color-primary);
-      border: none;
-      color: white;
-      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+      color: #fff;
+      box-shadow: 0 2px 10px var(--color-primary-light);
     }
 
     .btn-primary:hover {
       background: var(--color-primary-hover);
       transform: translateY(-1px);
-      box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.22);
     }
 
-    .btn-primary:disabled {
-      background: #cbd5e1;
-      box-shadow: none;
+    .btn:disabled {
+      opacity: 0.55;
       cursor: not-allowed;
       transform: none;
+      box-shadow: none;
     }
 
     .empty-state {
+      padding: 18px;
       border: 1px dashed var(--color-border);
-      border-radius: 0;
-      padding: 18px 16px;
+      border-radius: var(--radius-md);
       color: var(--color-text-muted);
+      background: rgba(248, 250, 252, 0.88);
       font-size: 13px;
-      line-height: 1.6;
-      background: rgba(255, 255, 255, 0.72);
+      line-height: 1.7;
     }
 
-    .launch-note {
-      flex: 1;
-      min-width: 0;
-      font-size: 12px;
-      line-height: 1.6;
-      color: var(--color-text-muted);
-    }
-
-    .launch-note strong {
-      color: var(--color-text-main);
-      font-weight: 600;
-    }
-
-    @media (max-width: 720px) {
+    @media (max-width: 860px) {
       .main-container {
-        padding: 18px 16px 18px;
+        padding: 12px;
       }
 
       .setup-card {
-        max-height: none;
+        max-height: 94vh;
+      }
+
+      .card-header,
+      .card-body,
+      .card-footer {
+        padding-left: 0;
+        padding-right: 0;
+      }
+
+      .eval-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .eval-col:first-child {
+        border-right: 0;
+        border-bottom: 1px solid var(--color-border);
+      }
+
+      .strategy-card {
+        align-items: flex-start;
       }
 
       .card-footer {
@@ -687,8 +972,12 @@
         align-items: stretch;
       }
 
-      .btn {
-        width: 100%;
+      .buttons-row {
+        justify-content: stretch;
+      }
+
+      .buttons-row .btn {
+        flex: 1 1 140px;
       }
     }
   </style>
@@ -697,7 +986,7 @@
   <div class="titlebar">
     <div class="titlebar-brand">
       <div class="brand-dot"></div>
-      <span>PaperSpark</span>
+      <span>PaperSpark 启动向导</span>
     </div>
     <div class="titlebar-actions">
       <button class="win-btn" id="minimizeButton" title="最小化" type="button">
@@ -712,142 +1001,242 @@
   <div class="main-container">
     <div class="setup-card">
       <div class="card-header">
-        <div class="python-logo" aria-hidden="true">
-          <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/python/python-original.svg" alt="" referrerpolicy="no-referrer" width="80" height="80" />
+        <div class="header-top">
+          <div class="python-logo">
+            <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/python/python-original.svg" alt="Python" />
+          </div>
+          <div class="header-titles">
+            <h1>配置 Python 微服务</h1>
+            <p>虽然PaperSpark 不完全依赖 Python 引擎，但是配置python后可获得全量功能的体验，你可以绑定本机环境，也可以直接跳过 Python 环境先启动主应用。</p>
+          </div>
         </div>
-        <h1>配置 Python 微服务</h1>
-        <p>PaperSpark 需要依赖 Python 环境来运行本地 OCR、文档分析和 Python 在线运行服务。请选择一个包含所需依赖的运行环境。</p>
+
+        <div class="stepper-container" aria-label="安装步骤">
+          <div class="stepper-line"></div>
+          <div class="stepper-progress" id="stepperProgress" style="width: 0%;"></div>
+
+          <div class="stepper-item active" id="stepper1">
+            <div class="stepper-circle">1</div>
+            <div class="stepper-title">Python 环境</div>
+          </div>
+          <div class="stepper-item" id="stepper2">
+            <div class="stepper-circle">2</div>
+            <div class="stepper-title">解析方案</div>
+          </div>
+          <div class="stepper-item" id="stepper3">
+            <div class="stepper-circle">3</div>
+            <div class="stepper-title">参数配置</div>
+          </div>
+        </div>
       </div>
 
       <div class="card-body">
-        <div class="mode-switch" role="tablist" aria-label="启动方式">
-          <button class="mode-switch__btn active" id="modeLocalButton" type="button" role="tab" aria-selected="true">
-            本地 Python
-          </button>
-          <button class="mode-switch__btn" id="modeCloudButton" type="button" role="tab" aria-selected="false">
-            Modal 云部署
-          </button>
+        <div class="step-view active" id="viewStep1">
+          <div class="section-title">
+            <span>当前本机查找到的 Python</span>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
+              <button class="btn-sm" id="refreshButton" type="button"><i data-lucide="refresh-cw" width="14"></i>重新扫描</button>
+              <button class="btn-sm" id="browseButton" type="button"><i data-lucide="folder-search" width="14"></i>手动指定</button>
+            </div>
+          </div>
+
+          <div class="env-top-bar">
+            <div class="env-select-wrapper">
+              <select class="env-select" id="envSelect"></select>
+              <i data-lucide="chevron-down" width="18" class="select-icon"></i>
+            </div>
+            <div class="env-meta" id="envMeta"></div>
+          </div>
+
+          <div class="toggle-row">
+            <div class="toggle-copy">
+              <strong>不指定 Python 环境</strong>
+              <span>如果你只想先进入 PaperSpark 主界面，可以保持这个选项开启。后续仍然能在设置里补充或切换 Python。</span>
+            </div>
+            <label class="switch" title="跳过 Python 环境">
+              <input type="checkbox" id="skipPythonToggle" checked />
+              <span class="slider"></span>
+            </label>
+          </div>
+
+          <div class="eval-grid">
+            <div class="eval-col">
+              <div class="eval-header"><i data-lucide="package-search" width="16" color="#6366f1"></i> 必须依赖包</div>
+              <div class="dep-list" id="depList"></div>
+            </div>
+
+            <div class="eval-col">
+              <div class="eval-header"><i data-lucide="sparkles" width="16" color="#6366f1"></i> 当前环境能实现</div>
+              <div class="cap-list" id="capList"></div>
+            </div>
+          </div>
         </div>
 
-        <div class="mode-panel active" id="localPanel">
-        <div class="list-header">
-          <span class="list-title">已检测到的环境</span>
-          <button class="refresh-btn" id="refreshButton" type="button">
-            <i data-lucide="refresh-cw" width="14"></i>
-            重新扫描
-          </button>
+        <div class="step-view" id="viewStep2">
+          <div class="section-title">选择用于重型排版解析的引擎</div>
+          <div class="strategy-list">
+            <button class="strategy-card" data-mode="skip" id="modeSkip" type="button">
+              <div class="strategy-icon"><i data-lucide="skip-forward" width="22"></i></div>
+              <div class="strategy-content">
+                <div class="strategy-header">
+                  <h4>直接跳过 Python</h4>
+                  <span class="pill warn">先启动</span>
+                </div>
+                <p>不绑定 Python 环境，直接进入 PaperSpark 主界面。后续仍然可以在设置里补充或切换解析能力。</p>
+              </div>
+              <div class="strategy-radio"><div class="radio-inner"></div></div>
+            </button>
+
+            <button class="strategy-card active" data-mode="local" id="modeLocal" type="button">
+              <div class="strategy-icon"><i data-lucide="cpu" width="22"></i></div>
+              <div class="strategy-content">
+                <div class="strategy-header">
+                  <h4>本地全量解析</h4>
+                  <span class="pill ok">零成本</span>
+                </div>
+                <p>完全使用本机硬件进行文档识别。若保持“不指定 Python 环境”，这里会保持禁用状态，只保留主应用直启动能力。</p>
+              </div>
+              <div class="strategy-radio"><div class="radio-inner"></div></div>
+            </button>
+
+            <button class="strategy-card" data-mode="cloud" id="modeCloud" type="button">
+              <div class="strategy-icon"><i data-lucide="cloud-lightning" width="22"></i></div>
+              <div class="strategy-content">
+                <div class="strategy-header">
+                  <h4>Modal 云端部署</h4>
+                  <span class="pill warn">省资源</span>
+                </div>
+                <p>本地不承担推理运算，将 Python 服务一键打包部署到 Modal 平台并提供接口。</p>
+              </div>
+              <div class="strategy-radio"><div class="radio-inner"></div></div>
+            </button>
+
+            <button class="strategy-card" data-mode="mineru" id="modeMineru" type="button">
+              <div class="strategy-icon"><i data-lucide="key-square" width="22"></i></div>
+              <div class="strategy-content">
+                <div class="strategy-header">
+                  <h4>MinerU 接口</h4>
+                  <span class="pill warn">开箱即用</span>
+                </div>
+                <p>完全独立于本地环境的商业化解析，只需提供 API Key 即可快速接入使用。</p>
+              </div>
+              <div class="strategy-radio"><div class="radio-inner"></div></div>
+            </button>
+          </div>
         </div>
 
-        <div id="candidateList" style="display:flex;flex-direction:column;gap:12px;"></div>
-        </div>
+        <div class="step-view" id="viewStep3">
+          <div class="config-panel" id="panelSkip">
+            <div class="success-state">
+              <div class="success-icon-wrapper"><i data-lucide="skip-forward" width="32"></i></div>
+              <h3>已选择跳过 Python</h3>
+              <p>PaperSpark 会直接启动主应用，不会等待本地 Python 解析服务。你可以稍后再回来补充环境。</p>
+            </div>
+          </div>
 
-        <div class="mode-panel" id="cloudPanel">
-          <div class="cloud-guide">
-            <div class="cloud-guide__title">
-              <i data-lucide="cloud" width="16"></i>
-              Modal 云部署（最推荐）
+          <div class="config-panel" id="panelLocal">
+            <div class="success-state">
+              <div class="success-icon-wrapper"><i data-lucide="check" width="32"></i></div>
+              <h3>本地路径已准备好</h3>
+              <p>如果你选择了可用的 Python 环境，PaperSpark 会优先按本地解析能力启动。若保持“ 不指定 Python 环境”，也会直接进入主界面，不会阻塞启动。</p>
             </div>
-            <div class="cloud-guide__desc">
-              适合希望获得更稳定 OCR 性能、较低本地环境负担，同时又不想长期维护 GPU 服务的用户。
+          </div>
+
+          <div class="config-panel" id="panelCloud">
+            <div class="panel-title"><i data-lucide="terminal" width="20" color="#6366f1"></i> Modal 部署向导</div>
+            <div class="panel-desc">请在命令行中执行以下命令进行部署，并将生成的终端地址填入下方。</div>
+            <div class="code-block"><span># 登录 Modal 账号</span>
+python -m modal setup
+
+<span># 一键部署服务代码</span>
+python -m modal deploy services/modal_app.py</div>
+            <div class="field-group">
+              <label for="serviceUrlInput">Modal 服务端点 (Web URL)</label>
+              <input class="input-field" id="serviceUrlInput" type="url" placeholder="https://your-name--paperspark-webapp.modal.run" />
             </div>
-            <div class="cloud-note">
-              首次使用 Surya OCR 时需要下载模型并建立缓存，启动时间会明显更长，请耐心等待。部署后把服务地址填到下面，PaperSpark 会直接连接云端服务。
+          </div>
+
+          <div class="config-panel" id="panelMineru">
+            <div class="panel-title"><i data-lucide="key" width="20" color="#6366f1"></i> MinerU 参数配置</div>
+            <div class="panel-desc">配置 MinerU API 可以让应用直接连接商业化云端服务，免去本地配置烦恼。</div>
+            <div class="field-group">
+              <label for="mineruUrlInput">MinerU 服务地址</label>
+              <input class="input-field" id="mineruUrlInput" type="url" placeholder="https://mineru.net" />
             </div>
-            <div class="steps">
-              <div class="step">
-                <div class="step__num">1</div>
-                <div class="step__body">
-                  <strong>在 Modal 部署 Surya OCR</strong>
-                  <span>按照 README 的部署步骤，拿到一个类似 `https://your-name--paperspark-surya-web-app.modal.run` 的地址。</span>
-                </div>
-              </div>
-              <div class="step">
-                <div class="step__num">2</div>
-                <div class="step__body">
-                  <strong>把地址填进 PaperSpark</strong>
-                  <span>把云端地址填写到下面输入框，PaperSpark 会把它写入运行配置。</span>
-                </div>
-              </div>
-              <div class="step">
-                <div class="step__num">3</div>
-                <div class="step__body">
-                  <strong>直接启动工作台</strong>
-                  <span>启动后，论文导入解析、知识库精读和相关 OCR 能力会直接走云端服务。</span>
-                </div>
-              </div>
+            <div class="field-group">
+              <label for="mineruApiKeyInput">API Key</label>
+              <input class="input-field" id="mineruApiKeyInput" type="password" placeholder="输入你在 MinerU 获取的密钥" />
             </div>
-            <div class="url-field">
-              <label for="serviceUrlInput">Modal 服务地址</label>
-              <input class="url-input" id="serviceUrlInput" type="url" placeholder="https://your-name--paperspark-surya-web-app.modal.run" />
-              <div class="url-help">
-                支持 `https://` 或 `http://` 地址，建议直接粘贴 Modal 部署成功后打印的 URL。
-                <span class="inline-code">SURYA_OCR_SERVICE_URL
-SURYA_SERVICE_URL
-NEXT_PUBLIC_SURYA_SERVICE_URL
-NEXT_PUBLIC_SURYA_OCR_SERVICE_URL</span>
-              </div>
+            <div class="field-group">
+              <label for="mineruModelVersionSelect">解析模型</label>
+              <select class="input-field" id="mineruModelVersionSelect">
+                <option value="vlm">Vision Language Model (推荐, 效果最好)</option>
+                <option value="pipeline">传统 Pipeline 模型</option>
+              </select>
             </div>
           </div>
         </div>
       </div>
 
       <div class="card-footer">
-        <div class="launch-note" id="statusLine">
-          正在扫描本机已有的 Python 环境...
+        <div class="launch-note" id="statusLine">正在扫描本机已有的 Python 环境...</div>
+        <div class="buttons-row">
+          <button class="btn btn-secondary" id="prevBtn" type="button" style="display:none;">上一步</button>
+          <button class="btn btn-primary" id="nextBtn" type="button">下一步 <i data-lucide="arrow-right" width="16"></i></button>
+          <button class="btn btn-primary" id="launchBtn" type="button" style="display:none;">完成并启动 <i data-lucide="rocket" width="16"></i></button>
         </div>
-        <button class="btn btn-secondary" id="browseButton" type="button">
-          <i data-lucide="folder-search" width="16"></i>
-          手动选择路径...
-        </button>
-        <button class="btn btn-primary" id="launchBtn" type="button" disabled>
-          启动 PaperSpark
-          <i data-lucide="arrow-right" width="16"></i>
-        </button>
-      </div>
-    </div>
-  </div>
-
-  <div class="skip-modal" id="skipModal" aria-hidden="true">
-    <div class="skip-modal__panel" role="dialog" aria-modal="true" aria-labelledby="skipModalTitle">
-      <div class="skip-modal__header">
-        <div class="skip-modal__title" id="skipModalTitle">
-          <i data-lucide="alert-triangle" width="18"></i>
-          跳过 Python 解析服务？
-        </div>
-      </div>
-      <div class="skip-modal__body">
-        如果没有配置，论文导入解析、Python 代码在线运行等功能将无法使用，是否继续？
-      </div>
-      <div class="skip-modal__footer">
-        <button class="btn btn-flat" id="skipCancelButton" type="button">取消</button>
-        <button class="btn btn-primary" id="skipConfirmButton" type="button">继续启动</button>
       </div>
     </div>
   </div>
 
   <script>
+    const packageCatalog = [
+      { key: 'fastapi', label: 'FastAPI' },
+      { key: 'uvicorn', label: 'uvicorn' },
+      { key: 'chromadb', label: 'ChromaDB' },
+      { key: 'surya', label: 'Surya OCR' },
+      { key: 'matplotlib', label: 'Matplotlib' },
+      { key: 'numpy', label: 'NumPy' },
+      { key: 'pandas', label: 'Pandas' },
+    ]
+
     const state = {
+      currentStep: 1,
+      selectedMode: 'local',
+      selectedCandidate: null,
       candidates: [],
-      selected: null,
       launching: false,
-      skipConfirmResolver: null,
-      mode: 'local',
       serviceUrl: '',
+      mineruUrl: '',
+      mineruApiKey: '',
+      mineruModelVersion: 'vlm',
+      skipPythonEnvironment: true,
     }
 
-    const candidateList = document.getElementById('candidateList')
+    const envSelect = document.getElementById('envSelect')
+    const envMeta = document.getElementById('envMeta')
+    const skipPythonToggle = document.getElementById('skipPythonToggle')
+    const depList = document.getElementById('depList')
+    const capList = document.getElementById('capList')
+    const stepperProgress = document.getElementById('stepperProgress')
     const statusLine = document.getElementById('statusLine')
+    const prevBtn = document.getElementById('prevBtn')
+    const nextBtn = document.getElementById('nextBtn')
     const launchBtn = document.getElementById('launchBtn')
-    const browseButton = document.getElementById('browseButton')
     const refreshButton = document.getElementById('refreshButton')
-    const skipModal = document.getElementById('skipModal')
-    const skipCancelButton = document.getElementById('skipCancelButton')
-    const skipConfirmButton = document.getElementById('skipConfirmButton')
-    const modeLocalButton = document.getElementById('modeLocalButton')
-    const modeCloudButton = document.getElementById('modeCloudButton')
-    const localPanel = document.getElementById('localPanel')
-    const cloudPanel = document.getElementById('cloudPanel')
+    const browseButton = document.getElementById('browseButton')
+    const modeSkipButton = document.getElementById('modeSkip')
+    const modeLocalButton = document.getElementById('modeLocal')
+    const modeCloudButton = document.getElementById('modeCloud')
+    const modeMineruButton = document.getElementById('modeMineru')
+    const skipPanel = document.getElementById('panelSkip')
+    const localPanel = document.getElementById('panelLocal')
+    const cloudPanel = document.getElementById('panelCloud')
+    const mineruPanel = document.getElementById('panelMineru')
     const serviceUrlInput = document.getElementById('serviceUrlInput')
+    const mineruUrlInput = document.getElementById('mineruUrlInput')
+    const mineruApiKeyInput = document.getElementById('mineruApiKeyInput')
+    const mineruModelVersionSelect = document.getElementById('mineruModelVersionSelect')
 
     function renderIcons() {
       if (window.lucide?.createIcons) {
@@ -855,49 +1244,13 @@ NEXT_PUBLIC_SURYA_OCR_SERVICE_URL</span>
       }
     }
 
-    function statusTone(candidate) {
-      if (!candidate) return 'missing'
-      if (candidate.ready) return 'ready'
-      if (candidate.compatible) return 'missing'
-      return 'error'
-    }
-
-    function statusLabel(candidate) {
-      if (!candidate) return '还没有选择 Python 环境'
-      if (candidate.ready) return '完美匹配'
-      if (candidate.compatible) return '缺少依赖'
-      return '版本不满足要求'
-    }
-
-    const requiredPackages = [
-      { key: 'fastapi', label: 'fastapi' },
-      { key: 'uvicorn', label: 'uvicorn' },
-      { key: 'chromadb', label: 'chromadb' },
-      { key: 'surya', label: 'surya' },
-    ]
-
-    function getMissingPackages(candidate) {
-      const issue = candidate?.issues?.find((item) => item.startsWith('缺少依赖:')) || ''
-      const missingSet = new Set(
-        issue
-          .split(':')
-          .slice(1)
-          .join(':')
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean),
-      )
-
-      return requiredPackages.map((pkg) => ({
-        ...pkg,
-        installed: !missingSet.has(pkg.key),
-      }))
-    }
-
-    function getVersionIssue(candidate) {
-      return candidate?.issues?.find((item) => item.startsWith('需要 Python '))
-        || candidate?.issues?.find((item) => item.includes('版本'))
-        || ''
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;')
     }
 
     function normalizeServiceUrl(value) {
@@ -916,261 +1269,364 @@ NEXT_PUBLIC_SURYA_OCR_SERVICE_URL</span>
       }
     }
 
-    function launchLabel(candidate) {
-      if (state.mode === 'cloud') return '连接 Modal 云部署并启动'
-      if (candidate?.ready) return '启动 PaperSpark'
-      return '跳过配置python解析服务，直接启动'
-    }
-
-    function launchIcon(candidate) {
-      if (state.mode === 'cloud') return 'cloud'
-      return candidate?.ready ? 'arrow-right' : 'skip-forward'
-    }
-
     function setStatus(message, tone = '') {
       statusLine.textContent = message
-      statusLine.dataset.tone = tone
+      if (tone) {
+        statusLine.dataset.tone = tone
+      } else {
+        delete statusLine.dataset.tone
+      }
     }
 
-    function setLaunchButton(candidate) {
-      launchBtn.innerHTML = `${launchLabel(candidate)} <i data-lucide="${launchIcon(candidate)}" width="16"></i>`
-      launchBtn.style.background = state.mode === 'cloud' || candidate?.ready ? 'var(--color-primary)' : '#f59e0b'
-      launchBtn.style.boxShadow = state.mode === 'cloud' || candidate?.ready ? '0 4px 14px rgba(99, 102, 241, 0.3)' : '0 4px 14px rgba(245, 158, 11, 0.3)'
-      launchBtn.disabled = state.launching
+    function renderEnvSelectOptions() {
+      const options = []
+      options.push({
+        value: '__none__',
+        label: '不指定 Python 环境（直接启动主应用）',
+      })
+
+      for (const candidate of state.candidates) {
+        const versionLabel = candidate.versionLabel || (candidate.version ? `Python ${candidate.version}` : '未知版本')
+        const sourceLabel = candidate.sourceLabel ? ` · ${candidate.sourceLabel}` : ''
+        const statusLabel = candidate.supportsSelfHostedParser
+          ? ' - 推荐'
+          : candidate.supportsCodeRuntime
+            ? ' - 可运行代码'
+            : candidate.compatible
+              ? ' - 依赖不足'
+              : ' - 不可用'
+
+        options.push({
+          value: candidate.path,
+          label: `${versionLabel} (${candidate.path})${sourceLabel}${statusLabel}`,
+        })
+      }
+
+      envSelect.innerHTML = options.map((item) => (
+        `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`
+      )).join('')
+    }
+
+    function getSelectedCandidate() {
+      return state.selectedCandidate || null
+    }
+
+    function updateEnvMeta() {
+      const candidate = getSelectedCandidate()
+      if (!candidate) {
+        envMeta.innerHTML = `
+          <span class="pill warn"><i data-lucide="skip-forward" width="12"></i> 未绑定环境</span>
+          <span>PaperSpark 将直接启动主界面，不会拉起本地 Python 解析服务。</span>
+        `
+      } else {
+        const readyTone = candidate.supportsSelfHostedParser ? 'ok' : candidate.supportsCodeRuntime ? 'warn' : 'error'
+        const readyLabel = candidate.supportsSelfHostedParser
+          ? '本地解析可用'
+          : candidate.supportsCodeRuntime
+            ? '仅支持代码运行'
+            : candidate.compatible
+              ? '依赖不足'
+              : '版本不满足要求'
+
+        envMeta.innerHTML = `
+          <span class="pill ${readyTone}"><i data-lucide="terminal-square" width="12"></i> ${readyLabel}</span>
+          <span><strong>${escapeHtml(candidate.displayName || candidate.path)}</strong></span>
+          <span>${escapeHtml(candidate.versionLabel || `Python ${candidate.version || 'unknown'}`)}</span>
+        `
+      }
       renderIcons()
+    }
+
+    function renderEnvInfo() {
+      const candidate = getSelectedCandidate()
+      const packageChecks = candidate?.packageChecks || {}
+      const selfHostedReady = Boolean(candidate?.supportsSelfHostedParser)
+      const codeRuntimeReady = Boolean(candidate?.supportsCodeRuntime)
+
+      depList.innerHTML = packageCatalog.map((pkg) => {
+        const installed = candidate ? Boolean(packageChecks[pkg.key]) : false
+        return `
+          <div class="dep-item">
+            <div class="dep-name"><i data-lucide="box" width="14"></i><span>${pkg.label}</span></div>
+            <div class="dep-status ${installed ? 'ok' : 'miss'}">
+              ${installed ? '<i data-lucide="check" width="14"></i> 已安装' : '<i data-lucide="x" width="14"></i> 未安装'}
+            </div>
+          </div>
+        `
+      }).join('')
+
+      const capabilityRows = candidate
+        ? [
+            {
+              title: '在线 Python 代码运行',
+              desc: '需要 FastAPI + uvicorn + NumPy 三件套满足后才能使用。',
+              ok: codeRuntimeReady,
+            },
+            {
+              title: '高级文档解析与 OCR',
+              desc: selfHostedReady ? '支持复杂 PDF 版面、公式与图文混排解析。' : '当前环境还缺少本地自部署解析所需依赖。',
+              ok: selfHostedReady,
+            },
+          ]
+        : [
+            {
+              title: '主应用直接启动',
+              desc: '不绑定 Python 环境，先进入 PaperSpark 主界面。',
+              ok: true,
+            },
+            {
+              title: '后续补充解析能力',
+              desc: '你可以稍后再从设置中接入本地或云端 Python 服务。',
+              ok: true,
+            },
+          ]
+
+      capList.innerHTML = capabilityRows.map((item) => `
+        <div class="cap-item">
+          <div class="cap-icon ${item.ok ? 'ok' : 'miss'}">
+            ${item.ok ? '<i data-lucide="check" width="16"></i>' : '<i data-lucide="x" width="16"></i>'}
+          </div>
+          <div class="cap-text">
+            <strong>${item.title}</strong>
+            <span>${item.desc}</span>
+          </div>
+        </div>
+      `).join('')
+
+      renderIcons()
+    }
+
+    function setSelectedCandidate(candidate, { syncSelect = true } = {}) {
+      state.selectedCandidate = candidate || null
+      state.skipPythonEnvironment = !candidate
+      skipPythonToggle.checked = state.skipPythonEnvironment
+
+      if (syncSelect) {
+        envSelect.value = candidate?.path || '__none__'
+      }
+
+      updateEnvMeta()
+      renderEnvInfo()
+      syncStrategyAvailability()
+      syncLaunchButton()
+    }
+
+    function syncStrategyAvailability() {
+      const candidate = getSelectedCandidate()
+      const codeRuntimeReady = Boolean(candidate?.supportsCodeRuntime)
+      const selfHostedReady = Boolean(candidate?.supportsSelfHostedParser)
+      const localDisabled = state.skipPythonEnvironment || !selfHostedReady || state.selectedMode === 'skip'
+
+      modeLocalButton.classList.toggle('disabled', localDisabled)
+      modeLocalButton.disabled = localDisabled
+
+      if (!candidate) {
+        setStatus('当前未绑定 Python 环境，仍可直接启动主应用。')
+      } else if (selfHostedReady) {
+        setStatus('当前已选中可作为本地自部署解析引擎的 Python 环境。')
+      } else if (codeRuntimeReady) {
+        setStatus('当前环境可运行 Python 代码，但还不足以承担本地全量解析。', 'warning')
+      } else {
+        setStatus('当前环境能力有限，建议改用云端解析或先直接启动主应用。', 'warning')
+      }
+
+      updateModeUI()
+    }
+
+    function updateModeUI() {
+      const isCloud = state.selectedMode === 'cloud'
+      const isMineru = state.selectedMode === 'mineru'
+      const isSkip = state.selectedMode === 'skip'
+
+      modeSkipButton.classList.toggle('active', isSkip)
+      modeLocalButton.classList.toggle('active', !isCloud && !isMineru && !isSkip)
+      modeCloudButton.classList.toggle('active', isCloud)
+      modeMineruButton.classList.toggle('active', isMineru)
+
+      modeSkipButton.setAttribute('aria-selected', String(isSkip))
+      modeLocalButton.setAttribute('aria-selected', String(!isCloud && !isMineru && !isSkip))
+      modeCloudButton.setAttribute('aria-selected', String(isCloud))
+      modeMineruButton.setAttribute('aria-selected', String(isMineru))
+
+      skipPanel.classList.toggle('active', isSkip)
+      localPanel.classList.toggle('active', !isCloud && !isMineru && !isSkip)
+      cloudPanel.classList.toggle('active', isCloud)
+      mineruPanel.classList.toggle('active', isMineru)
     }
 
     function setMode(mode) {
-      state.mode = mode
-      const isCloud = mode === 'cloud'
-      modeLocalButton.classList.toggle('active', !isCloud)
-      modeCloudButton.classList.toggle('active', isCloud)
-      modeLocalButton.setAttribute('aria-selected', String(!isCloud))
-      modeCloudButton.setAttribute('aria-selected', String(isCloud))
-      localPanel.classList.toggle('active', !isCloud)
-      cloudPanel.classList.toggle('active', isCloud)
-      renderCandidateList()
-      setLaunchButton(state.selected)
-      if (isCloud) {
-        setStatus('已切换到 Modal 云部署模式，请输入服务地址。')
-      } else if (state.selected?.ready) {
-        setStatus('已选中可直接启动的 Python 环境。')
-      } else if (state.selected?.compatible) {
-        setStatus('已选中环境，但它还不能直接启动 Surya。现在仍可跳过配置进入主应用。', 'warning')
+      state.selectedMode = mode
+      if (mode === 'skip') {
+        state.skipPythonEnvironment = true
+        skipPythonToggle.checked = true
+        envSelect.value = '__none__'
+        state.selectedCandidate = null
+      } else if (mode === 'local') {
+        state.skipPythonEnvironment = Boolean(skipPythonToggle.checked && !getSelectedCandidate())
+      }
+      updateModeUI()
+      syncLaunchButton()
+
+      const candidate = getSelectedCandidate()
+      if (mode === 'skip') {
+        setStatus('已选择跳过 Python 环境，启动时将直接进入主应用。')
+        return
+      }
+      if (mode === 'cloud') {
+        setStatus('已切换到 Modal 云端解析模式，请填写部署地址。')
+      } else if (mode === 'mineru') {
+        setStatus('已切换到 MinerU 接入模式，请填写 API Key。')
+      } else if (!candidate) {
+        setStatus('当前未绑定 Python 环境，将直接启动主应用。')
+      } else if (candidate.supportsSelfHostedParser) {
+        setStatus('当前已选中可作为本地自部署解析引擎的 Python 环境。')
+      } else if (candidate.supportsCodeRuntime) {
+        setStatus('当前环境可运行 Python 代码，但还不足以承担本地全量解析。', 'warning')
       } else {
-        setStatus('正在使用本地 Python 环境配置。')
+        setStatus('当前环境能力有限，建议改用云端解析或先直接启动主应用。', 'warning')
       }
     }
 
-    function selectEnv(candidate) {
-      state.mode = 'local'
-      state.selected = candidate || null
-      modeLocalButton.classList.add('active')
-      modeCloudButton.classList.remove('active')
-      modeLocalButton.setAttribute('aria-selected', 'true')
-      modeCloudButton.setAttribute('aria-selected', 'false')
-      localPanel.classList.add('active')
-      cloudPanel.classList.remove('active')
-      document.querySelectorAll('.env-item').forEach((el) => {
-        el.classList.toggle('active', el.dataset.path === candidate?.path)
-      })
-      setLaunchButton(candidate)
+    function syncLaunchButton() {
+      const candidate = getSelectedCandidate()
+      const canDirectStart = state.selectedMode === 'skip' || (state.selectedMode === 'local' && (!candidate || !candidate.supportsSelfHostedParser))
+      const cloudReady = state.selectedMode === 'cloud'
+      const mineruReady = state.selectedMode === 'mineru'
+      const actionable = canDirectStart || cloudReady || mineruReady || Boolean(candidate)
 
-      if (!candidate) {
-        setStatus('没有可用环境，请重新扫描或手动选择。', 'warning')
-        return
-      }
+      launchBtn.disabled = state.launching || !actionable
+      launchBtn.style.opacity = launchBtn.disabled ? '0.55' : '1'
 
-      if (candidate.ready) {
-        setStatus('已选中可直接启动的 Python 环境。')
-      } else if (candidate.compatible) {
-        setStatus('已选中环境，但它还不能直接启动 Surya。现在仍可跳过配置进入主应用。', 'warning')
+      if (state.selectedMode === 'cloud') {
+        launchBtn.innerHTML = '完成并启动 <i data-lucide="rocket" width="16"></i>'
+      } else if (state.selectedMode === 'mineru') {
+        launchBtn.innerHTML = '完成并启动 <i data-lucide="rocket" width="16"></i>'
+      } else if (state.selectedMode === 'skip') {
+        launchBtn.innerHTML = '直接启动主应用 <i data-lucide="rocket" width="16"></i>'
+      } else if (!candidate) {
+        launchBtn.innerHTML = '直接启动主应用 <i data-lucide="rocket" width="16"></i>'
+      } else if (candidate.supportsSelfHostedParser) {
+        launchBtn.innerHTML = '完成并启动 <i data-lucide="rocket" width="16"></i>'
       } else {
-        setStatus('当前环境不满足要求。你也可以跳过配置，直接进入主应用。', 'warning')
-      }
-    }
-
-    function badgeClass(candidate) {
-      if (candidate.ready) return 'ready'
-      if (candidate.compatible) return 'missing'
-      return 'error'
-    }
-
-    function badgeText(candidate) {
-      return statusLabel(candidate)
-    }
-
-    function renderCandidateList() {
-      candidateList.innerHTML = ''
-
-      if (state.mode === 'cloud') {
-        return
-      }
-
-      if (!state.candidates.length) {
-        const empty = document.createElement('div')
-        empty.className = 'empty-state'
-        empty.textContent = '暂时没有扫描到可展示的 Python 环境。你可以点击“手动选择路径...”直接指定 Python 可执行文件或安装目录。'
-        candidateList.appendChild(empty)
-        return
-      }
-
-      for (const candidate of state.candidates) {
-        const item = document.createElement('button')
-        item.className = `env-item${state.selected?.path === candidate.path ? ' active' : ''}`
-        item.type = 'button'
-        item.dataset.path = candidate.path
-        item.addEventListener('click', () => selectEnv(candidate))
-
-        const icon = document.createElement('div')
-        icon.className = 'env-icon'
-        icon.innerHTML = '<i data-lucide="terminal-square" width="24"></i>'
-
-        const details = document.createElement('div')
-        details.className = 'env-details'
-
-        const name = document.createElement('div')
-        name.className = 'env-name'
-        name.textContent = candidate.displayName || candidate.path
-
-        const badge = document.createElement('span')
-        badge.className = `status-badge ${badgeClass(candidate)}`
-        badge.innerHTML = candidate.ready
-          ? '<i data-lucide="check-circle-2" width="12"></i> 完美匹配'
-          : candidate.compatible
-            ? '<i data-lucide="alert-circle" width="12"></i> 缺少依赖'
-            : '<i data-lucide="x-circle" width="12"></i> 不可用'
-        name.appendChild(badge)
-
-        const path = document.createElement('div')
-        path.className = 'env-path'
-        path.textContent = candidate.path
-
-        details.appendChild(name)
-        details.appendChild(path)
-
-        const note = document.createElement('div')
-        note.className = 'env-note'
-        const versionIssue = getVersionIssue(candidate)
-        note.textContent = candidate.ready
-          ? `Python ${candidate.version || 'unknown'}`
-          : (versionIssue || '依赖检查中')
-        details.appendChild(note)
-
-        const deps = document.createElement('div')
-        deps.className = 'deps'
-
-        const depsTitle = document.createElement('div')
-        depsTitle.className = 'deps__title'
-        depsTitle.innerHTML = '<i data-lucide="package" width="13"></i> 依赖包'
-        deps.appendChild(depsTitle)
-
-        const depsList = document.createElement('div')
-        depsList.className = 'deps__list'
-
-        for (const pkg of getMissingPackages(candidate)) {
-          const depItem = document.createElement('div')
-          depItem.className = 'dep-item'
-
-          const depName = document.createElement('div')
-          depName.className = 'dep-item__name'
-          depName.textContent = pkg.label
-
-          const depState = document.createElement('div')
-          depState.className = `dep-item__state ${pkg.installed ? 'ok' : 'missing'}`
-          depState.innerHTML = pkg.installed
-            ? '<i data-lucide="check-circle-2" width="14"></i> 已安装'
-            : '<i data-lucide="x-circle" width="14"></i> 缺失'
-
-          depItem.appendChild(depName)
-          depItem.appendChild(depState)
-          depsList.appendChild(depItem)
-        }
-
-        deps.appendChild(depsList)
-        details.appendChild(deps)
-
-        const check = document.createElement('div')
-        check.className = 'check-icon'
-        check.innerHTML = '<i data-lucide="check" width="20"></i>'
-
-        item.appendChild(icon)
-        item.appendChild(details)
-        item.appendChild(check)
-
-        candidateList.appendChild(item)
+        launchBtn.innerHTML = '启动并保留 Python <i data-lucide="rocket" width="16"></i>'
       }
 
       renderIcons()
+    }
+
+    function updateView() {
+      document.querySelectorAll('.stepper-item').forEach((el, idx) => {
+        el.classList.remove('active', 'completed')
+        if (idx + 1 < state.currentStep) {
+          el.classList.add('completed')
+        } else if (idx + 1 === state.currentStep) {
+          el.classList.add('active')
+        }
+      })
+
+      stepperProgress.style.width = `${(state.currentStep - 1) * 50}%`
+
+      document.querySelectorAll('.step-view').forEach((el, idx) => {
+        el.classList.toggle('active', idx + 1 === state.currentStep)
+      })
+
+      prevBtn.style.display = state.currentStep > 1 ? 'inline-flex' : 'none'
+
+      if (state.currentStep === 3) {
+        nextBtn.style.display = 'none'
+        launchBtn.style.display = 'inline-flex'
+        updateModeUI()
+      } else {
+        nextBtn.style.display = 'inline-flex'
+        launchBtn.style.display = 'none'
+      }
+    }
+
+    function populateEnvSelectFromCandidates() {
+      const candidate = getSelectedCandidate()
+      renderEnvSelectOptions()
+
+      if (candidate) {
+        envSelect.value = candidate.path
+      } else {
+        envSelect.value = '__none__'
+      }
+      renderIcons()
+    }
+
+    function getBestCandidate(candidates) {
+      if (!Array.isArray(candidates) || candidates.length === 0) return null
+      return candidates.find((item) => item.supportsSelfHostedParser)
+        || candidates.find((item) => item.supportsCodeRuntime)
+        || candidates[0]
     }
 
     function pickInitialCandidate(payload) {
       if (!payload?.candidates?.length) {
-        if (state.mode !== 'cloud') selectEnv(null)
+        setSelectedCandidate(null)
         return
       }
 
-      const saved = payload.savedPythonPath
-      const savedCandidate = saved ? payload.candidates.find((item) => item.path === saved) : null
-      if (state.mode !== 'cloud') {
-        selectEnv(savedCandidate || payload.candidates.find((item) => item.ready) || payload.candidates[0])
-      }
+      const savedPath = payload.savedPythonPath
+      const savedCandidate = savedPath ? payload.candidates.find((item) => item.path === savedPath) : null
+      state.skipPythonEnvironment = false
+      skipPythonToggle.checked = false
+      setSelectedCandidate(savedCandidate || getBestCandidate(payload.candidates))
     }
 
-    function openSkipModal() {
-      skipModal.classList.add('open')
-      skipModal.setAttribute('aria-hidden', 'false')
-      return new Promise((resolve) => {
-        state.skipConfirmResolver = resolve
-      })
-    }
-
-    function closeSkipModal(result) {
-      skipModal.classList.remove('open')
-      skipModal.setAttribute('aria-hidden', 'true')
-      const resolver = state.skipConfirmResolver
-      state.skipConfirmResolver = null
-      if (resolver) resolver(result)
+    function getCandidateByPath(pathValue) {
+      return state.candidates.find((item) => item.path === pathValue) || null
     }
 
     async function loadCandidates() {
       if (!window.papersparkDesktop?.launcher) {
         state.candidates = []
-        state.selected = null
-        renderCandidateList()
-        selectEnv(null)
+        renderEnvSelectOptions()
+        setSelectedCandidate(null)
         setStatus('Electron 桥接没有成功注入，启动页暂时无法与桌面进程通信。请关闭后重启应用。', 'error')
         return
       }
 
-      launchBtn.disabled = true
+      refreshButton.disabled = true
       setStatus('正在扫描本机已有的 Python 环境...')
 
       try {
         const payload = await window.papersparkDesktop.launcher.getState()
-        state.mode = payload.savedDeploymentMode === 'cloud' ? 'cloud' : 'local'
+        state.selectedMode = payload.savedDeploymentMode === 'cloud'
+          ? 'cloud'
+          : payload.savedDeploymentMode === 'mineru'
+            ? 'mineru'
+            : 'local'
+
         state.serviceUrl = payload.savedServiceUrl || ''
+        state.mineruUrl = payload.savedMineruUrl || ''
+        state.mineruApiKey = payload.savedMineruApiKey || ''
+        state.mineruModelVersion = payload.savedMineruModelVersion || 'vlm'
         serviceUrlInput.value = state.serviceUrl
-        modeLocalButton.classList.toggle('active', state.mode !== 'cloud')
-        modeCloudButton.classList.toggle('active', state.mode === 'cloud')
-        modeLocalButton.setAttribute('aria-selected', String(state.mode !== 'cloud'))
-        modeCloudButton.setAttribute('aria-selected', String(state.mode === 'cloud'))
-        localPanel.classList.toggle('active', state.mode !== 'cloud')
-        cloudPanel.classList.toggle('active', state.mode === 'cloud')
+        mineruUrlInput.value = state.mineruUrl
+        mineruApiKeyInput.value = state.mineruApiKey
+        mineruModelVersionSelect.value = state.mineruModelVersion
+
         state.candidates = payload.candidates || []
-        if (state.mode === 'cloud') {
-          state.selected = null
-        }
+        renderEnvSelectOptions()
         pickInitialCandidate(payload)
-        renderCandidateList()
-        setLaunchButton(state.selected)
+        syncStrategyAvailability()
+        updateView()
+        syncLaunchButton()
+
+        if (getSelectedCandidate()) {
+          setStatus('已扫描到可用环境，继续完成配置即可启动。')
+        } else {
+          setStatus('未绑定 Python 环境。你可以直接启动主应用，也可以手动指定一个环境。')
+        }
       } catch (error) {
         console.error(error)
         state.candidates = []
-        state.selected = null
-        renderCandidateList()
-        selectEnv(null)
+        renderEnvSelectOptions()
+        setSelectedCandidate(null)
         setStatus(error?.message || '扫描 Python 环境失败。', 'error')
+      } finally {
+        refreshButton.disabled = false
       }
     }
 
@@ -1190,19 +1646,80 @@ NEXT_PUBLIC_SURYA_OCR_SERVICE_URL</span>
           state.candidates.splice(existingIndex, 1, result)
         }
 
-        selectEnv(result)
-        renderCandidateList()
-        setStatus(result.ready ? '手动选择的环境可直接启动。' : '已选择环境，但它暂时还不能直接启动 Surya。', result.ready ? '' : result.compatible ? 'warning' : 'error')
+        renderEnvSelectOptions()
+        state.skipPythonEnvironment = false
+        skipPythonToggle.checked = false
+        setSelectedCandidate(result)
+        setStatus(
+          result.supportsSelfHostedParser
+            ? '手动选择的环境已具备本地自部署能力。'
+            : result.supportsCodeRuntime
+              ? '手动选择的环境可用于在线代码运行，但本地自部署解析尚未满足。'
+              : '手动选择的环境能力仍然有限。',
+          result.supportsSelfHostedParser ? '' : result.compatible ? 'warning' : 'error',
+        )
       } catch (error) {
         console.error(error)
         setStatus(error?.message || '选择 Python 环境失败。', 'error')
       }
     }
 
+    function handleEnvChange() {
+      const value = envSelect.value
+      if (value === '__none__') {
+        state.skipPythonEnvironment = true
+        skipPythonToggle.checked = true
+        setSelectedCandidate(null, { syncSelect: false })
+        setStatus('已切换为不指定 Python 环境。启动时会直接进入主应用。')
+        return
+      }
+
+      const candidate = getCandidateByPath(value)
+      if (candidate) {
+        state.skipPythonEnvironment = false
+        skipPythonToggle.checked = false
+        setSelectedCandidate(candidate, { syncSelect: false })
+        if (candidate.supportsSelfHostedParser) {
+          setStatus('已选中可作为本地自部署解析引擎的 Python 环境。')
+        } else if (candidate.supportsCodeRuntime) {
+          setStatus('已选中支持在线代码运行与绘图的 Python 环境。', 'warning')
+        } else {
+          setStatus('当前环境能力有限。你可以继续补依赖，或先使用云端解析 / MinerU。', 'warning')
+        }
+      }
+    }
+
+    function handleSkipToggleChange() {
+      state.skipPythonEnvironment = Boolean(skipPythonToggle.checked)
+      if (state.skipPythonEnvironment) {
+        envSelect.value = '__none__'
+        setSelectedCandidate(null, { syncSelect: false })
+        if (state.selectedMode !== 'skip') {
+          setMode('skip')
+        } else {
+          setStatus('已开启“ 不指定 Python 环境 ”，将直接启动主应用。')
+        }
+      } else if (!getSelectedCandidate() && state.candidates.length) {
+        if (state.selectedMode === 'skip') {
+          setMode('local')
+        }
+        setSelectedCandidate(state.candidates[0])
+      } else {
+        if (state.selectedMode === 'skip') {
+          setMode('local')
+        }
+        updateEnvMeta()
+        renderEnvInfo()
+        syncStrategyAvailability()
+        syncLaunchButton()
+        updateModeUI()
+      }
+    }
+
     async function launchApp() {
       if (state.launching) return
 
-      if (state.mode === 'cloud') {
+      if (state.selectedMode === 'cloud') {
         const serviceUrl = normalizeServiceUrl(serviceUrlInput.value)
         if (!serviceUrl) {
           setStatus('请输入有效的 Modal 服务地址。', 'error')
@@ -1211,42 +1728,77 @@ NEXT_PUBLIC_SURYA_OCR_SERVICE_URL</span>
         }
 
         state.serviceUrl = serviceUrl
+        state.mineruUrl = normalizeServiceUrl(mineruUrlInput?.value || '')
+        state.mineruApiKey = (mineruApiKeyInput.value || '').trim()
+        state.mineruModelVersion = mineruModelVersionSelect.value || 'vlm'
         state.launching = true
-        setLaunchButton(state.selected)
+        syncLaunchButton()
         setStatus('正在连接 Modal 云部署并启动 PaperSpark，请稍候...')
 
         try {
           await window.papersparkDesktop?.launcher?.confirmPythonPath?.({
             mode: 'cloud',
+            pythonPath: getSelectedCandidate()?.path || null,
             serviceUrl,
+            mineruUrl: state.mineruUrl,
+            mineruApiKey: state.mineruApiKey,
+            mineruModelVersion: state.mineruModelVersion,
           })
         } catch (error) {
           console.error(error)
           state.launching = false
-          setLaunchButton(state.selected)
+          syncLaunchButton()
           setStatus(error?.message || '云部署连接失败，请检查服务地址。', 'error')
         }
         return
       }
 
-      if (!state.selected?.ready) {
-        const confirmed = await openSkipModal()
-        if (!confirmed) return
+      if (state.selectedMode === 'mineru') {
+        state.mineruUrl = normalizeServiceUrl(mineruUrlInput.value)
+        state.mineruApiKey = mineruApiKeyInput.value.trim()
+        state.mineruModelVersion = mineruModelVersionSelect.value || 'vlm'
+
+        if (!state.mineruUrl || !state.mineruApiKey) {
+          setStatus('请先填写完整的 MinerU 服务地址和 API Key。', 'error')
+          return
+        }
       }
 
       state.launching = true
-      setLaunchButton(state.selected)
-      setStatus(state.selected?.ready ? '正在启动 Surya 微服务和 PaperSpark 主应用，请稍候...' : '正在跳过 Python 解析服务并启动 PaperSpark，请稍候...')
+      syncLaunchButton()
+
+      const candidate = getSelectedCandidate()
+      const enableLocalParser = Boolean(candidate?.supportsSelfHostedParser && state.selectedMode === 'local' && !state.skipPythonEnvironment)
+      const launchMode = state.selectedMode === 'skip' ? 'local' : state.selectedMode
+
+      setStatus(
+        state.selectedMode === 'skip'
+          ? '正在跳过 Python 运行环境并启动 PaperSpark，请稍候...'
+          : state.selectedMode === 'local'
+          ? (candidate
+            ? (enableLocalParser
+              ? '正在启动本地 Python 解析引擎和 PaperSpark，请稍候...'
+              : '正在使用所选 Python 环境启动 PaperSpark，请稍候...')
+            : '正在跳过 Python 运行环境并启动 PaperSpark，请稍候...')
+          : state.selectedMode === 'cloud'
+            ? '正在接入 Modal 云端解析并启动 PaperSpark，请稍候...'
+            : '正在接入 MinerU 云端解析并启动 PaperSpark，请稍候...',
+      )
 
       try {
         await window.papersparkDesktop?.launcher?.confirmPythonPath?.({
-          mode: 'local',
-          pythonPath: state.selected?.ready ? state.selected.path : null,
+          mode: launchMode,
+          pythonPath: candidate?.path || null,
+          enableLocalParser,
+          serviceUrl: state.selectedMode === 'cloud' ? normalizeServiceUrl(serviceUrlInput.value) : '',
+          mineruUrl: state.mineruUrl,
+          mineruApiKey: state.mineruApiKey,
+          mineruModelVersion: state.mineruModelVersion,
         })
       } catch (error) {
         console.error(error)
         state.launching = false
-        setLaunchButton(state.selected)
+        syncLaunchButton()
         setStatus(error?.message || '启动失败，请更换一个 Python 环境。', 'error')
       }
     }
@@ -1259,23 +1811,48 @@ NEXT_PUBLIC_SURYA_OCR_SERVICE_URL</span>
       window.papersparkDesktop?.windowControls?.close()
     })
 
-    browseButton.addEventListener('click', browseAndSelect)
+    envSelect.addEventListener('change', handleEnvChange)
+    skipPythonToggle.addEventListener('change', handleSkipToggleChange)
     refreshButton.addEventListener('click', loadCandidates)
+    browseButton.addEventListener('click', browseAndSelect)
     launchBtn.addEventListener('click', launchApp)
-    skipCancelButton.addEventListener('click', () => closeSkipModal(false))
-    skipConfirmButton.addEventListener('click', () => closeSkipModal(true))
-    skipModal.addEventListener('click', (event) => {
-      if (event.target === skipModal) {
-        closeSkipModal(false)
+    prevBtn.addEventListener('click', () => {
+      if (state.currentStep > 1) {
+        state.currentStep -= 1
+        updateView()
       }
     })
-    modeLocalButton.addEventListener('click', () => setMode('local'))
+    nextBtn.addEventListener('click', () => {
+      if (state.currentStep < 3) {
+        state.currentStep += 1
+        updateView()
+      }
+    })
+    modeLocalButton.addEventListener('click', () => {
+      if (modeLocalButton.classList.contains('disabled')) return
+      setMode('local')
+    })
+    modeSkipButton.addEventListener('click', () => setMode('skip'))
     modeCloudButton.addEventListener('click', () => setMode('cloud'))
+    modeMineruButton.addEventListener('click', () => setMode('mineru'))
     serviceUrlInput.addEventListener('input', (event) => {
       state.serviceUrl = event.target.value
     })
+    mineruUrlInput.addEventListener('input', (event) => {
+      state.mineruUrl = event.target.value
+    })
+    mineruApiKeyInput.addEventListener('input', (event) => {
+      state.mineruApiKey = event.target.value
+    })
+    mineruModelVersionSelect.addEventListener('change', (event) => {
+      state.mineruModelVersion = event.target.value || 'vlm'
+    })
 
+    updateView()
     renderIcons()
+    renderEnvSelectOptions()
+    updateEnvMeta()
+    renderEnvInfo()
     loadCandidates()
   </script>
 </body>

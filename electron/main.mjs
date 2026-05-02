@@ -67,14 +67,22 @@ function readDesktopConfig() {
     return {
       pythonPath: null,
       deploymentMode: 'local',
+      localParserEnabled: false,
       serviceUrl: '',
+      mineruUrl: '',
+      mineruApiKey: '',
+      mineruModelVersion: 'vlm',
       ...parsed,
     }
   } catch {
     return {
       pythonPath: null,
       deploymentMode: 'local',
+      localParserEnabled: false,
       serviceUrl: '',
+      mineruUrl: '',
+      mineruApiKey: '',
+      mineruModelVersion: 'vlm',
     }
   }
 }
@@ -181,6 +189,8 @@ import sys
 checks = {}
 for name in ("fastapi", "uvicorn", "chromadb", "surya"):
     checks[name] = importlib.util.find_spec(name) is not None
+for name in ("matplotlib", "numpy", "pandas"):
+    checks[name] = importlib.util.find_spec(name) is not None
 
 payload = {
     "executable": sys.executable,
@@ -219,14 +229,27 @@ print(json.dumps(payload))
     const missingModules = Object.entries(payload.checks || {})
       .filter(([, ok]) => !ok)
       .map(([name]) => name)
-    const ready = compatible && missingModules.length === 0
+    const codeRuntimeModules = ['fastapi', 'uvicorn', 'numpy']
+    const selfHostedModules = ['fastapi', 'uvicorn', 'chromadb', 'surya', 'matplotlib', 'numpy', 'pandas']
+    const supportsCodeRuntime = compatible && codeRuntimeModules.every((name) => Boolean(payload.checks?.[name]))
+    const supportsSelfHostedParser = compatible && selfHostedModules.every((name) => Boolean(payload.checks?.[name]))
+    const ready = supportsSelfHostedParser
     const issues = []
 
     if (!compatible) {
       issues.push(`需要 Python ${MIN_PYTHON_VERSION.major}.${MIN_PYTHON_VERSION.minor}+`)
     }
-    if (missingModules.length) {
-      issues.push(`缺少依赖: ${missingModules.join(', ')}`)
+    if (!supportsCodeRuntime) {
+      const missingCodeRuntimeModules = codeRuntimeModules.filter((name) => !payload.checks?.[name])
+      if (missingCodeRuntimeModules.length) {
+        issues.push(`在线代码运行缺少依赖: ${missingCodeRuntimeModules.join(', ')}`)
+      }
+    }
+    if (!supportsSelfHostedParser) {
+      const missingSelfHostedModules = selfHostedModules.filter((name) => !payload.checks?.[name])
+      if (missingSelfHostedModules.length) {
+        issues.push(`本地自部署缺少依赖: ${missingSelfHostedModules.join(', ')}`)
+      }
     }
 
     return {
@@ -236,6 +259,9 @@ print(json.dumps(payload))
       versionLabel: payload.version ? `Python ${payload.version}` : '未知版本',
       compatible,
       ready,
+      supportsCodeRuntime,
+      supportsSelfHostedParser,
+      packageChecks: payload.checks || {},
       source,
       sourceLabel: getSourceLabel(source),
       issues,
@@ -449,7 +475,13 @@ async function startSuryaService(port, runtimeRoot, pythonPath) {
   }
 }
 
-async function startInternalNextServer(port, runtimeRoot, suryaServiceUrl) {
+async function startInternalNextServer(port, runtimeRoot, options = {}) {
+  const suryaServiceUrl = options.suryaServiceUrl || ''
+  const pythonPath = options.pythonPath || ''
+  const mineruUrl = options.mineruUrl || ''
+  const mineruApiKey = options.mineruApiKey || ''
+  const mineruModelVersion = options.mineruModelVersion || 'vlm'
+  const defaultAdvancedProvider = options.defaultAdvancedProvider || ''
   const serverScript = path.join(resolveUnpackedAppRoot(), 'standalone', 'server.js')
   if (!fs.existsSync(serverScript)) {
     throw new Error(`找不到 Next standalone 入口: ${serverScript}`)
@@ -465,9 +497,30 @@ async function startInternalNextServer(port, runtimeRoot, suryaServiceUrl) {
       PORT: String(port),
       PAPERSPARK_DESKTOP: '1',
       PAPERSPARK_RUNTIME_ROOT: runtimeRoot,
+      ...(pythonPath ? {
+        PAPERSPARK_PYTHON_PATH: pythonPath,
+      } : {}),
+      ...(defaultAdvancedProvider ? {
+        NEXT_PUBLIC_DEFAULT_ADVANCED_PARSE_PROVIDER: defaultAdvancedProvider,
+      } : {}),
       ...(suryaServiceUrl ? {
         SURYA_OCR_SERVICE_URL: suryaServiceUrl,
         SURYA_SERVICE_URL: suryaServiceUrl,
+        NEXT_PUBLIC_SURYA_SERVICE_URL: suryaServiceUrl,
+        NEXT_PUBLIC_SURYA_OCR_SERVICE_URL: suryaServiceUrl,
+      } : {}),
+      ...(mineruUrl ? {
+        MINERU_SERVICE_URL: mineruUrl,
+        MINERU_API_BASE_URL: mineruUrl,
+        NEXT_PUBLIC_MINERU_SERVICE_URL: mineruUrl,
+      } : {}),
+      ...(mineruApiKey ? {
+        MINERU_API_KEY: mineruApiKey,
+        NEXT_PUBLIC_MINERU_API_KEY: mineruApiKey,
+      } : {}),
+      ...(mineruModelVersion ? {
+        MINERU_MODEL_VERSION: mineruModelVersion,
+        NEXT_PUBLIC_MINERU_MODEL_VERSION: mineruModelVersion,
       } : {}),
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -717,14 +770,14 @@ function closeLoadingWindow() {
   loadingWindow = null
 }
 
-async function createMainWindow({ pythonPath = null, serviceUrl = '' } = {}) {
+async function createMainWindow({ pythonPath = null, enableLocalParser = false, deploymentMode = 'local', serviceUrl = '', mineruUrl = '', mineruApiKey = '', mineruModelVersion = 'vlm' } = {}) {
   const runtimeRoot = resolveRuntimeRoot()
   fs.mkdirSync(runtimeRoot, { recursive: true })
 
   const isDev = isDevMode()
   let suryaServiceUrl = serviceUrl || process.env.SURYA_OCR_SERVICE_URL || process.env.SURYA_SERVICE_URL || ''
 
-  if (pythonPath) {
+  if (pythonPath && enableLocalParser) {
     updateLoadingWindow('正在启动 Python 解析服务...')
     const suryaPort = isDev ? DEFAULT_SURYA_PORT : await findAvailablePort(DEFAULT_SURYA_PORT)
     const suryaResult = await startSuryaService(suryaPort, runtimeRoot, pythonPath)
@@ -750,7 +803,21 @@ async function createMainWindow({ pythonPath = null, serviceUrl = '' } = {}) {
     || await startInternalNextServer(
       isDev ? DEFAULT_RENDERER_PORT : await findAvailablePort(DEFAULT_RENDERER_PORT),
       runtimeRoot,
-      suryaServiceUrl,
+      {
+        suryaServiceUrl,
+        pythonPath,
+        mineruUrl,
+        mineruApiKey,
+        mineruModelVersion,
+        defaultAdvancedProvider:
+          deploymentMode === 'cloud'
+            ? 'surya-modal'
+            : deploymentMode === 'mineru'
+              ? 'mineru'
+              : enableLocalParser
+                ? 'surya-local'
+                : '',
+      },
     )
 
   mainWindow = new BrowserWindow({
@@ -799,9 +866,9 @@ async function createMainWindow({ pythonPath = null, serviceUrl = '' } = {}) {
 function createLauncherWindow() {
   launcherWindow = new BrowserWindow({
     width: 980,
-    height: 700,
+    height: 820,
     minWidth: 880,
-    minHeight: 640,
+    minHeight: 760,
     frame: false,
     resizable: false,
     backgroundColor: '#efe4d3',
@@ -872,7 +939,11 @@ ipcMain.handle('desktop:get-launcher-state', async () => {
   return {
     savedPythonPath: config.pythonPath || null,
     savedDeploymentMode: config.deploymentMode || 'local',
+    savedLocalParserEnabled: Boolean(config.localParserEnabled),
     savedServiceUrl: config.serviceUrl || '',
+    savedMineruUrl: config.mineruUrl || '',
+    savedMineruApiKey: config.mineruApiKey || '',
+    savedMineruModelVersion: config.mineruModelVersion || 'vlm',
     candidates: await scanPythonInstallations(),
   }
 })
@@ -901,39 +972,69 @@ ipcMain.handle('desktop:browse-python-path', async () => {
 })
 
 ipcMain.handle('desktop:confirm-python-path', async (_event, payload) => {
-  const mode = payload?.mode === 'cloud' ? 'cloud' : 'local'
+  const mode = payload?.mode === 'cloud' || payload?.mode === 'mineru' ? payload.mode : 'local'
   const normalizedPath = normalizeSelectedPythonPath(payload?.pythonPath)
+  const enableLocalParser = Boolean(payload?.enableLocalParser)
   const normalizedServiceUrl = normalizeServiceUrl(payload?.serviceUrl)
+  const normalizedMineruUrl = normalizeServiceUrl(payload?.mineruUrl)
+  const normalizedMineruApiKey = typeof payload?.mineruApiKey === 'string' ? payload.mineruApiKey.trim() : ''
+  const normalizedMineruModelVersion = typeof payload?.mineruModelVersion === 'string' && payload.mineruModelVersion.trim()
+    ? payload.mineruModelVersion.trim()
+    : 'vlm'
 
   let inspected = null
+  if (normalizedPath) {
+    inspected = await inspectPythonCandidate(normalizedPath, 'manual')
+  }
+
   if (mode === 'local') {
-    inspected = normalizedPath ? await inspectPythonCandidate(normalizedPath, 'manual') : null
-    if (normalizedPath && !inspected?.ready) {
-      throw new Error('当前 Python 环境还不能直接启动 Surya，请换一个带完整依赖的环境。')
+    if (enableLocalParser && normalizedPath && !inspected?.supportsSelfHostedParser) {
+      throw new Error('当前 Python 环境依赖不完整，还不能作为本地自部署引擎使用。')
     }
-  } else if (!normalizedServiceUrl) {
+  } else if (mode === 'cloud' && !normalizedServiceUrl) {
     throw new Error('请输入有效的 Modal 服务地址。')
+  } else if (mode === 'mineru' && (!normalizedMineruUrl || !normalizedMineruApiKey)) {
+    throw new Error('请填写完整的 MinerU 服务地址和 API Key。')
   }
 
   writeDesktopConfig({
-    pythonPath: mode === 'local' ? (inspected?.path || null) : null,
+    pythonPath: inspected?.path || null,
     deploymentMode: mode,
+    localParserEnabled: mode === 'local' ? Boolean(enableLocalParser && inspected?.supportsSelfHostedParser) : false,
     serviceUrl: mode === 'cloud' ? normalizedServiceUrl : '',
+    mineruUrl: normalizedMineruUrl,
+    mineruApiKey: normalizedMineruApiKey,
+    mineruModelVersion: normalizedMineruModelVersion,
   })
 
   const pendingLauncher = launcherWindow
   createLoadingWindow()
   updateLoadingWindow(
     mode === 'local'
-      ? (inspected?.path ? '正在启动 Python 解析服务...' : '已跳过 Python 解析服务，正在拉起前端项目...')
-      : '正在连接 Modal 云部署，随后拉起前端项目...',
+      ? (inspected?.path
+        ? (enableLocalParser && inspected?.supportsSelfHostedParser
+          ? '正在启动本地 Python 解析引擎...'
+          : '正在接入所选 Python 运行环境...')
+        : '已跳过 Python 运行环境，正在拉起前端项目...')
+      : mode === 'cloud'
+        ? (inspected?.path
+        ? '正在连接云端解析，并接入本地 Python 运行环境...'
+        : '正在连接云端解析，随后拉起前端项目...')
+        : (inspected?.path
+          ? '正在接入 MinerU 云端解析，并保留本地 Python 运行环境...'
+          : '正在接入 MinerU 云端解析，随后拉起前端项目...'),
   )
   pendingLauncher?.hide()
 
   try {
     await createMainWindow({
-      pythonPath: mode === 'local' ? (inspected?.path || null) : null,
+      pythonPath: inspected?.path || null,
+      enableLocalParser: mode === 'local' ? Boolean(enableLocalParser && inspected?.supportsSelfHostedParser) : false,
+      deploymentMode: mode,
       serviceUrl: mode === 'cloud' ? normalizedServiceUrl : '',
+      mineruUrl: normalizedMineruUrl,
+      mineruApiKey: normalizedMineruApiKey,
+      mineruModelVersion: normalizedMineruModelVersion,
     })
     if (pendingLauncher && !pendingLauncher.isDestroyed()) {
       pendingLauncher.destroy()

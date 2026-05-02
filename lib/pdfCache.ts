@@ -3,6 +3,7 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { PDFDocumentCache, PDFPageCache, TranslationCache, TextBlock, PDFAnnotation, GuideCache, VectorDocument } from './types'
 import { emitWorkspaceBridgeChanged } from './workspaceBridgeEvents'
+import { isAdvancedParserSource } from './documentParseProviders'
 
 // PDF 文件缓存（存储原始 PDF blob）
 interface PDFFileCache {
@@ -197,7 +198,7 @@ export async function deleteTranslation(documentId: string): Promise<void> {
 export async function hasImmersiveCache(knowledgeItemId: string): Promise<boolean> {
   const doc = await getPDFDocumentByKnowledgeId(knowledgeItemId)
   if (!doc) return false
-  if (doc.parser !== 'surya' || doc.parseStatus !== 'completed') return false
+  if (!isAdvancedParserSource(doc.parser) || doc.parseStatus !== 'completed') return false
   
   const pages = await getPDFPagesByDocumentId(doc.id)
   return pages.length > 0

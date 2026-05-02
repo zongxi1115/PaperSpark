@@ -7,7 +7,7 @@ import {
   getKnowledgeParseTaskResult,
   listKnowledgeParseTasks,
 } from '@/lib/server/knowledgeParseQueue'
-import type { KnowledgeItem, ModelConfig } from '@/lib/types'
+import type { AdvancedParseProviderId, KnowledgeItem, ModelConfig } from '@/lib/types'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -17,6 +17,10 @@ type BatchEnqueueRequest = {
     taskId: string
     title: string
     fileName: string
+    providerId: AdvancedParseProviderId
+    providerBaseUrl?: string
+    providerApiKey?: string
+    providerModelVersion?: string
     sourceType: KnowledgeItem['sourceType']
     remoteUrl?: string
     metadataModelConfig?: ModelConfig | null
@@ -87,6 +91,10 @@ export async function POST(request: NextRequest) {
     const taskId = form.get('taskId')
     const title = form.get('title')
     const fileName = form.get('fileName')
+    const providerId = form.get('providerId')
+    const providerBaseUrl = form.get('providerBaseUrl')
+    const providerApiKey = form.get('providerApiKey')
+    const providerModelVersion = form.get('providerModelVersion')
     const sourceType = form.get('sourceType')
     const itemSnapshotRaw = form.get('itemSnapshot')
     const metadataModelConfigRaw = form.get('metadataModelConfig')
@@ -96,6 +104,7 @@ export async function POST(request: NextRequest) {
       typeof taskId !== 'string' ||
       typeof title !== 'string' ||
       typeof fileName !== 'string' ||
+      typeof providerId !== 'string' ||
       typeof sourceType !== 'string' ||
       typeof itemSnapshotRaw !== 'string'
     ) {
@@ -115,6 +124,10 @@ export async function POST(request: NextRequest) {
       taskId,
       title,
       fileName,
+      providerId: providerId as AdvancedParseProviderId,
+      providerBaseUrl: typeof providerBaseUrl === 'string' ? providerBaseUrl : undefined,
+      providerApiKey: typeof providerApiKey === 'string' ? providerApiKey : undefined,
+      providerModelVersion: typeof providerModelVersion === 'string' ? providerModelVersion : undefined,
       sourceType: sourceType as KnowledgeItem['sourceType'],
       file,
       metadataModelConfig,

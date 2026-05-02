@@ -32,13 +32,15 @@ import {
   saveZoteroConfig,
   generateId,
   getSettings,
+  getAdvancedParseProviderConfig,
   getSelectedSmallModel,
   getEmbeddingModelConfig,
 } from '@/lib/storage'
 import { storeFile } from '@/lib/localFiles'
 import { deleteKnowledgeItemCache, getPDFDocumentByKnowledgeId, getPDFPagesByDocumentId, savePDFDocument, savePDFPages, updatePDFDocument } from '@/lib/pdfCache'
+import { isAdvancedParserSource, normalizePDFParserSource } from '@/lib/documentParseProviders'
 import { deleteKnowledgeVectors, indexKnowledgeForRAG } from '@/lib/rag'
-import type { KnowledgeItem, ModelConfig, PDFDocumentCache, PDFPageCache, ZoteroConfig } from '@/lib/types'
+import type { AdvancedParseProviderId, KnowledgeItem, ModelConfig, PDFDocumentCache, PDFPageCache, ZoteroConfig } from '@/lib/types'
 
 type BatchParseStatus = 'queued' | 'processing' | 'completed' | 'failed' | 'cancelled'
 
@@ -58,6 +60,7 @@ type ParseTaskSummary = {
   knowledgeItemId: string
   title: string
   fileName: string
+  providerId: AdvancedParseProviderId
   sourceType: KnowledgeItem['sourceType']
   status: BatchParseStatus
   stage?: string
@@ -236,7 +239,7 @@ export function KnowledgePanel() {
   const syncFailedTaskToClient = useCallback(async (item: KnowledgeItem, task: ParseTaskSummary) => {
     const message = task.error || '解析失败'
     await updatePDFDocument(item.id, {
-      parser: 'surya',
+      parser: normalizePDFParserSource(task.providerId),
       parseStatus: 'failed',
       parseError: message,
     }).catch(async () => {
@@ -255,7 +258,7 @@ export function KnowledgePanel() {
           keywords: [],
           references: [],
         },
-        parser: 'surya',
+        parser: normalizePDFParserSource(task.providerId),
         parseStatus: 'failed',
         parseError: message,
         parsedAt: now,
@@ -377,6 +380,12 @@ export function KnowledgePanel() {
 
     try {
       const settings = getSettings()
+      const {
+        providerId,
+        baseUrl: providerBaseUrl,
+        apiKey: providerApiKey,
+        modelVersion: providerModelVersion,
+      } = getAdvancedParseProviderConfig(settings)
       const metadataModelConfig = getSelectedSmallModel(settings)
       const modelConfig = metadataModelConfig?.apiKey && metadataModelConfig?.modelName
         ? metadataModelConfig
@@ -385,6 +394,10 @@ export function KnowledgePanel() {
         taskId: string
         title: string
         fileName: string
+        providerId: AdvancedParseProviderId
+        providerBaseUrl?: string
+        providerApiKey?: string
+        providerModelVersion?: string
         sourceType: KnowledgeItem['sourceType']
         remoteUrl?: string
         metadataModelConfig?: ModelConfig | null
@@ -394,7 +407,7 @@ export function KnowledgePanel() {
       for (const item of selectedItems) {
         const existingDoc = await getPDFDocumentByKnowledgeId(item.id)
         const existingPages = await getPDFPagesByDocumentId(item.id)
-        const hasCompletedCache = existingDoc?.parser === 'surya' && existingDoc?.parseStatus === 'completed' && existingPages.length > 0
+        const hasCompletedCache = isAdvancedParserSource(existingDoc?.parser) && existingDoc?.parseStatus === 'completed' && existingPages.length > 0
         if (hasCompletedCache) {
           const previousTask = batchParseTasksRef.current[item.id]
           setBatchParseTasks(prev => ({
@@ -425,7 +438,7 @@ export function KnowledgePanel() {
 
         if (existingDoc) {
           await updatePDFDocument(item.id, {
-            parser: 'surya',
+            parser: normalizePDFParserSource(providerId),
             parseStatus: 'processing',
             parseError: '',
           })
@@ -436,7 +449,7 @@ export function KnowledgePanel() {
             fileName: item.fileName || `${item.title || 'document'}.pdf`,
             pageCount: 0,
             metadata: fallbackMetadata,
-            parser: 'surya',
+            parser: normalizePDFParserSource(providerId),
             parseStatus: 'processing',
             parsedAt: now,
             updatedAt: now,
@@ -457,6 +470,16 @@ export function KnowledgePanel() {
           form.set('taskId', taskId)
           form.set('title', item.title)
           form.set('fileName', resolved.fileName)
+          form.set('providerId', providerId)
+          if (providerBaseUrl) {
+            form.set('providerBaseUrl', providerBaseUrl)
+          }
+          if (providerApiKey) {
+            form.set('providerApiKey', providerApiKey)
+          }
+          if (providerModelVersion) {
+            form.set('providerModelVersion', providerModelVersion)
+          }
           form.set('sourceType', item.sourceType)
           form.set('file', uploadFile)
           form.set('itemSnapshot', JSON.stringify({
@@ -489,6 +512,10 @@ export function KnowledgePanel() {
             taskId: generateId(),
             title: item.title,
             fileName: item.attachmentFileName || item.fileName || `${item.title || 'document'}.pdf`,
+            providerId,
+            providerBaseUrl,
+            providerApiKey,
+            providerModelVersion,
             sourceType: item.sourceType,
             remoteUrl,
             metadataModelConfig: modelConfig,

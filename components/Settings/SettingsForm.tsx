@@ -26,6 +26,7 @@ import {
 import { getSettings, saveSettings, generateId } from '@/lib/storage'
 import type { AppSettings, FeatureSelectItem, AIProvider, AIModel } from '@/lib/types'
 import { defaultSettings, selectFeatures } from '@/lib/types'
+import { ADVANCED_PARSE_PROVIDERS } from '@/lib/documentParseProviders'
 import { EDITOR_THEMES, injectGoogleFont } from '@/lib/editorThemes'
 import { Icon } from '@iconify/react'
 import { useThemeContext } from '@/components/Providers'
@@ -1124,6 +1125,153 @@ export function SettingsForm() {
               <SelectItem key="ieee">IEEE</SelectItem>
               <SelectItem key="chicago-author-date">Chicago Author-Date</SelectItem>
               <SelectItem key="gb-t-7714-2015-numeric">GB/T 7714-2015 (中文)</SelectItem>
+            </Select>
+          </CardBody>
+        </Card>
+
+        <Card shadow="sm">
+          <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+            <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>高级解析</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              配置重型文档解析 provider。`pdfjs` 仍作为基础本地兼容解析，不在这里选择。
+            </p>
+          </CardHeader>
+          <Divider />
+          <CardBody style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <Select
+              label="默认高级解析方案"
+              placeholder="选择高级解析 provider"
+              selectedKeys={new Set([settings.documentParse?.defaultAdvancedProvider || defaultSettings.documentParse!.defaultAdvancedProvider])}
+              onSelectionChange={keys => setSettings(s => ({
+                ...s,
+                documentParse: {
+                  defaultAdvancedProvider: keys instanceof Set && keys.size > 0
+                    ? [...keys][0] as 'surya-local' | 'surya-modal' | 'mineru'
+                    : defaultSettings.documentParse!.defaultAdvancedProvider,
+                  providers: s.documentParse?.providers || defaultSettings.documentParse!.providers,
+                },
+              }))}
+              variant="bordered"
+              description="沉浸式阅读、批量解析等高级解析入口默认使用的 provider"
+            >
+              {Object.values(ADVANCED_PARSE_PROVIDERS).map(provider => (
+                <SelectItem key={provider.id}>{provider.label}</SelectItem>
+              ))}
+            </Select>
+
+            <Input
+              label="Surya 本地服务 URL"
+              placeholder="http://127.0.0.1:8765"
+              value={settings.documentParse?.providers?.['surya-local']?.baseUrl || ''}
+              onValueChange={value => setSettings(s => ({
+                ...s,
+                documentParse: {
+                  defaultAdvancedProvider: s.documentParse?.defaultAdvancedProvider || defaultSettings.documentParse!.defaultAdvancedProvider,
+                  providers: {
+                    ...(s.documentParse?.providers || defaultSettings.documentParse!.providers),
+                    'surya-local': {
+                      ...(s.documentParse?.providers?.['surya-local'] || defaultSettings.documentParse!.providers['surya-local']),
+                      baseUrl: value,
+                    },
+                  },
+                },
+              }))}
+              variant="bordered"
+              size="sm"
+              description="本机 Python、Docker 或局域网服务地址"
+            />
+
+            <Input
+              label="Surya Modal 服务 URL"
+              placeholder="https://your-modal-web-endpoint"
+              value={settings.documentParse?.providers?.['surya-modal']?.baseUrl || ''}
+              onValueChange={value => setSettings(s => ({
+                ...s,
+                documentParse: {
+                  defaultAdvancedProvider: s.documentParse?.defaultAdvancedProvider || defaultSettings.documentParse!.defaultAdvancedProvider,
+                  providers: {
+                    ...(s.documentParse?.providers || defaultSettings.documentParse!.providers),
+                    'surya-modal': {
+                      ...(s.documentParse?.providers?.['surya-modal'] || defaultSettings.documentParse!.providers['surya-modal']),
+                      baseUrl: value,
+                    },
+                  },
+                },
+              }))}
+              variant="bordered"
+              size="sm"
+              description="部署在 Modal 上的同协议解析服务地址"
+            />
+
+            <Input
+              label="MinerU 服务 URL"
+              placeholder="https://mineru.net"
+              value={settings.documentParse?.providers?.mineru?.baseUrl || ''}
+              onValueChange={value => setSettings(s => ({
+                ...s,
+                documentParse: {
+                  defaultAdvancedProvider: s.documentParse?.defaultAdvancedProvider || defaultSettings.documentParse!.defaultAdvancedProvider,
+                  providers: {
+                    ...(s.documentParse?.providers || defaultSettings.documentParse!.providers),
+                    mineru: {
+                      ...(s.documentParse?.providers?.mineru || defaultSettings.documentParse!.providers.mineru),
+                      baseUrl: value,
+                    },
+                  },
+                },
+              }))}
+              variant="bordered"
+              size="sm"
+              description="MinerU 精准 API 服务根地址"
+            />
+
+            <Input
+              label="MinerU API Key"
+              placeholder="token"
+              type="password"
+              value={settings.documentParse?.providers?.mineru?.apiKey || ''}
+              onValueChange={value => setSettings(s => ({
+                ...s,
+                documentParse: {
+                  defaultAdvancedProvider: s.documentParse?.defaultAdvancedProvider || defaultSettings.documentParse!.defaultAdvancedProvider,
+                  providers: {
+                    ...(s.documentParse?.providers || defaultSettings.documentParse!.providers),
+                    mineru: {
+                      ...(s.documentParse?.providers?.mineru || defaultSettings.documentParse!.providers.mineru),
+                      apiKey: value,
+                    },
+                  },
+                },
+              }))}
+              variant="bordered"
+              size="sm"
+              description="仅本地存储，用于调用 MinerU 云端精准解析"
+            />
+
+            <Select
+              label="MinerU 模型版本"
+              placeholder="选择模型版本"
+              selectedKeys={new Set([settings.documentParse?.providers?.mineru?.modelVersion || defaultSettings.documentParse!.providers.mineru?.modelVersion || 'vlm'])}
+              onSelectionChange={keys => setSettings(s => ({
+                ...s,
+                documentParse: {
+                  defaultAdvancedProvider: s.documentParse?.defaultAdvancedProvider || defaultSettings.documentParse!.defaultAdvancedProvider,
+                  providers: {
+                    ...(s.documentParse?.providers || defaultSettings.documentParse!.providers),
+                    mineru: {
+                      ...(s.documentParse?.providers?.mineru || defaultSettings.documentParse!.providers.mineru),
+                      modelVersion: keys instanceof Set && keys.size > 0
+                        ? [...keys][0] as string
+                        : (defaultSettings.documentParse!.providers.mineru?.modelVersion || 'vlm'),
+                    },
+                  },
+                },
+              }))}
+              variant="bordered"
+              description="MinerU 当前支持的解析模型版本"
+            >
+              <SelectItem key="vlm">vlm</SelectItem>
+              <SelectItem key="pipeline">pipeline</SelectItem>
             </Select>
           </CardBody>
         </Card>

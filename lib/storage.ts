@@ -5,6 +5,7 @@ import { normalizeAgent, normalizeAgents, REVIEWER_AGENT_ID } from './agents'
 import { getStorage } from './storage/StorageFactory'
 import { getJSON, setJSON, getString, setString, removeItem as removeStorageItem } from './storage/StorageUtils'
 import { emitWorkspaceBridgeChanged } from './workspaceBridgeEvents'
+import { DEFAULT_ADVANCED_PARSE_PROVIDER, getAdvancedParseProviderBaseUrl, getDefaultAdvancedParseProvider } from './documentParseProviders'
 
 const DOCUMENTS_KEY = 'documents'
 const SETTINGS_KEY = 'settings'
@@ -76,7 +77,18 @@ export function getSettings(): AppSettings {
   try {
     const saved = getJSON<Partial<AppSettings>>(SETTINGS_KEY, {})
     // 迁移旧配置到新格式
-    const merged = { ...defaultSettings, ...saved }
+    const merged: AppSettings = {
+      ...defaultSettings,
+      ...saved,
+      documentParse: {
+        ...defaultSettings.documentParse,
+        ...saved.documentParse,
+        providers: {
+          ...defaultSettings.documentParse?.providers,
+          ...saved.documentParse?.providers,
+        },
+      },
+    }
     // 如果没有 providers 但有旧的 smallModel/largeModel，进行迁移
     if ((!saved.providers || saved.providers.length === 0) && (saved.smallModel || saved.largeModel)) {
       merged.providers = defaultSettings.providers
@@ -147,6 +159,23 @@ export function getRerankModelConfig(settings: AppSettings): import('./types').R
     return settings.rerankModel
   }
   return null
+}
+
+export function getSelectedAdvancedParseProvider(settings: AppSettings): import('./types').AdvancedParseProviderId {
+  return getDefaultAdvancedParseProvider(settings)
+}
+
+export function getAdvancedParseProviderConfig(
+  settings: AppSettings,
+  providerId?: import('./types').AdvancedParseProviderId,
+) {
+  const id = providerId || getSelectedAdvancedParseProvider(settings) || DEFAULT_ADVANCED_PARSE_PROVIDER
+  return {
+    providerId: id,
+    baseUrl: getAdvancedParseProviderBaseUrl(settings, id),
+    apiKey: settings.documentParse?.providers?.[id]?.apiKey?.trim() || '',
+    modelVersion: settings.documentParse?.providers?.[id]?.modelVersion?.trim() || '',
+  }
 }
 
 export function getLastDocId(): string | null {

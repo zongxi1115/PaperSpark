@@ -91,6 +91,22 @@ export interface RerankModelConfig {
   modelName: string
 }
 
+export type AdvancedParseProviderId = 'surya-local' | 'surya-modal' | 'mineru'
+export type DocumentParseEngine = 'pdfjs' | 'surya' | 'mineru'
+export type DocumentParseRuntime = 'browser' | 'local-python' | 'modal' | 'remote-http'
+
+export interface AdvancedParseProviderSettings {
+  baseUrl?: string
+  apiKey?: string
+  modelVersion?: string
+  enabled?: boolean
+}
+
+export interface DocumentParseSettings {
+  defaultAdvancedProvider: AdvancedParseProviderId
+  providers: Partial<Record<AdvancedParseProviderId, AdvancedParseProviderSettings>>
+}
+
 export type AppSettings = {
   // 新的多接口配置
   providers: AIProvider[]
@@ -113,6 +129,8 @@ export type AppSettings = {
   embeddingModel?: EmbeddingModelConfig
   // 重排序模型配置（RAG 用）
   rerankModel?: RerankModelConfig
+  // 文档解析配置
+  documentParse?: DocumentParseSettings
   // 沉浸式 Canvas 生成提示词
   immersiveCanvasPrompt?: string
 } & { [key in typeof selectFeatures[number]]: boolean
@@ -180,6 +198,29 @@ function getDefaultSettings(): AppSettings {
     },
     // 重排序模型默认配置（可选）
     rerankModel: undefined,
+    documentParse: {
+      defaultAdvancedProvider: 'surya-local',
+      providers: {
+        'surya-local': {
+          baseUrl:
+            process.env.NEXT_PUBLIC_SURYA_LOCAL_SERVICE_URL ||
+            process.env.NEXT_PUBLIC_SURYA_SERVICE_URL ||
+            process.env.NEXT_PUBLIC_SURYA_OCR_SERVICE_URL ||
+            'http://127.0.0.1:8765',
+          enabled: true,
+        },
+        'surya-modal': {
+          baseUrl: process.env.NEXT_PUBLIC_SURYA_MODAL_SERVICE_URL || '',
+          enabled: true,
+        },
+        mineru: {
+          baseUrl: process.env.NEXT_PUBLIC_MINERU_SERVICE_URL || 'https://mineru.net',
+          apiKey: process.env.NEXT_PUBLIC_MINERU_API_KEY || '',
+          modelVersion: process.env.NEXT_PUBLIC_MINERU_MODEL_VERSION || 'vlm',
+          enabled: true,
+        },
+      },
+    },
     immersiveCanvasPrompt: `角色设定
 你现在是一位顶尖的创意编程大师 (Creative Coder) 和数据可视化专家。
 请将我的论文内核“翻译”成一个高度动态、充满视觉交互的网页（单文件 HTML，内联 CSS/JS）。不要给我传统的文本阅读界面！我要的是生动的视觉隐喻和探索感！ 输出语言为中文。
@@ -477,7 +518,8 @@ export interface TextBlock {
   sourcePageHeight?: number
 }
 
-export type PDFParserSource = 'pdfjs' | 'surya'
+export type LegacyPDFParserSource = 'surya'
+export type PDFParserSource = 'pdfjs' | AdvancedParseProviderId | LegacyPDFParserSource
 export type PDFParseStatus = 'processing' | 'completed' | 'failed'
 
 // PDF 页面缓存

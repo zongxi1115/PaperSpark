@@ -85,7 +85,12 @@
   "build": {
     "appId": "com.paperspark.desktop",
     "productName": "PaperSpark",
-    "asar": false,
+    "asar": true,
+    "asarUnpack": [
+      ".next/standalone/**/*",
+      "scripts/start_surya_service.py",
+      "services/surya_ocr_service/**/*"
+    ],
     "directories": {
       "output": "release/electron",
       "buildResources": "desktop-resources"

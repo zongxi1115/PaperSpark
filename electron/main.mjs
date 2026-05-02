@@ -41,6 +41,13 @@ function resolveAppRoot() {
   return appPath
 }
 
+function resolveUnpackedAppRoot() {
+  if (!app.isPackaged || process.env.PAPERSPARK_ELECTRON_DEV === '1') {
+    return resolveAppRoot()
+  }
+  return path.join(process.resourcesPath, 'app.asar.unpacked')
+}
+
 function resolveRuntimeRoot() {
   return process.env.PAPERSPARK_RUNTIME_ROOT || path.join(app.getPath('userData'), 'runtime')
 }
@@ -397,7 +404,7 @@ async function waitForUrl(url, { timeoutMs = 45000, intervalMs = 500 } = {}) {
 
 async function startSuryaService(port, runtimeRoot, pythonPath) {
   const serviceDataRoot = path.join(runtimeRoot, 'surya-data')
-  const appRoot = resolveAppRoot()
+  const appRoot = resolveUnpackedAppRoot()
   const scriptPath = path.join(appRoot, 'scripts', 'start_surya_service.py')
 
   fs.mkdirSync(serviceDataRoot, { recursive: true })
@@ -443,7 +450,7 @@ async function startSuryaService(port, runtimeRoot, pythonPath) {
 }
 
 async function startInternalNextServer(port, runtimeRoot, suryaServiceUrl) {
-  const serverScript = path.join(resolveAppRoot(), '.next', 'standalone', 'server.js')
+  const serverScript = path.join(resolveUnpackedAppRoot(), '.next', 'standalone', 'server.js')
   if (!fs.existsSync(serverScript)) {
     throw new Error(`找不到 Next standalone 入口: ${serverScript}`)
   }

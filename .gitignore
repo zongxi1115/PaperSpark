@@ -10,6 +10,9 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+release
+.desktop-runtime
+.tmp/
 *.local
 
 # Editor directories and files
@@ -36,3 +39,4 @@ AGENTS.md
 docs/
 data/
 NEEDS.md
+*.tsbuildinfo

@@ -3,6 +3,7 @@ import { spawn } from 'child_process'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
+import { buildRuntimeFileUrl, resolveRuntimeOutPath, resolveRuntimeUploadPath } from '@/lib/server/runtimePaths'
 
 interface RunRequest {
   code: string
@@ -19,7 +20,7 @@ interface RunResult {
 }
 
 // 图片存储目录
-const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'python_images')
+const UPLOAD_DIR = resolveRuntimeUploadPath('python_images')
 
 // 确保上传目录存在
 function ensureUploadDir() {
@@ -50,7 +51,7 @@ export async function POST(request: NextRequest) {
     }
 
     // 创建临时目录
-    const tempDir = path.join(process.cwd(), 'out', 'python_runs')
+    const tempDir = resolveRuntimeOutPath('python_runs')
     if (!fs.existsSync(tempDir)) {
       fs.mkdirSync(tempDir, { recursive: true })
     }
@@ -193,7 +194,7 @@ if _image_counter > 0:
             fs.copyFileSync(srcPath, destPath)
             
             // 返回公开 URL
-            images.push(`/uploads/python_images/${newFileName}`)
+            images.push(buildRuntimeFileUrl('python_images', newFileName))
           }
         } catch {
           // 忽略读取错误

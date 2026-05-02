@@ -11,6 +11,14 @@ on:
         description: Source PR number for traceability
         required: false
         default: ''
+      existing_tag:
+        description: Rebuild an existing tag/release, e.g. v1.1.0
+        required: false
+        default: ''
+      recreate_release:
+        description: Recreate or refresh the GitHub Release for existing_tag
+        required: false
+        default: 'false'
 
 concurrency:
   group: master-versioning
@@ -20,8 +28,8 @@ jobs:
   release:
     runs-on: ubuntu-latest
     outputs:
-      released: ${{ steps.semantic.outputs.released }}
-      version: ${{ steps.semantic.outputs.version }}
+      released: ${{ steps.existing.outputs.released || steps.semantic.outputs.released }}
+      version: ${{ steps.existing.outputs.version || steps.semantic.outputs.version }}
     permissions:
       contents: write
       issues: write
@@ -51,9 +59,36 @@ jobs:
         run: |
           echo "release_ref=${{ github.event.inputs.release_ref }}"
           echo "source_pr=${{ github.event.inputs.source_pr }}"
+          echo "existing_tag=${{ github.event.inputs.existing_tag }}"
+          echo "recreate_release=${{ github.event.inputs.recreate_release }}"
+
+      - name: Reuse existing tag
+        id: existing
+        if: ${{ github.event.inputs.existing_tag != '' }}
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.existing_tag }}"
+          VERSION="${TAG#v}"
+          echo "released=true" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Using existing tag ${TAG}"
+
+      - name: Recreate or refresh GitHub Release
+        if: ${{ github.event.inputs.existing_tag != '' && github.event.inputs.recreate_release == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.existing_tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --latest
+          else
+            gh release create "$TAG" --verify-tag --generate-notes --latest
+          fi
 
       - name: Release
         id: semantic
+        if: ${{ github.event.inputs.existing_tag == '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -139,16 +174,18 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          $releaseVersion = "${{ needs.release.outputs.version }}"
+          $releaseTag = "v$releaseVersion"
           $assets = @(
-            "release/electron/PaperSpark-${env:RELEASE_VERSION}-setup.exe",
-            "release/electron/PaperSpark-${env:RELEASE_VERSION}-win-unpacked.zip"
+            "release/electron/PaperSpark-${releaseVersion}-setup.exe",
+            "release/electron/PaperSpark-${releaseVersion}-win-unpacked.zip"
           )
           $nsisArchive = Get-ChildItem "release/electron" -Filter "*.nsis.7z" -ErrorAction SilentlyContinue | Select-Object -First 1
           if ($nsisArchive) {
             $assets += $nsisArchive.FullName
           }
 
-          gh release upload $env:RELEASE_TAG $assets --clobber
+          gh release upload $releaseTag $assets --clobber
 
   build-electron-macos:
     name: Build Electron macOS Assets

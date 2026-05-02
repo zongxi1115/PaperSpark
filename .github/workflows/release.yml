@@ -76,7 +76,7 @@ jobs:
       - name: Recreate or refresh GitHub Release
         if: ${{ github.event.inputs.existing_tag != '' && github.event.inputs.recreate_release == 'true' }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
           TAG="${{ github.event.inputs.existing_tag }}"
@@ -172,7 +172,7 @@ jobs:
       - name: Upload assets to GitHub Release
         shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $releaseVersion = "${{ needs.release.outputs.version }}"
           $releaseTag = "v$releaseVersion"
@@ -236,7 +236,7 @@ jobs:
 
       - name: Upload macOS assets to GitHub Release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${RELEASE_TAG}" release/electron/*.dmg release/electron/*-mac-*.zip --clobber
 

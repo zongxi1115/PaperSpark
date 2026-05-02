@@ -1,3 +1,11 @@
+# [1.2.0](https://github.com/zongxi1115/PaperSpark/compare/v1.1.2...v1.2.0) (2026-05-02)
+
+
+### Features
+
+* 启动向导增加minerU可选项 ([fb09b08](https://github.com/zongxi1115/PaperSpark/commit/fb09b08ef7b7dc6a7d022ff620d0e8c0c6513fbd))
+* 支持minerU解析 ([b04a695](https://github.com/zongxi1115/PaperSpark/commit/b04a69555ae577b531c738cdb434be51dc566fe8))
+
 ## [1.1.2](https://github.com/zongxi1115/PaperSpark/compare/v1.1.1...v1.1.2) (2026-05-02)
 
 

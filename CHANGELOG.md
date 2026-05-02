@@ -1,3 +1,12 @@
+## [1.1.1](https://github.com/zongxi1115/PaperSpark/compare/v1.1.0...v1.1.1) (2026-05-02)
+
+
+### Bug Fixes
+
+* bot在关闭的pr留言 ([13d842f](https://github.com/zongxi1115/PaperSpark/commit/13d842fa2982d6074c81d9ea72b90f5aaf09e57f))
+* 入口缺少配置modal的功能 ([8c7e674](https://github.com/zongxi1115/PaperSpark/commit/8c7e67462e0ef3a6c1d80dcf8d32e045af1cc106))
+* 自动化发版报错 ([49cf305](https://github.com/zongxi1115/PaperSpark/commit/49cf3057bd17bd40aaf5df4fdd2867686ced7020))
+
 # [1.1.0](https://github.com/zongxi1115/PaperSpark/compare/v1.0.0...v1.1.0) (2026-05-02)
 
 

@@ -19,10 +19,16 @@ export interface PaperSparkDesktopAPI {
   launcher: {
     getState: () => Promise<{
       savedPythonPath: string | null
+      savedDeploymentMode: 'local' | 'cloud'
+      savedServiceUrl: string
       candidates: DesktopPythonCandidate[]
     }>
     browsePythonPath: () => Promise<DesktopPythonCandidate | null>
-    confirmPythonPath: (pythonPath: string | null) => Promise<{ ok: true }>
+    confirmPythonPath: (payload: {
+      mode: 'local' | 'cloud'
+      pythonPath?: string | null
+      serviceUrl?: string
+    }) => Promise<{ ok: true }>
   }
   windowControls: {
     minimize: () => Promise<void>

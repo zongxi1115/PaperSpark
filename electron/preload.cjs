@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('papersparkDesktop', {
   launcher: {
     getState: () => ipcRenderer.invoke('desktop:get-launcher-state'),
     browsePythonPath: () => ipcRenderer.invoke('desktop:browse-python-path'),
-    confirmPythonPath: (pythonPath) => ipcRenderer.invoke('desktop:confirm-python-path', pythonPath),
+    confirmPythonPath: (payload) => ipcRenderer.invoke('desktop:confirm-python-path', payload),
   },
   windowControls: {
     minimize: () => ipcRenderer.invoke('desktop:window-action', 'minimize'),

@@ -1,13 +1,15 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState } from 'react'
+import type { CSSProperties } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Divider, Tooltip, Modal, ModalContent, ModalHeader, ModalBody, ModalFooter, Card, CardBody } from '@heroui/react'
 import { useThemeContext } from '@/components/Providers'
 import { Icon } from '@iconify/react'
 import Image from 'next/image'
 
 const HELP_DOCS_URL = 'https://docs.paper.062679.xyz'
+type DesktopDragStyle = CSSProperties & { WebkitAppRegion?: 'drag' | 'no-drag' | 'initial' }
 
 function ThoughtIcon() {
   return (
@@ -33,6 +35,8 @@ export function TopNav() {
   const pathname = usePathname()
   const { theme, setTheme, resolvedTheme, mounted } = useThemeContext()
   const [isAboutOpen, setIsAboutOpen] = useState(false)
+  const [isDesktop, setIsDesktop] = useState(false)
+  const [isMaximized, setIsMaximized] = useState(false)
 
   const isEditor = pathname.startsWith('/editor')
   const isDocuments = pathname === '/documents'
@@ -49,20 +53,49 @@ export function TopNav() {
     }
   }
 
+  useEffect(() => {
+    const api = window.papersparkDesktop
+    if (!api?.isDesktop) return
+
+    setIsDesktop(true)
+    api.windowControls.getState().then((state) => {
+      setIsMaximized(Boolean(state?.isMaximized))
+    }).catch(() => {})
+
+    return api.windowControls.onStateChange((state) => {
+      setIsMaximized(Boolean(state?.isMaximized))
+    })
+  }, [])
+
+  const navStyle: DesktopDragStyle = {
+    height: 52,
+    background: 'var(--bg-primary)',
+    borderBottom: '1px solid var(--border-color)',
+    display: 'flex',
+    alignItems: 'center',
+    padding: '0 16px',
+    gap: 8,
+    flexShrink: 0,
+    zIndex: 10,
+    WebkitAppRegion: isDesktop ? 'drag' : 'initial',
+  }
+
+  const interactiveStripStyle: DesktopDragStyle = {
+    display: 'flex',
+    gap: 4,
+    WebkitAppRegion: 'no-drag',
+  }
+
+  const interactiveRightStyle: DesktopDragStyle = {
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 4,
+    WebkitAppRegion: 'no-drag',
+  }
+
   return (
-    <nav
-      style={{
-        height: 52,
-        background: 'var(--bg-primary)',
-        borderBottom: '1px solid var(--border-color)',
-        display: 'flex',
-        alignItems: 'center',
-        padding: '0 16px',
-        gap: 8,
-        flexShrink: 0,
-        zIndex: 10,
-      }}
-    >
+    <nav style={navStyle}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginRight: 8 }}>
         <svg
           width="20"
@@ -79,11 +112,25 @@ export function TopNav() {
           <line x1="16" y1="17" x2="8" y2="17" />
         </svg>
         <span style={{ fontWeight: 600, fontSize: 15 }}>PaperSpark</span>
+        {isDesktop && (
+          <span
+            style={{
+              padding: '2px 8px',
+              borderRadius: 999,
+              background: 'rgba(59, 130, 246, 0.08)',
+              color: 'var(--text-secondary)',
+              fontSize: 11,
+              fontWeight: 600,
+            }}
+          >
+            Desktop
+          </span>
+        )}
       </div>
 
       <Divider orientation="vertical" style={{ height: 20 }} />
 
-      <div style={{ display: 'flex', gap: 4 }}>
+      <div style={interactiveStripStyle}>
         <Link href="/documents">
           <Button
             size="sm"
@@ -125,7 +172,7 @@ export function TopNav() {
       </div>
 
       {/* 右侧区域 */}
-      <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 4 }}>
+      <div style={interactiveRightStyle}>
         <Tooltip content="打开帮助文档" placement="bottom">
           <Button
             as="a"
@@ -169,6 +216,39 @@ export function TopNav() {
             />
           </Button>
         </Tooltip>
+        {isDesktop && (
+          <>
+            <Divider orientation="vertical" style={{ height: 20, marginInline: 4 }} />
+            <Button
+              isIconOnly
+              size="sm"
+              variant="light"
+              onPress={() => window.papersparkDesktop?.windowControls.minimize()}
+            >
+              <Icon icon="solar:minimize-square-2-outline" width={16} />
+            </Button>
+            <Button
+              isIconOnly
+              size="sm"
+              variant="light"
+              onPress={() => window.papersparkDesktop?.windowControls.toggleMaximize()}
+            >
+              <Icon
+                icon={isMaximized ? 'solar:quit-full-screen-square-outline' : 'solar:maximize-square-2-outline'}
+                width={16}
+              />
+            </Button>
+            <Button
+              isIconOnly
+              size="sm"
+              variant="light"
+              color="danger"
+              onPress={() => window.papersparkDesktop?.windowControls.close()}
+            >
+              <Icon icon="solar:close-square-outline" width={16} />
+            </Button>
+          </>
+        )}
       </div>
 
       {/* 关于弹窗 */}

@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PaperSpark - 环境配置</title>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    :root {
+      --color-primary: #6366f1;
+      --color-primary-hover: #4f46e5;
+      --color-bg: #f8fafc;
+      --color-surface: rgba(255, 255, 255, 0.85);
+      --color-border: #e2e8f0;
+      --color-text-main: #0f172a;
+      --color-text-muted: #64748b;
+      --color-success: #10b981;
+      --color-success-bg: #d1fae5;
+      --color-warning: #f59e0b;
+      --color-warning-bg: #fef3c7;
+      --color-error: #ef4444;
+      --color-error-bg: #fee2e2;
+      --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+      --shadow-lg: 0 10px 25px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -4px rgba(0, 0, 0, 0.02);
+      --radius-xl: 20px;
+      --radius-md: 12px;
+      --radius-sm: 8px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html,
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--color-bg);
+      background-image:
+        radial-gradient(circle at top, rgba(99, 102, 241, 0.06), transparent 32%),
+        radial-gradient(circle at 12% 18%, rgba(16, 185, 129, 0.05), transparent 22%),
+        radial-gradient(circle at 88% 12%, rgba(245, 158, 11, 0.05), transparent 20%);
+      color: var(--color-text-main);
+      display: flex;
+      flex-direction: column;
+    }
+
+    .titlebar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 16px;
+      -webkit-app-region: drag;
+      user-select: none;
+      z-index: 10;
+    }
+
+    .titlebar-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-text-muted);
+    }
+
+    .brand-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--color-primary);
+      box-shadow: 0 0 12px var(--color-primary);
+    }
+
+    .titlebar-actions {
+      display: flex;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .win-btn {
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--color-text-muted);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+
+    .win-btn:hover {
+      background: rgba(0, 0, 0, 0.05);
+      color: var(--color-text-main);
+    }
+
+    .win-btn.close:hover {
+      background: var(--color-error-bg);
+      color: var(--color-error);
+    }
+
+    .main-container {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 24px 22px 28px;
+    }
+
+    .setup-card {
+      width: 100%;
+      max-width: 720px;
+      height: 100%;
+      max-height: 620px;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+      background: transparent;
+      backdrop-filter: none;
+      border: 0;
+      box-shadow: none;
+      overflow: visible;
+    }
+
+    .card-header {
+      padding: 0;
+      text-align: center;
+      display: grid;
+      justify-items: center;
+      gap: 14px;
+    }
+
+    .python-logo {
+      width: 80px;
+      height: 80px;
+    }
+
+    .card-header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .card-header p {
+      font-size: 14px;
+      color: var(--color-text-muted);
+      line-height: 1.6;
+      max-width: 480px;
+      margin: 0 auto;
+    }
+
+    .card-body {
+      flex: 1;
+      padding: 0;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .list-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+
+    .list-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-text-muted);
+    }
+
+    .refresh-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--color-primary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 6px 10px;
+      border-radius: 10px;
+      transition: background 0.2s;
+    }
+
+    .refresh-btn:hover {
+      background: #eef2ff;
+    }
+
+    .env-item {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      background: #ffffff;
+      border: 1px solid var(--color-border);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      position: relative;
+      width: 100%;
+      text-align: left;
+      appearance: none;
+      border-radius: 0;
+    }
+
+    .env-item:hover {
+      border-color: #cbd5e1;
+      box-shadow: var(--shadow-sm);
+      transform: translateY(-1px);
+    }
+
+    .env-item.active {
+      border-color: var(--color-primary);
+      background: #fbfbfe;
+      box-shadow: 0 0 0 1px var(--color-primary);
+    }
+
+    .env-item.active .deps {
+      display: grid;
+    }
+
+    .env-icon {
+      color: var(--color-text-muted);
+      margin-right: 16px;
+      flex: 0 0 auto;
+    }
+
+    .env-item.active .env-icon {
+      color: var(--color-primary);
+    }
+
+    .env-details {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .env-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
+    }
+
+    .env-path {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .env-note {
+      margin-top: 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--color-text-muted);
+      white-space: normal;
+    }
+
+    .deps {
+      margin-top: 10px;
+      display: none;
+      gap: 6px;
+    }
+
+    .deps__title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--color-text-muted);
+    }
+
+    .deps__list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .dep-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 8px 10px;
+      border: 1px solid var(--color-border);
+      background: rgba(255, 255, 255, 0.78);
+      border-radius: 0;
+    }
+
+    .dep-item__name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-width: 0;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--color-text-main);
+    }
+
+    .dep-item__state {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 12px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .dep-item__state.ok {
+      color: var(--color-success);
+    }
+
+    .dep-item__state.missing {
+      color: var(--color-error);
+    }
+
+    .dep-item__state.warn {
+      color: var(--color-warning);
+    }
+
+    .status-badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .status-badge.ready {
+      background: var(--color-success-bg);
+      color: var(--color-success);
+    }
+
+    .status-badge.missing {
+      background: var(--color-warning-bg);
+      color: var(--color-warning);
+    }
+
+    .status-badge.error {
+      background: var(--color-error-bg);
+      color: var(--color-error);
+    }
+
+    .check-icon {
+      display: none;
+      color: var(--color-primary);
+      margin-left: 16px;
+      flex: 0 0 auto;
+    }
+
+    .env-item.active .check-icon {
+      display: block;
+    }
+
+    .card-footer {
+      padding: 8px 0 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      background: transparent;
+    }
+
+    .skip-modal {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.42);
+      backdrop-filter: blur(8px);
+      z-index: 50;
+      padding: 20px;
+    }
+
+    .skip-modal.open {
+      display: flex;
+    }
+
+    .skip-modal__panel {
+      width: min(460px, 100%);
+      border-radius: 24px;
+      background: rgba(255, 255, 255, 0.96);
+      border: 1px solid rgba(226, 232, 240, 0.9);
+      box-shadow: 0 28px 60px rgba(15, 23, 42, 0.22);
+      overflow: hidden;
+    }
+
+    .skip-modal__header {
+      padding: 22px 24px 0;
+    }
+
+    .skip-modal__title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--color-text-main);
+      letter-spacing: -0.02em;
+    }
+
+    .skip-modal__body {
+      padding: 14px 24px 22px;
+      color: var(--color-text-muted);
+      font-size: 14px;
+      line-height: 1.7;
+    }
+
+    .skip-modal__footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding: 0 24px 24px;
+    }
+
+    .btn-flat {
+      background: #ffffff;
+      border: 1px solid var(--color-border);
+      color: var(--color-text-main);
+    }
+
+    .btn-flat:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
+
+    .btn {
+      height: 44px;
+      padding: 0 24px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      transition: all 0.2s;
+      border: none;
+      white-space: nowrap;
+    }
+
+    .btn-secondary {
+      background: #ffffff;
+      border: 1px solid var(--color-border);
+      color: var(--color-text-main);
+    }
+
+    .btn-secondary:hover {
+      background: #f8fafc;
+      border-color: #cbd5e1;
+    }
+
+    .btn-primary {
+      background: var(--color-primary);
+      border: none;
+      color: white;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.3);
+    }
+
+    .btn-primary:hover {
+      background: var(--color-primary-hover);
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(99, 102, 241, 0.4);
+    }
+
+    .btn-primary:disabled {
+      background: #cbd5e1;
+      box-shadow: none;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .empty-state {
+      border: 1px dashed var(--color-border);
+      border-radius: 0;
+      padding: 18px 16px;
+      color: var(--color-text-muted);
+      font-size: 13px;
+      line-height: 1.6;
+      background: rgba(255, 255, 255, 0.72);
+    }
+
+    .launch-note {
+      flex: 1;
+      min-width: 0;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--color-text-muted);
+    }
+
+    .launch-note strong {
+      color: var(--color-text-main);
+      font-weight: 600;
+    }
+
+    @media (max-width: 720px) {
+      .main-container {
+        padding: 18px 16px 18px;
+      }
+
+      .setup-card {
+        max-height: none;
+      }
+
+      .card-footer {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="titlebar">
+    <div class="titlebar-brand">
+      <div class="brand-dot"></div>
+      <span>PaperSpark</span>
+    </div>
+    <div class="titlebar-actions">
+      <button class="win-btn" id="minimizeButton" title="最小化" type="button">
+        <i data-lucide="minus" width="16"></i>
+      </button>
+      <button class="win-btn close" id="closeButton" title="关闭" type="button">
+        <i data-lucide="x" width="16"></i>
+      </button>
+    </div>
+  </div>
+
+  <div class="main-container">
+    <div class="setup-card">
+      <div class="card-header">
+        <div class="python-logo" aria-hidden="true">
+          <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/python/python-original.svg" alt="" referrerpolicy="no-referrer" width="80" height="80" />
+        </div>
+        <h1>配置 Python 微服务</h1>
+        <p>PaperSpark 需要依赖 Python 环境来运行本地 OCR、文档分析和 Python 在线运行服务。请选择一个包含所需依赖的运行环境。</p>
+      </div>
+
+      <div class="card-body">
+        <div class="list-header">
+          <span class="list-title">已检测到的环境</span>
+          <button class="refresh-btn" id="refreshButton" type="button">
+            <i data-lucide="refresh-cw" width="14"></i>
+            重新扫描
+          </button>
+        </div>
+
+        <div id="candidateList" style="display:flex;flex-direction:column;gap:12px;"></div>
+      </div>
+
+      <div class="card-footer">
+        <div class="launch-note" id="statusLine">
+          正在扫描本机已有的 Python 环境...
+        </div>
+        <button class="btn btn-secondary" id="browseButton" type="button">
+          <i data-lucide="folder-search" width="16"></i>
+          手动选择路径...
+        </button>
+        <button class="btn btn-primary" id="launchBtn" type="button" disabled>
+          启动 PaperSpark
+          <i data-lucide="arrow-right" width="16"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="skip-modal" id="skipModal" aria-hidden="true">
+    <div class="skip-modal__panel" role="dialog" aria-modal="true" aria-labelledby="skipModalTitle">
+      <div class="skip-modal__header">
+        <div class="skip-modal__title" id="skipModalTitle">
+          <i data-lucide="alert-triangle" width="18"></i>
+          跳过 Python 解析服务？
+        </div>
+      </div>
+      <div class="skip-modal__body">
+        如果没有配置，论文导入解析、Python 代码在线运行等功能将无法使用，是否继续？
+      </div>
+      <div class="skip-modal__footer">
+        <button class="btn btn-flat" id="skipCancelButton" type="button">取消</button>
+        <button class="btn btn-primary" id="skipConfirmButton" type="button">继续启动</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      candidates: [],
+      selected: null,
+      launching: false,
+      skipConfirmResolver: null,
+    }
+
+    const candidateList = document.getElementById('candidateList')
+    const statusLine = document.getElementById('statusLine')
+    const launchBtn = document.getElementById('launchBtn')
+    const browseButton = document.getElementById('browseButton')
+    const refreshButton = document.getElementById('refreshButton')
+    const skipModal = document.getElementById('skipModal')
+    const skipCancelButton = document.getElementById('skipCancelButton')
+    const skipConfirmButton = document.getElementById('skipConfirmButton')
+
+    function renderIcons() {
+      if (window.lucide?.createIcons) {
+        window.lucide.createIcons()
+      }
+    }
+
+    function statusTone(candidate) {
+      if (!candidate) return 'missing'
+      if (candidate.ready) return 'ready'
+      if (candidate.compatible) return 'missing'
+      return 'error'
+    }
+
+    function statusLabel(candidate) {
+      if (!candidate) return '还没有选择 Python 环境'
+      if (candidate.ready) return '完美匹配'
+      if (candidate.compatible) return '缺少依赖'
+      return '版本不满足要求'
+    }
+
+    const requiredPackages = [
+      { key: 'fastapi', label: 'fastapi' },
+      { key: 'uvicorn', label: 'uvicorn' },
+      { key: 'chromadb', label: 'chromadb' },
+      { key: 'surya', label: 'surya' },
+    ]
+
+    function getMissingPackages(candidate) {
+      const issue = candidate?.issues?.find((item) => item.startsWith('缺少依赖:')) || ''
+      const missingSet = new Set(
+        issue
+          .split(':')
+          .slice(1)
+          .join(':')
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean),
+      )
+
+      return requiredPackages.map((pkg) => ({
+        ...pkg,
+        installed: !missingSet.has(pkg.key),
+      }))
+    }
+
+    function getVersionIssue(candidate) {
+      return candidate?.issues?.find((item) => item.startsWith('需要 Python '))
+        || candidate?.issues?.find((item) => item.includes('版本'))
+        || ''
+    }
+
+    function launchLabel(candidate) {
+      if (candidate?.ready) return '启动 PaperSpark'
+      return '跳过配置python解析服务，直接启动'
+    }
+
+    function launchIcon(candidate) {
+      return candidate?.ready ? 'arrow-right' : 'skip-forward'
+    }
+
+    function setStatus(message, tone = '') {
+      statusLine.textContent = message
+      statusLine.dataset.tone = tone
+    }
+
+    function setLaunchButton(candidate) {
+      launchBtn.innerHTML = `${launchLabel(candidate)} <i data-lucide="${launchIcon(candidate)}" width="16"></i>`
+      launchBtn.style.background = candidate?.ready ? 'var(--color-primary)' : '#f59e0b'
+      launchBtn.style.boxShadow = candidate?.ready ? '0 4px 14px rgba(99, 102, 241, 0.3)' : '0 4px 14px rgba(245, 158, 11, 0.3)'
+      launchBtn.disabled = state.launching
+      renderIcons()
+    }
+
+    function selectEnv(candidate) {
+      state.selected = candidate || null
+      document.querySelectorAll('.env-item').forEach((el) => {
+        el.classList.toggle('active', el.dataset.path === candidate?.path)
+      })
+      setLaunchButton(candidate)
+
+      if (!candidate) {
+        setStatus('没有可用环境，请重新扫描或手动选择。', 'warning')
+        return
+      }
+
+      if (candidate.ready) {
+        setStatus('已选中可直接启动的 Python 环境。')
+      } else if (candidate.compatible) {
+        setStatus('已选中环境，但它还不能直接启动 Surya。现在仍可跳过配置进入主应用。', 'warning')
+      } else {
+        setStatus('当前环境不满足要求。你也可以跳过配置，直接进入主应用。', 'warning')
+      }
+    }
+
+    function badgeClass(candidate) {
+      if (candidate.ready) return 'ready'
+      if (candidate.compatible) return 'missing'
+      return 'error'
+    }
+
+    function badgeText(candidate) {
+      return statusLabel(candidate)
+    }
+
+    function renderCandidateList() {
+      candidateList.innerHTML = ''
+
+      if (!state.candidates.length) {
+        const empty = document.createElement('div')
+        empty.className = 'empty-state'
+        empty.textContent = '暂时没有扫描到可展示的 Python 环境。你可以点击“手动选择路径...”直接指定 Python 可执行文件或安装目录。'
+        candidateList.appendChild(empty)
+        return
+      }
+
+      for (const candidate of state.candidates) {
+        const item = document.createElement('button')
+        item.className = `env-item${state.selected?.path === candidate.path ? ' active' : ''}`
+        item.type = 'button'
+        item.dataset.path = candidate.path
+        item.addEventListener('click', () => selectEnv(candidate))
+
+        const icon = document.createElement('div')
+        icon.className = 'env-icon'
+        icon.innerHTML = '<i data-lucide="terminal-square" width="24"></i>'
+
+        const details = document.createElement('div')
+        details.className = 'env-details'
+
+        const name = document.createElement('div')
+        name.className = 'env-name'
+        name.textContent = candidate.displayName || candidate.path
+
+        const badge = document.createElement('span')
+        badge.className = `status-badge ${badgeClass(candidate)}`
+        badge.innerHTML = candidate.ready
+          ? '<i data-lucide="check-circle-2" width="12"></i> 完美匹配'
+          : candidate.compatible
+            ? '<i data-lucide="alert-circle" width="12"></i> 缺少依赖'
+            : '<i data-lucide="x-circle" width="12"></i> 不可用'
+        name.appendChild(badge)
+
+        const path = document.createElement('div')
+        path.className = 'env-path'
+        path.textContent = candidate.path
+
+        details.appendChild(name)
+        details.appendChild(path)
+
+        const note = document.createElement('div')
+        note.className = 'env-note'
+        const versionIssue = getVersionIssue(candidate)
+        note.textContent = candidate.ready
+          ? `Python ${candidate.version || 'unknown'}`
+          : (versionIssue || '依赖检查中')
+        details.appendChild(note)
+
+        const deps = document.createElement('div')
+        deps.className = 'deps'
+
+        const depsTitle = document.createElement('div')
+        depsTitle.className = 'deps__title'
+        depsTitle.innerHTML = '<i data-lucide="package" width="13"></i> 依赖包'
+        deps.appendChild(depsTitle)
+
+        const depsList = document.createElement('div')
+        depsList.className = 'deps__list'
+
+        for (const pkg of getMissingPackages(candidate)) {
+          const depItem = document.createElement('div')
+          depItem.className = 'dep-item'
+
+          const depName = document.createElement('div')
+          depName.className = 'dep-item__name'
+          depName.textContent = pkg.label
+
+          const depState = document.createElement('div')
+          depState.className = `dep-item__state ${pkg.installed ? 'ok' : 'missing'}`
+          depState.innerHTML = pkg.installed
+            ? '<i data-lucide="check-circle-2" width="14"></i> 已安装'
+            : '<i data-lucide="x-circle" width="14"></i> 缺失'
+
+          depItem.appendChild(depName)
+          depItem.appendChild(depState)
+          depsList.appendChild(depItem)
+        }
+
+        deps.appendChild(depsList)
+        details.appendChild(deps)
+
+        const check = document.createElement('div')
+        check.className = 'check-icon'
+        check.innerHTML = '<i data-lucide="check" width="20"></i>'
+
+        item.appendChild(icon)
+        item.appendChild(details)
+        item.appendChild(check)
+
+        candidateList.appendChild(item)
+      }
+
+      renderIcons()
+    }
+
+    function pickInitialCandidate(payload) {
+      if (!payload?.candidates?.length) {
+        selectEnv(null)
+        return
+      }
+
+      const saved = payload.savedPythonPath
+      const savedCandidate = saved ? payload.candidates.find((item) => item.path === saved) : null
+      selectEnv(savedCandidate || payload.candidates.find((item) => item.ready) || payload.candidates[0])
+    }
+
+    function openSkipModal() {
+      skipModal.classList.add('open')
+      skipModal.setAttribute('aria-hidden', 'false')
+      return new Promise((resolve) => {
+        state.skipConfirmResolver = resolve
+      })
+    }
+
+    function closeSkipModal(result) {
+      skipModal.classList.remove('open')
+      skipModal.setAttribute('aria-hidden', 'true')
+      const resolver = state.skipConfirmResolver
+      state.skipConfirmResolver = null
+      if (resolver) resolver(result)
+    }
+
+    async function loadCandidates() {
+      if (!window.papersparkDesktop?.launcher) {
+        state.candidates = []
+        state.selected = null
+        renderCandidateList()
+        selectEnv(null)
+        setStatus('Electron 桥接没有成功注入，启动页暂时无法与桌面进程通信。请关闭后重启应用。', 'error')
+        return
+      }
+
+      launchBtn.disabled = true
+      setStatus('正在扫描本机已有的 Python 环境...')
+
+      try {
+        const payload = await window.papersparkDesktop.launcher.getState()
+        state.candidates = payload.candidates || []
+        pickInitialCandidate(payload)
+        renderCandidateList()
+      } catch (error) {
+        console.error(error)
+        state.candidates = []
+        state.selected = null
+        renderCandidateList()
+        selectEnv(null)
+        setStatus(error?.message || '扫描 Python 环境失败。', 'error')
+      }
+    }
+
+    async function browseAndSelect() {
+      setStatus('正在打开文件/目录选择框...')
+      try {
+        const result = await window.papersparkDesktop?.launcher?.browsePythonPath?.()
+        if (!result) {
+          setStatus('已取消选择。')
+          return
+        }
+
+        const existingIndex = state.candidates.findIndex((item) => item.path === result.path)
+        if (existingIndex === -1) {
+          state.candidates.unshift(result)
+        } else {
+          state.candidates.splice(existingIndex, 1, result)
+        }
+
+        selectEnv(result)
+        renderCandidateList()
+        setStatus(result.ready ? '手动选择的环境可直接启动。' : '已选择环境，但它暂时还不能直接启动 Surya。', result.ready ? '' : result.compatible ? 'warning' : 'error')
+      } catch (error) {
+        console.error(error)
+        setStatus(error?.message || '选择 Python 环境失败。', 'error')
+      }
+    }
+
+    async function launchApp() {
+      if (state.launching) return
+
+      if (!state.selected?.ready) {
+        const confirmed = await openSkipModal()
+        if (!confirmed) return
+      }
+
+      state.launching = true
+      setLaunchButton(state.selected)
+      setStatus(state.selected?.ready ? '正在启动 Surya 微服务和 PaperSpark 主应用，请稍候...' : '正在跳过 Python 解析服务并启动 PaperSpark，请稍候...')
+
+      try {
+        await window.papersparkDesktop?.launcher?.confirmPythonPath?.(state.selected?.ready ? state.selected.path : null)
+      } catch (error) {
+        console.error(error)
+        state.launching = false
+        setLaunchButton(state.selected)
+        setStatus(error?.message || '启动失败，请更换一个 Python 环境。', 'error')
+      }
+    }
+
+    document.getElementById('minimizeButton').addEventListener('click', () => {
+      window.papersparkDesktop?.windowControls?.minimize()
+    })
+
+    document.getElementById('closeButton').addEventListener('click', () => {
+      window.papersparkDesktop?.windowControls?.close()
+    })
+
+    browseButton.addEventListener('click', browseAndSelect)
+    refreshButton.addEventListener('click', loadCandidates)
+    launchBtn.addEventListener('click', launchApp)
+    skipCancelButton.addEventListener('click', () => closeSkipModal(false))
+    skipConfirmButton.addEventListener('click', () => closeSkipModal(true))
+    skipModal.addEventListener('click', (event) => {
+      if (event.target === skipModal) {
+        closeSkipModal(false)
+      }
+    })
+
+    renderIcons()
+    loadCandidates()
+  </script>
+</body>
+</html>

@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import path from 'path'
 import fs from 'fs'
 import crypto from 'crypto'
+import { buildRuntimeFileUrl, resolveRuntimeUploadPath } from '@/lib/server/runtimePaths'
 
 // 图片存储目录
-const UPLOAD_DIR = path.join(process.cwd(), 'public', 'uploads', 'images')
+const UPLOAD_DIR = resolveRuntimeUploadPath('images')
 
 // 确保上传目录存在
 function ensureUploadDir() {
@@ -49,7 +50,7 @@ export async function POST(request: NextRequest) {
         
         return NextResponse.json({
           success: true,
-          url: `/uploads/images/${fileName}`,
+          url: buildRuntimeFileUrl('images', fileName),
           fileName,
           size: buffer.length,
         })
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      url: `/uploads/images/${fileName}`,
+      url: buildRuntimeFileUrl('images', fileName),
       fileName,
       originalName: file.name,
       size: file.size,

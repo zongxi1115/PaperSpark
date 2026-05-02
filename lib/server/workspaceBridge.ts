@@ -1,15 +1,16 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import type { WorkspaceSnapshot } from '@/lib/workspaceSnapshot'
+import { resolveRuntimeOutPath } from '@/lib/server/runtimePaths'
 import { DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME } from '@/lib/workspaceSnapshot'
 
-export const WORKSPACE_BRIDGE_DIR = path.join(process.cwd(), 'out', 'workspace-cli')
+export const WORKSPACE_BRIDGE_DIR = resolveRuntimeOutPath('workspace-cli')
 export const WORKSPACE_BRIDGE_FILE_NAME = 'paperspark-workspace-bridge.json'
 export const WORKSPACE_BRIDGE_FILE = path.join(WORKSPACE_BRIDGE_DIR, WORKSPACE_BRIDGE_FILE_NAME)
 
 const LEGACY_BRIDGE_FILES = [
   path.join(WORKSPACE_BRIDGE_DIR, DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME),
-  path.join(process.cwd(), 'out', DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME),
+  resolveRuntimeOutPath(DEFAULT_WORKSPACE_SNAPSHOT_FILE_NAME),
 ]
 
 export class WorkspaceBridgeUnavailableError extends Error {

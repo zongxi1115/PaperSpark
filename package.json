@@ -110,6 +110,10 @@
       "target": [
         "nsis"
       ],
+      "nsis": {
+        "oneClick": false,
+        "allowToChangeInstallationDirectory": true
+      },
       "artifactName": "PaperSpark-${version}-setup.${ext}"
     }
   }

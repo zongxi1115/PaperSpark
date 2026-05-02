@@ -143,8 +143,15 @@ jobs:
       - name: Prepare Electron bundle resources
         run: pnpm desktop:build
 
+      - name: Build Electron unpacked app
+        run: pnpm exec electron-builder --win --x64 --dir
+
+      - name: Prune Windows packaging paths
+        shell: pwsh
+        run: node scripts/prune-electron-win-assets.mjs
+
       - name: Build Electron installer
-        run: pnpm exec electron-builder --win nsis --x64
+        run: pnpm exec electron-builder --win nsis --x64 --publish never --prepackaged release/electron/win-unpacked
 
       - name: Archive win-unpacked
         shell: pwsh
@@ -227,7 +234,7 @@ jobs:
         run: pnpm desktop:build
 
       - name: Build Electron macOS packages
-        run: pnpm exec electron-builder --mac dmg zip
+        run: pnpm exec electron-builder --mac dmg zip --publish never
 
       - name: Verify macOS release assets
         run: |

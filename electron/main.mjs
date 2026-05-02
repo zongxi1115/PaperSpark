@@ -45,7 +45,7 @@ function resolveUnpackedAppRoot() {
   if (!app.isPackaged || process.env.PAPERSPARK_ELECTRON_DEV === '1') {
     return resolveAppRoot()
   }
-  return path.join(process.resourcesPath, 'app.asar.unpacked')
+  return process.resourcesPath
 }
 
 function resolveRuntimeRoot() {
@@ -450,7 +450,7 @@ async function startSuryaService(port, runtimeRoot, pythonPath) {
 }
 
 async function startInternalNextServer(port, runtimeRoot, suryaServiceUrl) {
-  const serverScript = path.join(resolveUnpackedAppRoot(), '.next', 'standalone', 'server.js')
+  const serverScript = path.join(resolveUnpackedAppRoot(), 'standalone', 'server.js')
   if (!fs.existsSync(serverScript)) {
     throw new Error(`找不到 Next standalone 入口: ${serverScript}`)
   }

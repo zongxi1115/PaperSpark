@@ -86,23 +86,33 @@
     "appId": "com.paperspark.desktop",
     "productName": "PaperSpark",
     "asar": true,
-    "asarUnpack": [
-      ".next/standalone/**/*",
-      "scripts/start_surya_service.py",
-      "services/surya_ocr_service/**/*"
-    ],
     "directories": {
       "output": "release/electron",
       "buildResources": "desktop-resources"
     },
     "files": [
       "electron/**/*",
-      ".next/standalone/**/*",
-      "scripts/start_surya_service.py",
-      "services/surya_ocr_service/**/*",
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": ".electron-build/standalone",
+        "to": "standalone",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "scripts/start_surya_service.py",
+        "to": "scripts/start_surya_service.py"
+      },
+      {
+        "from": "services/surya_ocr_service",
+        "to": "services/surya_ocr_service",
+        "filter": [
+          "**/*"
+        ]
+      },
       {
         "from": "desktop-resources",
         "to": "desktop-resources",

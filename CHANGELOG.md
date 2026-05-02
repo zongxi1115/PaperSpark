@@ -1,3 +1,11 @@
+## [1.1.2](https://github.com/zongxi1115/PaperSpark/compare/v1.1.1...v1.1.2) (2026-05-02)
+
+
+### Bug Fixes
+
+* gh token缺失 ([fe8f29f](https://github.com/zongxi1115/PaperSpark/commit/fe8f29fa95d4aa8f500235f557eacb942dc36610))
+* mac构建问题 ([28a4224](https://github.com/zongxi1115/PaperSpark/commit/28a4224fbacd5f8392afa1a1866b0ce98414baf8))
+
 ## [1.1.1](https://github.com/zongxi1115/PaperSpark/compare/v1.1.0...v1.1.1) (2026-05-02)
 
 

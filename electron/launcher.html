@@ -166,6 +166,167 @@
       gap: 12px;
     }
 
+    .mode-switch {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px;
+      border: 1px solid var(--color-border);
+      background: rgba(255, 255, 255, 0.82);
+      border-radius: 999px;
+      width: fit-content;
+      margin: 0 auto 6px;
+    }
+
+    .mode-switch__btn {
+      border: 0;
+      background: transparent;
+      color: var(--color-text-muted);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 14px;
+      cursor: pointer;
+      border-radius: 999px;
+      transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+    }
+
+    .mode-switch__btn.active {
+      background: #fff;
+      color: var(--color-text-main);
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+    }
+
+    .mode-panel {
+      display: none;
+      border: 1px solid var(--color-border);
+      background: rgba(255, 255, 255, 0.82);
+      padding: 16px 18px;
+    }
+
+    .mode-panel.active {
+      display: block;
+    }
+
+    .cloud-guide {
+      display: grid;
+      gap: 12px;
+    }
+
+    .cloud-guide__title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .cloud-guide__desc {
+      font-size: 13px;
+      line-height: 1.7;
+      color: var(--color-text-muted);
+    }
+
+    .cloud-note {
+      border-left: 3px solid var(--color-warning);
+      padding: 10px 12px;
+      background: rgba(245, 158, 11, 0.08);
+      color: #92400e;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .steps {
+      display: grid;
+      gap: 8px;
+    }
+
+    .step {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 10px 12px;
+      border: 1px solid var(--color-border);
+      background: #fff;
+    }
+
+    .step__num {
+      width: 24px;
+      height: 24px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 999px;
+      background: rgba(99, 102, 241, 0.1);
+      color: var(--color-primary);
+      font-size: 12px;
+      font-weight: 700;
+      flex: 0 0 auto;
+    }
+
+    .step__body {
+      min-width: 0;
+      display: grid;
+      gap: 2px;
+    }
+
+    .step__body strong {
+      font-size: 13px;
+    }
+
+    .step__body span {
+      font-size: 12px;
+      line-height: 1.5;
+      color: var(--color-text-muted);
+    }
+
+    .url-field {
+      display: grid;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .url-field label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--color-text-muted);
+    }
+
+    .url-input {
+      width: 100%;
+      height: 42px;
+      border: 1px solid var(--color-border);
+      background: #fff;
+      border-radius: 0;
+      padding: 0 12px;
+      font-size: 13px;
+      color: var(--color-text-main);
+      outline: none;
+    }
+
+    .url-input:focus {
+      border-color: var(--color-primary);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.14);
+    }
+
+    .url-help {
+      font-size: 12px;
+      color: var(--color-text-muted);
+      line-height: 1.6;
+    }
+
+    .inline-code {
+      display: block;
+      margin-top: 6px;
+      padding: 10px 12px;
+      border: 1px solid var(--color-border);
+      background: rgba(15, 23, 42, 0.03);
+      color: var(--color-text-main);
+      font-size: 11px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-all;
+      border-radius: 0;
+    }
+
     .list-header {
       display: flex;
       justify-content: space-between;
@@ -559,6 +720,16 @@
       </div>
 
       <div class="card-body">
+        <div class="mode-switch" role="tablist" aria-label="启动方式">
+          <button class="mode-switch__btn active" id="modeLocalButton" type="button" role="tab" aria-selected="true">
+            本地 Python
+          </button>
+          <button class="mode-switch__btn" id="modeCloudButton" type="button" role="tab" aria-selected="false">
+            Modal 云部署
+          </button>
+        </div>
+
+        <div class="mode-panel active" id="localPanel">
         <div class="list-header">
           <span class="list-title">已检测到的环境</span>
           <button class="refresh-btn" id="refreshButton" type="button">
@@ -568,6 +739,56 @@
         </div>
 
         <div id="candidateList" style="display:flex;flex-direction:column;gap:12px;"></div>
+        </div>
+
+        <div class="mode-panel" id="cloudPanel">
+          <div class="cloud-guide">
+            <div class="cloud-guide__title">
+              <i data-lucide="cloud" width="16"></i>
+              Modal 云部署（最推荐）
+            </div>
+            <div class="cloud-guide__desc">
+              适合希望获得更稳定 OCR 性能、较低本地环境负担，同时又不想长期维护 GPU 服务的用户。
+            </div>
+            <div class="cloud-note">
+              首次使用 Surya OCR 时需要下载模型并建立缓存，启动时间会明显更长，请耐心等待。部署后把服务地址填到下面，PaperSpark 会直接连接云端服务。
+            </div>
+            <div class="steps">
+              <div class="step">
+                <div class="step__num">1</div>
+                <div class="step__body">
+                  <strong>在 Modal 部署 Surya OCR</strong>
+                  <span>按照 README 的部署步骤，拿到一个类似 `https://your-name--paperspark-surya-web-app.modal.run` 的地址。</span>
+                </div>
+              </div>
+              <div class="step">
+                <div class="step__num">2</div>
+                <div class="step__body">
+                  <strong>把地址填进 PaperSpark</strong>
+                  <span>把云端地址填写到下面输入框，PaperSpark 会把它写入运行配置。</span>
+                </div>
+              </div>
+              <div class="step">
+                <div class="step__num">3</div>
+                <div class="step__body">
+                  <strong>直接启动工作台</strong>
+                  <span>启动后，论文导入解析、知识库精读和相关 OCR 能力会直接走云端服务。</span>
+                </div>
+              </div>
+            </div>
+            <div class="url-field">
+              <label for="serviceUrlInput">Modal 服务地址</label>
+              <input class="url-input" id="serviceUrlInput" type="url" placeholder="https://your-name--paperspark-surya-web-app.modal.run" />
+              <div class="url-help">
+                支持 `https://` 或 `http://` 地址，建议直接粘贴 Modal 部署成功后打印的 URL。
+                <span class="inline-code">SURYA_OCR_SERVICE_URL
+SURYA_SERVICE_URL
+NEXT_PUBLIC_SURYA_SERVICE_URL
+NEXT_PUBLIC_SURYA_OCR_SERVICE_URL</span>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div class="card-footer">
@@ -610,6 +831,8 @@
       selected: null,
       launching: false,
       skipConfirmResolver: null,
+      mode: 'local',
+      serviceUrl: '',
     }
 
     const candidateList = document.getElementById('candidateList')
@@ -620,6 +843,11 @@
     const skipModal = document.getElementById('skipModal')
     const skipCancelButton = document.getElementById('skipCancelButton')
     const skipConfirmButton = document.getElementById('skipConfirmButton')
+    const modeLocalButton = document.getElementById('modeLocalButton')
+    const modeCloudButton = document.getElementById('modeCloudButton')
+    const localPanel = document.getElementById('localPanel')
+    const cloudPanel = document.getElementById('cloudPanel')
+    const serviceUrlInput = document.getElementById('serviceUrlInput')
 
     function renderIcons() {
       if (window.lucide?.createIcons) {
@@ -672,12 +900,30 @@
         || ''
     }
 
+    function normalizeServiceUrl(value) {
+      if (!value) return ''
+      const trimmed = String(value).trim()
+      if (!trimmed) return ''
+      const cleaned = trimmed.replace(/\/+$/, '')
+      try {
+        const parsed = new URL(cleaned)
+        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+          return ''
+        }
+        return cleaned
+      } catch {
+        return ''
+      }
+    }
+
     function launchLabel(candidate) {
+      if (state.mode === 'cloud') return '连接 Modal 云部署并启动'
       if (candidate?.ready) return '启动 PaperSpark'
       return '跳过配置python解析服务，直接启动'
     }
 
     function launchIcon(candidate) {
+      if (state.mode === 'cloud') return 'cloud'
       return candidate?.ready ? 'arrow-right' : 'skip-forward'
     }
 
@@ -688,14 +934,43 @@
 
     function setLaunchButton(candidate) {
       launchBtn.innerHTML = `${launchLabel(candidate)} <i data-lucide="${launchIcon(candidate)}" width="16"></i>`
-      launchBtn.style.background = candidate?.ready ? 'var(--color-primary)' : '#f59e0b'
-      launchBtn.style.boxShadow = candidate?.ready ? '0 4px 14px rgba(99, 102, 241, 0.3)' : '0 4px 14px rgba(245, 158, 11, 0.3)'
+      launchBtn.style.background = state.mode === 'cloud' || candidate?.ready ? 'var(--color-primary)' : '#f59e0b'
+      launchBtn.style.boxShadow = state.mode === 'cloud' || candidate?.ready ? '0 4px 14px rgba(99, 102, 241, 0.3)' : '0 4px 14px rgba(245, 158, 11, 0.3)'
       launchBtn.disabled = state.launching
       renderIcons()
     }
 
+    function setMode(mode) {
+      state.mode = mode
+      const isCloud = mode === 'cloud'
+      modeLocalButton.classList.toggle('active', !isCloud)
+      modeCloudButton.classList.toggle('active', isCloud)
+      modeLocalButton.setAttribute('aria-selected', String(!isCloud))
+      modeCloudButton.setAttribute('aria-selected', String(isCloud))
+      localPanel.classList.toggle('active', !isCloud)
+      cloudPanel.classList.toggle('active', isCloud)
+      renderCandidateList()
+      setLaunchButton(state.selected)
+      if (isCloud) {
+        setStatus('已切换到 Modal 云部署模式，请输入服务地址。')
+      } else if (state.selected?.ready) {
+        setStatus('已选中可直接启动的 Python 环境。')
+      } else if (state.selected?.compatible) {
+        setStatus('已选中环境，但它还不能直接启动 Surya。现在仍可跳过配置进入主应用。', 'warning')
+      } else {
+        setStatus('正在使用本地 Python 环境配置。')
+      }
+    }
+
     function selectEnv(candidate) {
+      state.mode = 'local'
       state.selected = candidate || null
+      modeLocalButton.classList.add('active')
+      modeCloudButton.classList.remove('active')
+      modeLocalButton.setAttribute('aria-selected', 'true')
+      modeCloudButton.setAttribute('aria-selected', 'false')
+      localPanel.classList.add('active')
+      cloudPanel.classList.remove('active')
       document.querySelectorAll('.env-item').forEach((el) => {
         el.classList.toggle('active', el.dataset.path === candidate?.path)
       })
@@ -727,6 +1002,10 @@
 
     function renderCandidateList() {
       candidateList.innerHTML = ''
+
+      if (state.mode === 'cloud') {
+        return
+      }
 
       if (!state.candidates.length) {
         const empty = document.createElement('div')
@@ -827,13 +1106,15 @@
 
     function pickInitialCandidate(payload) {
       if (!payload?.candidates?.length) {
-        selectEnv(null)
+        if (state.mode !== 'cloud') selectEnv(null)
         return
       }
 
       const saved = payload.savedPythonPath
       const savedCandidate = saved ? payload.candidates.find((item) => item.path === saved) : null
-      selectEnv(savedCandidate || payload.candidates.find((item) => item.ready) || payload.candidates[0])
+      if (state.mode !== 'cloud') {
+        selectEnv(savedCandidate || payload.candidates.find((item) => item.ready) || payload.candidates[0])
+      }
     }
 
     function openSkipModal() {
@@ -867,9 +1148,22 @@
 
       try {
         const payload = await window.papersparkDesktop.launcher.getState()
+        state.mode = payload.savedDeploymentMode === 'cloud' ? 'cloud' : 'local'
+        state.serviceUrl = payload.savedServiceUrl || ''
+        serviceUrlInput.value = state.serviceUrl
+        modeLocalButton.classList.toggle('active', state.mode !== 'cloud')
+        modeCloudButton.classList.toggle('active', state.mode === 'cloud')
+        modeLocalButton.setAttribute('aria-selected', String(state.mode !== 'cloud'))
+        modeCloudButton.setAttribute('aria-selected', String(state.mode === 'cloud'))
+        localPanel.classList.toggle('active', state.mode !== 'cloud')
+        cloudPanel.classList.toggle('active', state.mode === 'cloud')
         state.candidates = payload.candidates || []
+        if (state.mode === 'cloud') {
+          state.selected = null
+        }
         pickInitialCandidate(payload)
         renderCandidateList()
+        setLaunchButton(state.selected)
       } catch (error) {
         console.error(error)
         state.candidates = []
@@ -908,6 +1202,33 @@
     async function launchApp() {
       if (state.launching) return
 
+      if (state.mode === 'cloud') {
+        const serviceUrl = normalizeServiceUrl(serviceUrlInput.value)
+        if (!serviceUrl) {
+          setStatus('请输入有效的 Modal 服务地址。', 'error')
+          serviceUrlInput.focus()
+          return
+        }
+
+        state.serviceUrl = serviceUrl
+        state.launching = true
+        setLaunchButton(state.selected)
+        setStatus('正在连接 Modal 云部署并启动 PaperSpark，请稍候...')
+
+        try {
+          await window.papersparkDesktop?.launcher?.confirmPythonPath?.({
+            mode: 'cloud',
+            serviceUrl,
+          })
+        } catch (error) {
+          console.error(error)
+          state.launching = false
+          setLaunchButton(state.selected)
+          setStatus(error?.message || '云部署连接失败，请检查服务地址。', 'error')
+        }
+        return
+      }
+
       if (!state.selected?.ready) {
         const confirmed = await openSkipModal()
         if (!confirmed) return
@@ -918,7 +1239,10 @@
       setStatus(state.selected?.ready ? '正在启动 Surya 微服务和 PaperSpark 主应用，请稍候...' : '正在跳过 Python 解析服务并启动 PaperSpark，请稍候...')
 
       try {
-        await window.papersparkDesktop?.launcher?.confirmPythonPath?.(state.selected?.ready ? state.selected.path : null)
+        await window.papersparkDesktop?.launcher?.confirmPythonPath?.({
+          mode: 'local',
+          pythonPath: state.selected?.ready ? state.selected.path : null,
+        })
       } catch (error) {
         console.error(error)
         state.launching = false
@@ -944,6 +1268,11 @@
       if (event.target === skipModal) {
         closeSkipModal(false)
       }
+    })
+    modeLocalButton.addEventListener('click', () => setMode('local'))
+    modeCloudButton.addEventListener('click', () => setMode('cloud'))
+    serviceUrlInput.addEventListener('input', (event) => {
+      state.serviceUrl = event.target.value
     })
 
     renderIcons()

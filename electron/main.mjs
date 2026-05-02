@@ -56,15 +56,42 @@ function getDesktopConfigPath() {
 function readDesktopConfig() {
   try {
     const raw = fs.readFileSync(getDesktopConfigPath(), 'utf8')
-    return JSON.parse(raw)
+    const parsed = JSON.parse(raw)
+    return {
+      pythonPath: null,
+      deploymentMode: 'local',
+      serviceUrl: '',
+      ...parsed,
+    }
   } catch {
-    return { pythonPath: null }
+    return {
+      pythonPath: null,
+      deploymentMode: 'local',
+      serviceUrl: '',
+    }
   }
 }
 
 function writeDesktopConfig(config) {
   fs.mkdirSync(path.dirname(getDesktopConfigPath()), { recursive: true })
   fs.writeFileSync(getDesktopConfigPath(), JSON.stringify(config, null, 2), 'utf8')
+}
+
+function normalizeServiceUrl(value) {
+  if (!value) return ''
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  const normalized = trimmed.replace(/\/+$/, '')
+
+  try {
+    const parsed = new URL(normalized)
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      return ''
+    }
+    return normalized
+  } catch {
+    return ''
+  }
 }
 
 function normalizeSelectedPythonPath(selectedPath) {
@@ -683,12 +710,12 @@ function closeLoadingWindow() {
   loadingWindow = null
 }
 
-async function createMainWindow(pythonPath) {
+async function createMainWindow({ pythonPath = null, serviceUrl = '' } = {}) {
   const runtimeRoot = resolveRuntimeRoot()
   fs.mkdirSync(runtimeRoot, { recursive: true })
 
   const isDev = isDevMode()
-  let suryaServiceUrl = process.env.SURYA_OCR_SERVICE_URL || process.env.SURYA_SERVICE_URL || ''
+  let suryaServiceUrl = serviceUrl || process.env.SURYA_OCR_SERVICE_URL || process.env.SURYA_SERVICE_URL || ''
 
   if (pythonPath) {
     updateLoadingWindow('正在启动 Python 解析服务...')
@@ -837,6 +864,8 @@ ipcMain.handle('desktop:get-launcher-state', async () => {
   const config = readDesktopConfig()
   return {
     savedPythonPath: config.pythonPath || null,
+    savedDeploymentMode: config.deploymentMode || 'local',
+    savedServiceUrl: config.serviceUrl || '',
     candidates: await scanPythonInstallations(),
   }
 })
@@ -864,22 +893,41 @@ ipcMain.handle('desktop:browse-python-path', async () => {
   return inspected
 })
 
-ipcMain.handle('desktop:confirm-python-path', async (_event, pythonPath) => {
-  const normalizedPath = normalizeSelectedPythonPath(pythonPath)
-  const inspected = normalizedPath ? await inspectPythonCandidate(normalizedPath, 'manual') : null
-  if (normalizedPath && !inspected?.ready) {
-    throw new Error('当前 Python 环境还不能直接启动 Surya，请换一个带完整依赖的环境。')
+ipcMain.handle('desktop:confirm-python-path', async (_event, payload) => {
+  const mode = payload?.mode === 'cloud' ? 'cloud' : 'local'
+  const normalizedPath = normalizeSelectedPythonPath(payload?.pythonPath)
+  const normalizedServiceUrl = normalizeServiceUrl(payload?.serviceUrl)
+
+  let inspected = null
+  if (mode === 'local') {
+    inspected = normalizedPath ? await inspectPythonCandidate(normalizedPath, 'manual') : null
+    if (normalizedPath && !inspected?.ready) {
+      throw new Error('当前 Python 环境还不能直接启动 Surya，请换一个带完整依赖的环境。')
+    }
+  } else if (!normalizedServiceUrl) {
+    throw new Error('请输入有效的 Modal 服务地址。')
   }
 
-  writeDesktopConfig({ pythonPath: inspected?.path || null })
+  writeDesktopConfig({
+    pythonPath: mode === 'local' ? (inspected?.path || null) : null,
+    deploymentMode: mode,
+    serviceUrl: mode === 'cloud' ? normalizedServiceUrl : '',
+  })
 
   const pendingLauncher = launcherWindow
   createLoadingWindow()
-  updateLoadingWindow(inspected?.path ? '正在启动 Python 解析服务...' : '已跳过 Python 解析服务，正在拉起前端项目...')
+  updateLoadingWindow(
+    mode === 'local'
+      ? (inspected?.path ? '正在启动 Python 解析服务...' : '已跳过 Python 解析服务，正在拉起前端项目...')
+      : '正在连接 Modal 云部署，随后拉起前端项目...',
+  )
   pendingLauncher?.hide()
 
   try {
-    await createMainWindow(inspected?.path || null)
+    await createMainWindow({
+      pythonPath: mode === 'local' ? (inspected?.path || null) : null,
+      serviceUrl: mode === 'cloud' ? normalizedServiceUrl : '',
+    })
     if (pendingLauncher && !pendingLauncher.isDestroyed()) {
       pendingLauncher.destroy()
     }

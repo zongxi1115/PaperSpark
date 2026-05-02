@@ -14,6 +14,22 @@
 * 添加许可证信息，明确使用条款和版权声明 ([97c36b3](https://github.com/zongxi1115/PaperSpark/commit/97c36b3463e09712d471eca46035eee16afa8214))
 * 重构智能体，权限最小化；实现一个AI审稿人 ([277b260](https://github.com/zongxi1115/PaperSpark/commit/277b260c14c4e5ef24c153e73f36d0043d5d8950))
 
+# [1.1.0](https://github.com/zongxi1115/PaperSpark/compare/v1.0.0...v1.1.0) (2026-05-02)
+
+
+### Bug Fixes
+
+* skill读取不同步和AI评论选区不显示在文档 ([dd2b43d](https://github.com/zongxi1115/PaperSpark/commit/dd2b43d855891bd69ae8d0f2b69135072001e37e))
+
+
+### Features
+
+* electron打包支持 ([ce3073a](https://github.com/zongxi1115/PaperSpark/commit/ce3073a9e406b8ce9a80be3dd295198a40d7d711))
+* 合并评论树智能体功能，减少编辑卡顿问题 ([d9454b4](https://github.com/zongxi1115/PaperSpark/commit/d9454b497e0da99ed3287594994d5c2acb195e31))
+* 添加 macOS 资产构建流程和打包支持 ([acbf993](https://github.com/zongxi1115/PaperSpark/commit/acbf993fb70ef0eae590c397d26edfe681de8a0a))
+* 添加许可证信息，明确使用条款和版权声明 ([97c36b3](https://github.com/zongxi1115/PaperSpark/commit/97c36b3463e09712d471eca46035eee16afa8214))
+* 重构智能体，权限最小化；实现一个AI审稿人 ([277b260](https://github.com/zongxi1115/PaperSpark/commit/277b260c14c4e5ef24c153e73f36d0043d5d8950))
+
 # 1.0.0 (2026-04-07)
 
 

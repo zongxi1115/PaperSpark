@@ -154,12 +154,21 @@ function normalizeListText(text: string) {
   return lines.map(line => normalizeWrappedText(line)).join('\n')
 }
 
-function getReadableBlockText(block: TextBlock, preferTranslated = false) {
+function getRawBlockText(block: TextBlock, preferTranslated = false) {
   const raw = preferTranslated ? (block.translated || '') : block.text
+  return raw || ''
+}
+
+function getReadableBlockText(block: TextBlock, preferTranslated = false) {
+  const raw = getRawBlockText(block, preferTranslated)
   if (!raw) return ''
 
-  if (block.type === 'formula' || block.type === 'table') {
+  if (block.type === 'formula') {
     return normalizeStructuredText(raw)
+  }
+
+  if (block.type === 'table') {
+    return /<table[\s>]/i.test(raw) ? raw : normalizeStructuredText(raw)
   }
 
   if (block.type === 'list') {
@@ -258,7 +267,7 @@ function getBlockWrapperClass(block: TextBlock) {
     case 'table':
       return 'my-5 overflow-x-auto bg-[#fafafa] border border-[#e0e0e0] rounded-lg px-3 py-2'
     case 'reference':
-      return 'my-1.5 pl-4 border-l-2 border-[#c0c0c0] hanging-indent'
+      return 'my-2 pl-4 border-l-2 border-[#c0c0c0]'
     case 'header':
     case 'footer':
       return 'my-1'
@@ -290,6 +299,49 @@ function getPictureCropStyle(block: TextBlock) {
 
 const LATEX_INLINE_RE = /\$([^\$]+?)\$/g
 const LATEX_DISPLAY_RE = /\$\$([^\$]+?)\$\$/g
+const LATEX_DELIMITER_RE = /^\s*(\$\$[\s\S]+\$\$|\$[\s\S]+\$)\s*$/
+const LATEX_COMMAND_RE = /\\(?:begin|end|frac|dfrac|tfrac|sqrt|sum|prod|int|lim|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|phi|omega|mathbf|mathrm|mathit|text|label|ref|eqref|left|right|cdot|times|leq|geq|neq|approx|infty|partial|nabla|vec|hat|bar|overline|underline|operatorname)\b/
+const MATH_SYMBOL_RE = /[=<>±×÷∑∏∫√∞≈≠≤≥∂∇∈∉⊂⊆⊃⊇∪∩∝→←↔]/g
+const SUB_SUP_RE = /[_^](\{[^}]+\}|[A-Za-z0-9()+\-])/g
+const NATURAL_WORD_RE = /\b[A-Za-z]{3,}\b/g
+const CJK_CHAR_RE = /[\u3400-\u9fff]/g
+
+function isLikelyFormulaText(text: string) {
+  const normalized = normalizeBlockText(text)
+  if (!normalized) return false
+
+  if (LATEX_DELIMITER_RE.test(normalized) || LATEX_COMMAND_RE.test(normalized)) {
+    return true
+  }
+
+  const mathSymbolCount = (normalized.match(MATH_SYMBOL_RE) || []).length
+  const subSupCount = (normalized.match(SUB_SUP_RE) || []).length
+  const naturalWordCount = (normalized.match(NATURAL_WORD_RE) || []).length
+  const cjkCharCount = (normalized.match(CJK_CHAR_RE) || []).length
+  const lineCount = normalized.split('\n').filter(Boolean).length
+
+  if (cjkCharCount >= 4 && mathSymbolCount === 0 && subSupCount === 0) {
+    return false
+  }
+
+  if (naturalWordCount >= 7 && mathSymbolCount < 2 && subSupCount === 0) {
+    return false
+  }
+
+  return (
+    (mathSymbolCount >= 2 && naturalWordCount <= 6 && normalized.length <= 160) ||
+    (subSupCount >= 1 && naturalWordCount <= 8 && normalized.length <= 180) ||
+    (lineCount >= 2 && (mathSymbolCount >= 1 || subSupCount >= 1) && naturalWordCount <= 10)
+  )
+}
+
+function getRenderableBlockType(block: TextBlock, text: string): TextBlock['type'] {
+  if (block.type === 'formula' && !isLikelyFormulaText(text)) {
+    return 'paragraph'
+  }
+
+  return block.type
+}
 
 function renderLatexToHtml(latex: string, displayMode: boolean): string {
   try {
@@ -364,6 +416,122 @@ function renderFormulaBlock(text: string): React.ReactNode {
   return <code className="text-sm bg-gray-50 px-1.5 py-0.5 rounded">{text}</code>
 }
 
+function splitReferenceEntries(text: string) {
+  const normalized = normalizeBlockText(text)
+    .replace(/([A-Za-z])-\s*\n\s*([A-Za-z])/g, '$1$2')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
+    .trim()
+
+  if (!normalized) return []
+
+  const numberedEntries = normalized.match(/\[\d+\]\s*[\s\S]*?(?=(?:\s+\[\d+\]\s*)|$)/g)
+    ?.map(entry => entry.trim())
+    .filter(Boolean)
+
+  if (numberedEntries && numberedEntries.length > 0) {
+    return numberedEntries
+  }
+
+  const lineEntries = normalizeBlockText(text)
+    .split('\n')
+    .map(line => normalizeWrappedText(line))
+    .filter(Boolean)
+
+  return lineEntries.length > 0 ? lineEntries : [normalizeWrappedText(text)]
+}
+
+function renderReferenceBlock(text: string): React.ReactNode {
+  const entries = splitReferenceEntries(text)
+  if (entries.length === 0) return null
+
+  return (
+    <div className="space-y-2">
+      {entries.map((entry, index) => (
+        <div key={index} className="hanging-indent leading-[1.72]">
+          {renderTextWithLatex(entry)}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+type ParsedTableCell = {
+  content: string
+  isHeader: boolean
+  colSpan: number
+  rowSpan: number
+}
+
+type ParsedTableRow = ParsedTableCell[]
+
+function hasHtmlTableMarkup(text: string) {
+  return /<table[\s>][\s\S]*<\/table>/i.test(text)
+}
+
+function parseHtmlTable(text: string): ParsedTableRow[] | null {
+  if (typeof window === 'undefined' || !hasHtmlTableMarkup(text)) {
+    return null
+  }
+
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(text, 'text/html')
+    const table = doc.querySelector('table')
+    if (!table) return null
+
+    const rows = Array.from(table.querySelectorAll('tr'))
+      .map((row) => {
+        const cells = Array.from(row.querySelectorAll('th, td')).map((cell) => ({
+          content: normalizeWrappedText(cell.textContent || ''),
+          isHeader: cell.tagName.toLowerCase() === 'th',
+          colSpan: Math.max(Number(cell.getAttribute('colspan') || 1), 1),
+          rowSpan: Math.max(Number(cell.getAttribute('rowspan') || 1), 1),
+        }))
+
+        return cells.filter(cell => cell.content)
+      })
+      .filter(row => row.length > 0)
+
+    return rows.length > 0 ? rows : null
+  } catch {
+    return null
+  }
+}
+
+function renderTableBlock(text: string): React.ReactNode {
+  const parsedTable = parseHtmlTable(text)
+  if (!parsedTable) {
+    return <div className="whitespace-pre-wrap break-words font-mono text-sm">{normalizeStructuredText(text)}</div>
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full border-collapse text-left text-[0.95em] leading-6">
+        <tbody>
+          {parsedTable.map((row, rowIndex) => (
+            <tr key={rowIndex} className={rowIndex === 0 ? 'border-b border-[#d6d6d6]' : 'border-b border-[#ececec]'}>
+              {row.map((cell, cellIndex) => {
+                const CellTag = cell.isHeader || rowIndex === 0 ? 'th' : 'td'
+                return (
+                  <CellTag
+                    key={`${rowIndex}-${cellIndex}`}
+                    colSpan={cell.colSpan}
+                    rowSpan={cell.rowSpan}
+                    className={`px-3 py-2 align-top ${CellTag === 'th' ? 'bg-[#f3f4f6] font-semibold text-[#222]' : 'text-[#333]'}`}
+                  >
+                    {renderTextWithLatex(cell.content)}
+                  </CellTag>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 // ─── Block rendering ────────────────────────────────────────────────────
 
 function HTMLReaderBlock({
@@ -381,10 +549,14 @@ function HTMLReaderBlock({
   focused: boolean
   pageImageSrc: string | null
 }) {
+  const rawOriginalText = getRawBlockText(block, false)
+  const rawTranslatedText = getRawBlockText(block, true)
   const originalText = getReadableBlockText(block, false)
   const translatedText = getReadableBlockText(block, true)
-  const typography = getBlockTypography(block, zoomRatio)
-  const baseWrapper = getBlockWrapperClass(block)
+  const renderableType = getRenderableBlockType(block, originalText)
+  const renderBlock = renderableType === block.type ? block : { ...block, type: renderableType }
+  const typography = getBlockTypography(renderBlock, zoomRatio)
+  const baseWrapper = getBlockWrapperClass(renderBlock)
 
   if (block.sourceLabel === 'Picture') {
     const cropStyle = getPictureCropStyle(block)
@@ -421,38 +593,58 @@ function HTMLReaderBlock({
     return null
   }
 
-  const textToneClass = block.type === 'caption'
+  const textToneClass = renderableType === 'caption'
     ? 'text-[#60656f]'
-    : block.type === 'reference'
+    : renderableType === 'reference'
       ? 'text-[#5e6470]'
-      : block.type === 'header' || block.type === 'footer'
+      : renderableType === 'header' || renderableType === 'footer'
         ? 'text-[#7a7f88]'
         : 'text-[#181818]'
 
-  const contentClass = block.type === 'table'
+  const contentClass = renderableType === 'table'
     ? 'whitespace-pre-wrap break-words font-mono text-sm'
-    : block.type === 'formula'
+    : renderableType === 'formula'
       ? ''
-      : block.type === 'list'
+      : renderableType === 'reference'
+        ? ''
+      : renderableType === 'list'
         ? 'whitespace-pre-wrap break-words'
         : 'whitespace-normal break-words'
 
   const translatedPanel = translatedText ? (
-    translationDisplayMode === 'parallel' && block.type !== 'title' && block.type !== 'subtitle' ? (
+    translationDisplayMode === 'parallel' && renderableType !== 'title' && renderableType !== 'subtitle' ? (
       <div className="mt-4 grid gap-4 border-t border-[#ececec] pt-4 md:grid-cols-2">
         <div className="border-l border-[#d9d9d9] pl-4">
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#777]">Original</p>
-          <div className={contentClass}>{originalText}</div>
+          <div className={contentClass}>
+            {renderableType === 'table'
+              ? renderTableBlock(rawOriginalText)
+              : renderableType === 'reference'
+                ? renderReferenceBlock(rawOriginalText)
+                : originalText}
+          </div>
         </div>
         <div className="border-l border-[#f2b37a] pl-4 text-[#b45309]" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#c26a17]">译文</p>
-          <div className={contentClass}>{translatedText}</div>
+          <div className={contentClass}>
+            {renderableType === 'table'
+              ? renderTableBlock(rawTranslatedText || translatedText)
+              : renderableType === 'reference'
+                ? renderReferenceBlock(rawTranslatedText || translatedText)
+                : translatedText}
+          </div>
         </div>
       </div>
     ) : (
       <div className="mt-4 border-l-2 border-[#f2b37a] pl-4 text-[#b45309]" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
-        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#c26a17]">译文</p>
-        <div className={contentClass}>{translatedText}</div>
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#c26a17]">译文</p>
+        <div className={contentClass}>
+          {renderableType === 'table'
+            ? renderTableBlock(rawTranslatedText || translatedText)
+            : renderableType === 'reference'
+              ? renderReferenceBlock(rawTranslatedText || translatedText)
+              : translatedText}
+        </div>
       </div>
     )
   ) : null
@@ -463,15 +655,19 @@ function HTMLReaderBlock({
       className={`${baseWrapper} ${focused ? 'rounded-xl ring-2 ring-[#d97706]/55 ring-offset-2 ring-offset-white' : ''}`}
       style={typography}
     >
-      {translatedPanel && translationDisplayMode === 'parallel' && block.type !== 'title' && block.type !== 'subtitle' ? (
+      {translatedPanel && translationDisplayMode === 'parallel' && renderableType !== 'title' && renderableType !== 'subtitle' ? (
         translatedPanel
       ) : (
         <>
           {originalText && (
             <div className={`${contentClass} ${textToneClass}`}>
-              {block.type === 'formula'
-                ? renderFormulaBlock(originalText)
-                : renderTextWithLatex(originalText)}
+              {renderableType === 'table'
+                ? renderTableBlock(rawOriginalText)
+                : renderableType === 'reference'
+                  ? renderReferenceBlock(rawOriginalText)
+                : renderableType === 'formula'
+                  ? renderFormulaBlock(originalText)
+                  : renderTextWithLatex(originalText)}
             </div>
           )}
           {showTranslation && translatedPanel}

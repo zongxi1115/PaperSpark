@@ -375,7 +375,7 @@ ${selectionText}${quoteText}${contextText}
             },
           ],
           modelConfig: largeModelConfig,
-          systemPrompt: '你是一个学术文档阅读助手，帮助用户理解学术论文和研究文档。回答要简洁、专业、有依据。',
+          systemPrompt: '你是一个学术文档阅读助手，帮助用户理解学术论文和研究文档。回答要简洁、专业、有依据。必须使用中文回答，只有引用原文时可以保留英文。',
         }),
         signal: abortControllerRef.current.signal,
       })

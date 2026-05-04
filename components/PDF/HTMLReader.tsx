@@ -1,9 +1,13 @@
 'use client'
 
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import { Icon } from '@iconify/react'
+import { Popover, PopoverContent, PopoverTrigger } from '@heroui/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GuideFocusTarget, HighlightColor, PDFAnnotation, TextBlock } from '@/lib/types'
 import { saveAnnotation } from '@/lib/pdfCache'
+import { getSettings, getSelectedSmallModel } from '@/lib/storage'
 import SelectionToolbar from './SelectionToolbar'
 
 interface PDFDocumentProxy {
@@ -165,6 +169,8 @@ function getReadableBlockText(block: TextBlock, preferTranslated = false) {
   return normalizeWrappedText(raw)
 }
 
+const SERIF_FONT = '"STIX Two Text", Charter, Georgia, "Noto Serif", "Source Han Serif SC", SimSun, serif'
+
 function getBlockTypography(block: TextBlock, zoomRatio: number) {
   const detectedFontSize = block.style.fontSize || 16
 
@@ -174,15 +180,17 @@ function getBlockTypography(block: TextBlock, zoomRatio: number) {
       lineHeight: 1.12,
       letterSpacing: '-0.04em',
       fontWeight: 700,
+      fontFamily: SERIF_FONT,
     }
   }
 
   if (block.type === 'subtitle') {
     return {
       fontSize: `${clamp(detectedFontSize * 0.96 * zoomRatio, 20, 30)}px`,
-      lineHeight: 1.24,
-      letterSpacing: '-0.025em',
+      lineHeight: 1.28,
+      letterSpacing: '-0.02em',
       fontWeight: 640,
+      fontFamily: SERIF_FONT,
     }
   }
 
@@ -192,6 +200,7 @@ function getBlockTypography(block: TextBlock, zoomRatio: number) {
       lineHeight: 1.55,
       letterSpacing: '0',
       fontWeight: 500,
+      fontFamily: SERIF_FONT,
     }
   }
 
@@ -201,6 +210,7 @@ function getBlockTypography(block: TextBlock, zoomRatio: number) {
       lineHeight: 1.72,
       letterSpacing: '0',
       fontWeight: 500,
+      fontFamily: SERIF_FONT,
     }
   }
 
@@ -224,9 +234,10 @@ function getBlockTypography(block: TextBlock, zoomRatio: number) {
 
   return {
     fontSize: `${clamp(detectedFontSize * 0.98 * zoomRatio, 15, 19)}px`,
-    lineHeight: 1.8,
+    lineHeight: 1.85,
     letterSpacing: '0',
     fontWeight: 500,
+    fontFamily: SERIF_FONT,
   }
 }
 
@@ -237,22 +248,22 @@ function getBlockWrapperClass(block: TextBlock) {
 
   switch (block.type) {
     case 'title':
-      return 'mb-5 pt-1'
+      return 'mb-6 pt-2'
     case 'subtitle':
-      return 'mt-8 mb-3'
+      return 'mt-10 mb-4 pb-2 border-b border-[#d6d6d6]'
     case 'caption':
-      return 'mt-2 mb-6'
+      return 'mt-2 mb-6 text-center italic'
     case 'formula':
-      return 'my-5 overflow-x-auto border-l-2 border-[#63728d] pl-4'
+      return 'my-6 overflow-x-auto bg-[#f8f8fc] border border-[#e4e4ec] rounded-lg px-4 py-3'
     case 'table':
-      return 'my-5 overflow-x-auto border-l-2 border-white/10 pl-4'
+      return 'my-5 overflow-x-auto bg-[#fafafa] border border-[#e0e0e0] rounded-lg px-3 py-2'
     case 'reference':
-      return 'my-2'
+      return 'my-1.5 pl-4 border-l-2 border-[#c0c0c0] hanging-indent'
     case 'header':
     case 'footer':
-      return 'my-2'
+      return 'my-1'
     default:
-      return 'my-3'
+      return 'my-4'
   }
 }
 
@@ -274,6 +285,86 @@ function getPictureCropStyle(block: TextBlock) {
     },
   }
 }
+
+// ─── KaTeX rendering helpers ──────────────────────────────────────────────
+
+const LATEX_INLINE_RE = /\$([^\$]+?)\$/g
+const LATEX_DISPLAY_RE = /\$\$([^\$]+?)\$\$/g
+
+function renderLatexToHtml(latex: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(latex, { throwOnError: false, displayMode })
+  } catch {
+    return latex
+  }
+}
+
+function renderTextWithLatex(text: string): React.ReactNode {
+  // Handle display math ($$...$$) first, then inline ($...$)
+  const segments: Array<{ type: 'text' | 'math'; content: string; display?: boolean }> = []
+
+  // Split on $$...$$ first
+  const displayParts = text.split(LATEX_DISPLAY_RE)
+  for (let i = 0; i < displayParts.length; i++) {
+    if (i % 2 === 1) {
+      segments.push({ type: 'math', content: displayParts[i], display: true })
+    } else if (displayParts[i]) {
+      // Then split each text part on $...$
+      const inlineParts = displayParts[i].split(LATEX_INLINE_RE)
+      for (let j = 0; j < inlineParts.length; j++) {
+        if (j % 2 === 1) {
+          segments.push({ type: 'math', content: inlineParts[j], display: false })
+        } else if (inlineParts[j]) {
+          segments.push({ type: 'text', content: inlineParts[j] })
+        }
+      }
+    }
+  }
+
+  if (segments.length === 0) return text
+  if (segments.length === 1 && segments[0].type === 'text') return text
+
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.type === 'math' ? (
+          <span
+            key={i}
+            className={seg.display ? 'block my-3 text-center' : 'inline'}
+            dangerouslySetInnerHTML={{ __html: renderLatexToHtml(seg.content, !!seg.display) }}
+          />
+        ) : (
+          <span key={i}>{seg.content}</span>
+        ),
+      )}
+    </>
+  )
+}
+
+function renderFormulaBlock(text: string): React.ReactNode {
+  // Strip surrounding $$ or $ delimiters if present
+  let latex = text.trim()
+  if (latex.startsWith('$$') && latex.endsWith('$$')) {
+    latex = latex.slice(2, -2).trim()
+  } else if (latex.startsWith('$') && latex.endsWith('$')) {
+    latex = latex.slice(1, -1).trim()
+  }
+
+  // Try display mode first
+  const html = renderLatexToHtml(latex, true)
+  if (!html.includes('katex-error')) {
+    return <div className="text-center my-2" dangerouslySetInnerHTML={{ __html: html }} />
+  }
+
+  // Fall back to inline rendering
+  const withInline = renderTextWithLatex(text)
+  if (withInline !== text) return withInline
+
+  // Last resort: show raw text
+  return <code className="text-sm bg-gray-50 px-1.5 py-0.5 rounded">{text}</code>
+}
+
+// ─── Block rendering ────────────────────────────────────────────────────
 
 function HTMLReaderBlock({
   block,
@@ -338,11 +429,13 @@ function HTMLReaderBlock({
         ? 'text-[#7a7f88]'
         : 'text-[#181818]'
 
-  const contentClass = block.type === 'formula' || block.type === 'table'
-    ? 'whitespace-pre-wrap break-words font-medium'
-    : block.type === 'list'
-      ? 'whitespace-pre-wrap break-words'
-      : 'whitespace-normal break-words'
+  const contentClass = block.type === 'table'
+    ? 'whitespace-pre-wrap break-words font-mono text-sm'
+    : block.type === 'formula'
+      ? ''
+      : block.type === 'list'
+        ? 'whitespace-pre-wrap break-words'
+        : 'whitespace-normal break-words'
 
   const translatedPanel = translatedText ? (
     translationDisplayMode === 'parallel' && block.type !== 'title' && block.type !== 'subtitle' ? (
@@ -351,13 +444,13 @@ function HTMLReaderBlock({
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#777]">Original</p>
           <div className={contentClass}>{originalText}</div>
         </div>
-        <div className="border-l border-[#f2b37a] pl-4 text-[#b45309]">
+        <div className="border-l border-[#f2b37a] pl-4 text-[#b45309]" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#c26a17]">译文</p>
           <div className={contentClass}>{translatedText}</div>
         </div>
       </div>
     ) : (
-      <div className="mt-4 border-l-2 border-[#f2b37a] pl-4 text-[#b45309]">
+      <div className="mt-4 border-l-2 border-[#f2b37a] pl-4 text-[#b45309]" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
         <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#c26a17]">译文</p>
         <div className={contentClass}>{translatedText}</div>
       </div>
@@ -376,7 +469,9 @@ function HTMLReaderBlock({
         <>
           {originalText && (
             <div className={`${contentClass} ${textToneClass}`}>
-              {originalText}
+              {block.type === 'formula'
+                ? renderFormulaBlock(originalText)
+                : renderTextWithLatex(originalText)}
             </div>
           )}
           {showTranslation && translatedPanel}
@@ -448,10 +543,15 @@ function HTMLReaderPage({
   return (
     <section
       data-page-number={page.pageNumber}
-      className="html-reader-page relative scroll-mt-5 border-t border-[#e9e9e9] pt-10 first:border-t-0 first:pt-2"
+      className="html-reader-page relative scroll-mt-5 pt-8 first:pt-2"
     >
-      <div className="mx-auto w-full max-w-[960px] px-5 text-[#181818] md:px-8">
-        <div className="space-y-1">
+      <div className="mb-3 flex items-center gap-2 text-[11px] text-[#999] font-mono select-none">
+        <span className="w-5 h-px bg-[#d0d0d0]" />
+        {page.pageNumber}
+        <span className="flex-1 h-px bg-[#d0d0d0]" />
+      </div>
+      <div className="mx-auto w-full max-w-[840px] px-5 text-[#181818] md:px-10">
+        <div className="border-l-[3px] border-[#c8c8c8] pl-4 space-y-0.5">
           {pageBlocks.map(block => (
             <HTMLReaderBlock
               key={block.id}
@@ -497,6 +597,12 @@ export default function HTMLReader({
   const [noteMenuOpen, setNoteMenuOpen] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [noteSelectedColor, setNoteSelectedColor] = useState<HighlightColor>('yellow')
+  const [quickAction, setQuickAction] = useState<{
+    type: 'dictionary' | 'translate' | 'explain'
+    text: string
+    result: string
+    loading: boolean
+  } | null>(null)
 
   const releasePageSync = useCallback(() => {
     if (scrollReleaseTimerRef.current !== null) {
@@ -777,10 +883,79 @@ export default function HTMLReader({
     resetSelectionState()
   }, [clearBrowserSelection, onAskSelection, resetSelectionState, selection])
 
+  const SYSTEM_PROMPTS: Record<string, string> = {
+    dictionary: '你是一个学术词典助手。请给出以下词汇或短语的释义，包括：中文释义、词性、学术语境中的含义。用中文回答，简洁明了。',
+    translate: '你是一个专业学术翻译助手。请将以下文本翻译为自然、准确的中文。只输出译文，不要解释。保留公式和专有名词。绝对不要输出英文原文。',
+    explain: '你是一个学术文献解读助手。请用通俗易懂的中文解释以下文本的含义，帮助读者理解其学术含义。解释要简洁明了。',
+  }
+
+  const handleQuickAction = useCallback(async (type: 'dictionary' | 'translate' | 'explain') => {
+    if (!selection?.text?.trim()) return
+
+    setQuickAction({ type, text: selection.text, result: '', loading: true })
+    clearBrowserSelection()
+    resetSelectionState()
+
+    const settings = getSettings()
+    const modelConfig = getSelectedSmallModel(settings)
+    if (!modelConfig?.apiKey || !modelConfig?.modelName) {
+      setQuickAction(prev => prev ? { ...prev, loading: false, result: '请先在设置中配置小参数模型的 API Key' } : null)
+      return
+    }
+
+    try {
+      const response = await fetch('/api/ai/assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: selection.text.trim() }],
+          modelConfig,
+          systemPrompt: SYSTEM_PROMPTS[type],
+        }),
+      })
+
+      if (!response.ok) {
+        setQuickAction(prev => prev ? { ...prev, loading: false, result: '请求失败' } : null)
+        return
+      }
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      let fullContent = ''
+      let buffer = ''
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              const parsed = JSON.parse(line)
+              if (parsed.type === 'text-delta') {
+                fullContent += parsed.delta
+                setQuickAction(prev => prev ? { ...prev, result: fullContent } : null)
+              }
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      }
+
+      setQuickAction(prev => prev ? { ...prev, loading: false, result: fullContent || '无结果' } : null)
+    } catch {
+      setQuickAction(prev => prev ? { ...prev, loading: false, result: '请求出错' } : null)
+    }
+  }, [clearBrowserSelection, resetSelectionState, selection])
+
   return (
     <div
       ref={containerRef}
-      className="relative h-full overflow-auto bg-white"
+      className="relative h-full overflow-auto bg-[#fefefe]"
       onMouseUp={handleHtmlMouseUp}
     >
       <div className="mx-auto flex w-full max-w-6xl flex-col px-4 py-5 md:px-6 md:py-6">
@@ -815,9 +990,9 @@ export default function HTMLReader({
           onHighlight={color => { void handleAddHighlight(color) }}
           onToggleNote={() => setNoteMenuOpen(value => !value)}
           onAskAI={handleAskSelectedText}
-          onDictionary={() => {}}
-          onTranslate={() => {}}
-          onExplain={() => {}}
+          onDictionary={() => handleQuickAction('dictionary')}
+          onTranslate={() => handleQuickAction('translate')}
+          onExplain={() => handleQuickAction('explain')}
           onNoteTextChange={setNoteText}
           onNoteColorChange={setNoteSelectedColor}
           onNoteCancel={() => {
@@ -832,6 +1007,57 @@ export default function HTMLReader({
         <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-full border border-[#dddddd] bg-white/92 px-3 py-1 text-sm text-[#222] shadow-[0_12px_24px_rgba(15,23,42,0.12)] backdrop-blur">
           {visiblePage} / {pdfDoc.numPages}
         </div>
+      )}
+
+      {/* 快捷操作结果弹窗 */}
+      {quickAction && (
+        <Popover
+          isOpen
+          placement="top"
+          showArrow
+          offset={12}
+          onOpenChange={open => {
+            if (!open) setQuickAction(null)
+          }}
+        >
+          <PopoverTrigger>
+            <button
+              type="button"
+              aria-label="quick-action-anchor"
+              className="fixed opacity-0 pointer-events-none"
+              style={{ left: '50%', top: '40%', width: 1, height: 1 }}
+            />
+          </PopoverTrigger>
+          <PopoverContent className="max-w-80 bg-[#161a23] border border-[#2b3242] px-3 py-2">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-medium text-gray-400">
+                  {quickAction.type === 'dictionary' ? '词典' : quickAction.type === 'translate' ? '翻译' : '解释'}
+                </span>
+                <button
+                  type="button"
+                  className="text-gray-500 hover:text-gray-300 transition-colors"
+                  onClick={() => setQuickAction(null)}
+                >
+                  <Icon icon="mdi:close" className="text-xs" />
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500 line-clamp-2">
+                {quickAction.text.slice(0, 80)}{quickAction.text.length > 80 ? '…' : ''}
+              </p>
+              {quickAction.loading ? (
+                <div className="flex items-center gap-2 py-1">
+                  <Icon icon="mdi:loading" className="text-sm text-blue-400 animate-spin" />
+                  <span className="text-xs text-gray-400">处理中…</span>
+                </div>
+              ) : (
+                <p className="text-xs leading-relaxed text-gray-200 whitespace-pre-wrap" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
+                  {quickAction.result}
+                </p>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
       )}
 
       <style jsx global>{`
@@ -852,6 +1078,19 @@ export default function HTMLReader({
             box-shadow: 0 0 0 0 rgba(217, 119, 6, 0);
             transform: translateY(0);
           }
+        }
+
+        .hanging-indent {
+          text-indent: -1.5em;
+          padding-left: 1.5em;
+        }
+
+        .html-reader-page + .html-reader-page {
+          margin-top: 2rem;
+        }
+
+        .katex-display {
+          margin: 0.5em 0 !important;
         }
       `}</style>
     </div>

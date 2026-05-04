@@ -1,9 +1,16 @@
 'use client'
 
+import katex from 'katex'
+import 'katex/dist/katex.min.css'
 import { Icon } from '@iconify/react'
+import { Popover, PopoverContent, PopoverTrigger } from '@heroui/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GuideFocusTarget, HighlightColor, PDFAnnotation, TextBlock } from '@/lib/types'
-import { saveAnnotation } from '@/lib/pdfCache'
+import { HIGHLIGHT_COLORS } from '@/lib/types'
+import { extractCitationLinks, getBestCitationLink } from '@/lib/citationLinks'
+import { saveAnnotation, updateAnnotation, deleteAnnotation } from '@/lib/pdfCache'
+import { getSettings, getSelectedSmallModel } from '@/lib/storage'
+import { Citation, CitationTrigger, CitationContent } from '@/components/ui/citation'
 import SelectionToolbar from './SelectionToolbar'
 
 interface PDFDocumentProxy {
@@ -50,6 +57,9 @@ interface HTMLReaderProps {
   focusTarget?: GuideFocusTarget | null
   onAskSelection?: (selection: { text: string; pageNum: number; blockId?: string }) => void
   onAnnotationAdd?: (annotation: PDFAnnotation) => void
+  onAnnotationDelete?: (id: string) => void
+  onAnnotationUpdate?: (annotation: PDFAnnotation) => void
+  annotations?: PDFAnnotation[]
 }
 
 const PAGE_IMAGE_RENDER_SCALE = 1.8
@@ -150,12 +160,21 @@ function normalizeListText(text: string) {
   return lines.map(line => normalizeWrappedText(line)).join('\n')
 }
 
-function getReadableBlockText(block: TextBlock, preferTranslated = false) {
+function getRawBlockText(block: TextBlock, preferTranslated = false) {
   const raw = preferTranslated ? (block.translated || '') : block.text
+  return raw || ''
+}
+
+function getReadableBlockText(block: TextBlock, preferTranslated = false) {
+  const raw = getRawBlockText(block, preferTranslated)
   if (!raw) return ''
 
-  if (block.type === 'formula' || block.type === 'table') {
+  if (block.type === 'formula') {
     return normalizeStructuredText(raw)
+  }
+
+  if (block.type === 'table') {
+    return /<table[\s>]/i.test(raw) ? raw : normalizeStructuredText(raw)
   }
 
   if (block.type === 'list') {
@@ -165,94 +184,101 @@ function getReadableBlockText(block: TextBlock, preferTranslated = false) {
   return normalizeWrappedText(raw)
 }
 
+const SERIF_FONT = 'Georgia, "Noto Serif", "Source Han Serif SC", SimSun, serif'
+
 function getBlockTypography(block: TextBlock, zoomRatio: number) {
   const detectedFontSize = block.style.fontSize || 16
 
   if (block.type === 'title') {
     return {
-      fontSize: `${clamp(detectedFontSize * 1.18 * zoomRatio, 28, 42)}px`,
-      lineHeight: 1.12,
-      letterSpacing: '-0.04em',
+      fontSize: `${clamp(detectedFontSize * 1.1 * zoomRatio, 24, 36)}px`,
+      lineHeight: 1.25,
+      letterSpacing: '-0.02em',
       fontWeight: 700,
+      fontFamily: SERIF_FONT,
     }
   }
 
   if (block.type === 'subtitle') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.96 * zoomRatio, 20, 30)}px`,
-      lineHeight: 1.24,
-      letterSpacing: '-0.025em',
-      fontWeight: 640,
+      fontSize: `${clamp(detectedFontSize * 0.95 * zoomRatio, 18, 26)}px`,
+      lineHeight: 1.35,
+      letterSpacing: '-0.01em',
+      fontWeight: 600,
+      fontFamily: SERIF_FONT,
     }
   }
 
   if (block.type === 'caption') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.92 * zoomRatio, 12, 15)}px`,
-      lineHeight: 1.55,
+      fontSize: `${clamp(detectedFontSize * 0.88 * zoomRatio, 12, 14)}px`,
+      lineHeight: 1.5,
       letterSpacing: '0',
-      fontWeight: 500,
+      fontWeight: 400,
+      fontFamily: SERIF_FONT,
     }
   }
 
   if (block.type === 'reference') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.9 * zoomRatio, 13, 15)}px`,
-      lineHeight: 1.72,
+      fontSize: `${clamp(detectedFontSize * 0.85 * zoomRatio, 12, 14)}px`,
+      lineHeight: 1.65,
       letterSpacing: '0',
-      fontWeight: 500,
+      fontWeight: 400,
+      fontFamily: SERIF_FONT,
     }
   }
 
   if (block.type === 'formula' || block.type === 'table') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.96 * zoomRatio, 14, 18)}px`,
-      lineHeight: 1.65,
+      fontSize: `${clamp(detectedFontSize * 0.92 * zoomRatio, 13, 17)}px`,
+      lineHeight: 1.6,
       letterSpacing: '0',
-      fontWeight: 520,
+      fontWeight: 400,
     }
   }
 
   if (block.type === 'header' || block.type === 'footer') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.82 * zoomRatio, 11, 13)}px`,
+      fontSize: `${clamp(detectedFontSize * 0.78 * zoomRatio, 10, 12)}px`,
       lineHeight: 1.4,
-      letterSpacing: '0.06em',
-      fontWeight: 600,
+      letterSpacing: '0.04em',
+      fontWeight: 400,
     }
   }
 
   return {
-    fontSize: `${clamp(detectedFontSize * 0.98 * zoomRatio, 15, 19)}px`,
+    fontSize: `${clamp(detectedFontSize * 0.95 * zoomRatio, 14, 18)}px`,
     lineHeight: 1.8,
-    letterSpacing: '0',
-    fontWeight: 500,
+    letterSpacing: '0.01em',
+    fontWeight: 400,
+    fontFamily: SERIF_FONT,
   }
 }
 
 function getBlockWrapperClass(block: TextBlock) {
   if (block.sourceLabel === 'Picture') {
-    return 'my-8'
+    return 'my-6'
   }
 
   switch (block.type) {
     case 'title':
-      return 'mb-5 pt-1'
+      return 'mb-4'
     case 'subtitle':
-      return 'mt-8 mb-3'
+      return 'mt-6 mb-3 pb-1.5 border-b border-[#e0e0e0]'
     case 'caption':
-      return 'mt-2 mb-6'
+      return 'my-2 text-center italic'
     case 'formula':
-      return 'my-5 overflow-x-auto border-l-2 border-[#63728d] pl-4'
+      return 'my-4 overflow-x-auto rounded bg-[#f7f7fb] px-3 py-2'
     case 'table':
-      return 'my-5 overflow-x-auto border-l-2 border-white/10 pl-4'
+      return 'my-4 overflow-x-auto rounded bg-[#fafafa] px-2 py-1.5'
     case 'reference':
-      return 'my-2'
+      return 'my-1.5'
     case 'header':
     case 'footer':
-      return 'my-2'
+      return 'my-0.5'
     default:
-      return 'my-3'
+      return 'my-2.5'
   }
 }
 
@@ -275,6 +301,407 @@ function getPictureCropStyle(block: TextBlock) {
   }
 }
 
+// ─── KaTeX rendering helpers ──────────────────────────────────────────────
+
+const LATEX_INLINE_RE = /\$([^\$]+?)\$/g
+const LATEX_DISPLAY_RE = /\$\$([^\$]+?)\$\$/g
+const LATEX_DELIMITER_RE = /^\s*(\$\$[\s\S]+\$\$|\$[\s\S]+\$)\s*$/
+const LATEX_COMMAND_RE = /\\(?:begin|end|frac|dfrac|tfrac|sqrt|sum|prod|int|lim|alpha|beta|gamma|delta|theta|lambda|mu|pi|sigma|phi|omega|mathbf|mathrm|mathit|text|label|ref|eqref|left|right|cdot|times|leq|geq|neq|approx|infty|partial|nabla|vec|hat|bar|overline|underline|operatorname)\b/
+const MATH_SYMBOL_RE = /[=<>±×÷∑∏∫√∞≈≠≤≥∂∇∈∉⊂⊆⊃⊇∪∩∝→←↔]/g
+const SUB_SUP_RE = /[_^](\{[^}]+\}|[A-Za-z0-9()+\-])/g
+const NATURAL_WORD_RE = /\b[A-Za-z]{3,}\b/g
+const CJK_CHAR_RE = /[\u3400-\u9fff]/g
+
+function isLikelyFormulaText(text: string) {
+  const normalized = normalizeBlockText(text)
+  if (!normalized) return false
+
+  if (LATEX_DELIMITER_RE.test(normalized) || LATEX_COMMAND_RE.test(normalized)) {
+    return true
+  }
+
+  const mathSymbolCount = (normalized.match(MATH_SYMBOL_RE) || []).length
+  const subSupCount = (normalized.match(SUB_SUP_RE) || []).length
+  const naturalWordCount = (normalized.match(NATURAL_WORD_RE) || []).length
+  const cjkCharCount = (normalized.match(CJK_CHAR_RE) || []).length
+  const lineCount = normalized.split('\n').filter(Boolean).length
+
+  if (cjkCharCount >= 4 && mathSymbolCount === 0 && subSupCount === 0) {
+    return false
+  }
+
+  if (naturalWordCount >= 7 && mathSymbolCount < 2 && subSupCount === 0) {
+    return false
+  }
+
+  return (
+    (mathSymbolCount >= 2 && naturalWordCount <= 6 && normalized.length <= 160) ||
+    (subSupCount >= 1 && naturalWordCount <= 8 && normalized.length <= 180) ||
+    (lineCount >= 2 && (mathSymbolCount >= 1 || subSupCount >= 1) && naturalWordCount <= 10)
+  )
+}
+
+function getRenderableBlockType(block: TextBlock, text: string): TextBlock['type'] {
+  if (block.type === 'formula' && !isLikelyFormulaText(text)) {
+    return 'paragraph'
+  }
+
+  return block.type
+}
+
+function renderLatexToHtml(latex: string, displayMode: boolean): string {
+  try {
+    return katex.renderToString(latex, { throwOnError: false, displayMode })
+  } catch {
+    return latex
+  }
+}
+
+function renderTextWithLatex(text: string): React.ReactNode {
+  // Handle display math ($$...$$) first, then inline ($...$)
+  const segments: Array<{ type: 'text' | 'math'; content: string; display?: boolean }> = []
+
+  // Split on $$...$$ first
+  const displayParts = text.split(LATEX_DISPLAY_RE)
+  for (let i = 0; i < displayParts.length; i++) {
+    if (i % 2 === 1) {
+      segments.push({ type: 'math', content: displayParts[i], display: true })
+    } else if (displayParts[i]) {
+      // Then split each text part on $...$
+      const inlineParts = displayParts[i].split(LATEX_INLINE_RE)
+      for (let j = 0; j < inlineParts.length; j++) {
+        if (j % 2 === 1) {
+          segments.push({ type: 'math', content: inlineParts[j], display: false })
+        } else if (inlineParts[j]) {
+          segments.push({ type: 'text', content: inlineParts[j] })
+        }
+      }
+    }
+  }
+
+  if (segments.length === 0) return text
+  if (segments.length === 1 && segments[0].type === 'text') return text
+
+  return (
+    <>
+      {segments.map((seg, i) =>
+        seg.type === 'math' ? (
+          <span
+            key={i}
+            className={seg.display ? 'block my-3 text-center' : 'inline'}
+            dangerouslySetInnerHTML={{ __html: renderLatexToHtml(seg.content, !!seg.display) }}
+          />
+        ) : (
+          <span key={i}>{seg.content}</span>
+        ),
+      )}
+    </>
+  )
+}
+
+function renderFormulaBlock(text: string): React.ReactNode {
+  // Strip surrounding $$ or $ delimiters if present
+  let latex = text.trim()
+  if (latex.startsWith('$$') && latex.endsWith('$$')) {
+    latex = latex.slice(2, -2).trim()
+  } else if (latex.startsWith('$') && latex.endsWith('$')) {
+    latex = latex.slice(1, -1).trim()
+  }
+
+  // Try display mode first
+  const html = renderLatexToHtml(latex, true)
+  if (!html.includes('katex-error')) {
+    return <div className="text-center my-2" dangerouslySetInnerHTML={{ __html: html }} />
+  }
+
+  // Fall back to inline rendering
+  const withInline = renderTextWithLatex(text)
+  if (withInline !== text) return withInline
+
+  // Last resort: show raw text
+  return <code className="text-sm bg-gray-50 px-1.5 py-0.5 rounded">{text}</code>
+}
+
+// ─── Citation rendering ────────────────────────────────────────────────
+
+type ParsedRef = {
+  index: number
+  title: string
+  authors: string
+  year: string
+  journal: string
+  raw: string
+  url: string | null
+  linkLabel: string | null
+}
+
+const YEAR_RE = /[\[(]?(?:19|20)\d{2}[\])]?/g
+const AUTHOR_RE = /^(?:\[\d+\]\s*)(([A-Z][a-zÀ-ſ]+(?:[\s-][A-Z][a-zÀ-ſ]+)*(?:\s+et\s+al\.?)?(?:\s*[,&]\s*[A-Z][a-zÀ-ſ]+(?:[\s-][A-Z][a-zÀ-ſ]+)*(?:\s+et\s+al\.?)?)*))/g
+const QUOTED_TITLE_RE = /[\""“]([^”\""]{8,}?)[\""”]/g
+
+function parseRefEntry(raw: string): ParsedRef {
+  const m = raw.match(/^\[(\d+)\]/)
+  const index = m ? Number(m[1]) : 0
+  const body = raw.replace(/^\[\d+\]\s*/, '')
+
+  // Year
+  const yearMatches = body.match(YEAR_RE)
+  const year = yearMatches?.[0]?.replace(/[\[\]()]/g, '') || ''
+
+  // Authors: text before first year or quoted title
+  let authors = ''
+  const yearIdx = year ? body.indexOf(yearMatches![0]) : -1
+  const quotedMatch = body.match(QUOTED_TITLE_RE)
+  const titleStartIdx = quotedMatch ? body.indexOf(quotedMatch[0]) : -1
+
+  if (yearIdx > 0) {
+    authors = body.slice(0, Math.min(yearIdx, titleStartIdx > 0 ? titleStartIdx : yearIdx)).replace(/[,;:]\s*$/, '').trim()
+  }
+
+  // Title from quotes
+  let title = ''
+  if (quotedMatch) {
+    title = quotedMatch[1]
+  }
+
+  // Journal: text after year, skip title
+  let journal = ''
+  if (year) {
+    const afterYear = body.slice(body.indexOf(yearMatches![0]) + yearMatches![0].length).trim()
+    // Remove quoted title from journal extraction
+    const withoutTitle = afterYear.replace(/[\""“][^”\""]+[\""”]/, '').trim()
+    const journalPart = withoutTitle.replace(/^[,.;:]\s*/, '').split(/[.,]\s*/)[0]
+    if (journalPart && journalPart.length > 2 && journalPart.length < 80) {
+      journal = journalPart
+    }
+  }
+
+  // If no quoted title, try sentence-based extraction
+  if (!title) {
+    const sentences = body.split(/(?<=[.!?])\s+/).filter(s => s.length > 10 && s.length < 240)
+    if (sentences.length > 0) {
+      // Heuristic: title is usually the first standalone sentence or after authors
+      for (const s of sentences) {
+        if (!/^\d{4}/.test(s) && !/^(https?:|doi:|pmid:)/i.test(s) && !/^(http|www)/i.test(s)) {
+          title = s.replace(/[""“”]/g, '')
+          break
+        }
+      }
+    }
+  }
+
+  if (!title) title = body.slice(0, 120)
+
+  // Links via citationLinks lib
+  const bestLink = getBestCitationLink(raw, { includeSearchLinks: false })
+  const url = bestLink?.url || null
+  const linkLabel = bestLink ? `${bestLink.label}` : null
+
+  return { index, title, authors, year, journal, raw, url, linkLabel }
+}
+
+function buildRefMap(blocks: TextBlock[]): Map<number, ParsedRef> {
+  const map = new Map<number, ParsedRef>()
+  for (const block of blocks) {
+    if (block.type !== 'reference') continue
+    const entries = splitReferenceEntries(block.text)
+    for (const entry of entries) {
+      const parsed = parseRefEntry(entry)
+      if (parsed.index > 0) map.set(parsed.index, parsed)
+    }
+  }
+  return map
+}
+
+const CITATION_INLINE_RE = /\[(\d+(?:\s*[,，\-–]\s*\d+)*)\]/g
+
+function parseCitationNumbers(match: string): number[] {
+  const inner = match.slice(1, -1)
+  const nums: number[] = []
+  for (const part of inner.split(/\s*[,，\-–]\s*/)) {
+    const n = Number(part)
+    if (Number.isInteger(n) && n > 0) nums.push(n)
+  }
+  return nums
+}
+
+function InlineCitationBadge({ num, refData }: { num: number; refData: ParsedRef | undefined }) {
+  if (!refData) {
+    return (
+      <span className="inline-flex h-[1.25em] min-w-[1.25em] items-center justify-center rounded-full bg-[#e8edf3] px-1 text-[0.7em] font-medium text-[#4a6a8a] tabular-nums cursor-default select-none align-baseline">
+        {num}
+      </span>
+    )
+  }
+
+  return (
+    <Citation
+      index={num}
+      title={refData.title}
+      sourceKind="asset"
+      year={refData.year || undefined}
+      journal={refData.journal || undefined}
+      authors={refData.authors ? refData.authors.split(/[,;&]\s*/).map(a => a.trim()).filter(Boolean) : undefined}
+      excerpt={refData.raw}
+    >
+      <CitationTrigger />
+      <CitationContent />
+    </Citation>
+  )
+}
+
+function renderTextWithCitations(
+  text: string,
+  refMap: Map<number, ParsedRef>,
+): React.ReactNode {
+  const parts: Array<{ type: 'text'; content: string } | { type: 'citation'; nums: number[] }> = []
+  let last = 0
+
+  for (const m of text.matchAll(CITATION_INLINE_RE)) {
+    if (m.index === undefined) continue
+    if (m.index > last) parts.push({ type: 'text', content: text.slice(last, m.index) })
+    parts.push({ type: 'citation', nums: parseCitationNumbers(m[0]) })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push({ type: 'text', content: text.slice(last) })
+  if (parts.length === 0) return text
+  if (parts.length === 1 && parts[0].type === 'text') return renderTextWithLatex(text)
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.type === 'citation' ? (
+          <span key={`cit-${i}`} className="inline-flex items-baseline gap-0.5">
+            {part.nums.map((num) => (
+              <InlineCitationBadge key={num} num={num} refData={refMap.get(num)} />
+            ))}
+          </span>
+        ) : (
+          <span key={`txt-${i}`}>{renderTextWithLatex(part.content)}</span>
+        ),
+      )}
+    </>
+  )
+}
+
+function splitReferenceEntries(text: string) {
+  const normalized = normalizeBlockText(text)
+    .replace(/([A-Za-z])-\s*\n\s*([A-Za-z])/g, '$1$2')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+([,.;:])/g, '$1')
+    .trim()
+
+  if (!normalized) return []
+
+  const numberedEntries = normalized.match(/\[\d+\]\s*[\s\S]*?(?=(?:\s+\[\d+\]\s*)|$)/g)
+    ?.map(entry => entry.trim())
+    .filter(Boolean)
+
+  if (numberedEntries && numberedEntries.length > 0) {
+    return numberedEntries
+  }
+
+  const lineEntries = normalizeBlockText(text)
+    .split('\n')
+    .map(line => normalizeWrappedText(line))
+    .filter(Boolean)
+
+  return lineEntries.length > 0 ? lineEntries : [normalizeWrappedText(text)]
+}
+
+function renderReferenceBlock(text: string): React.ReactNode {
+  const entries = splitReferenceEntries(text)
+  if (entries.length === 0) return null
+
+  return (
+    <div className="space-y-2">
+      {entries.map((entry, index) => (
+        <div key={index} className="hanging-indent leading-[1.72]">
+          {renderTextWithLatex(entry)}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+type ParsedTableCell = {
+  content: string
+  isHeader: boolean
+  colSpan: number
+  rowSpan: number
+}
+
+type ParsedTableRow = ParsedTableCell[]
+
+function hasHtmlTableMarkup(text: string) {
+  return /<table[\s>][\s\S]*<\/table>/i.test(text)
+}
+
+function parseHtmlTable(text: string): ParsedTableRow[] | null {
+  if (typeof window === 'undefined' || !hasHtmlTableMarkup(text)) {
+    return null
+  }
+
+  try {
+    const parser = new DOMParser()
+    const doc = parser.parseFromString(text, 'text/html')
+    const table = doc.querySelector('table')
+    if (!table) return null
+
+    const rows = Array.from(table.querySelectorAll('tr'))
+      .map((row) => {
+        const cells = Array.from(row.querySelectorAll('th, td')).map((cell) => ({
+          content: normalizeWrappedText(cell.textContent || ''),
+          isHeader: cell.tagName.toLowerCase() === 'th',
+          colSpan: Math.max(Number(cell.getAttribute('colspan') || 1), 1),
+          rowSpan: Math.max(Number(cell.getAttribute('rowspan') || 1), 1),
+        }))
+
+        return cells.filter(cell => cell.content)
+      })
+      .filter(row => row.length > 0)
+
+    return rows.length > 0 ? rows : null
+  } catch {
+    return null
+  }
+}
+
+function renderTableBlock(text: string): React.ReactNode {
+  const parsedTable = parseHtmlTable(text)
+  if (!parsedTable) {
+    return <div className="whitespace-pre-wrap break-words font-mono text-sm">{normalizeStructuredText(text)}</div>
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="min-w-full border-collapse text-left text-[0.95em] leading-6">
+        <tbody>
+          {parsedTable.map((row, rowIndex) => (
+            <tr key={rowIndex} className={rowIndex === 0 ? 'border-b border-[#d6d6d6]' : 'border-b border-[#ececec]'}>
+              {row.map((cell, cellIndex) => {
+                const CellTag = cell.isHeader || rowIndex === 0 ? 'th' : 'td'
+                return (
+                  <CellTag
+                    key={`${rowIndex}-${cellIndex}`}
+                    colSpan={cell.colSpan}
+                    rowSpan={cell.rowSpan}
+                    className={`px-3 py-2 align-top ${CellTag === 'th' ? 'bg-[#f3f4f6] font-semibold text-[#222]' : 'text-[#333]'}`}
+                  >
+                    {renderTextWithLatex(cell.content)}
+                  </CellTag>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─── Block rendering ────────────────────────────────────────────────────
+
 function HTMLReaderBlock({
   block,
   showTranslation,
@@ -282,6 +709,9 @@ function HTMLReaderBlock({
   zoomRatio,
   focused,
   pageImageSrc,
+  refMap,
+  pageAnnotations,
+  onNoteClick,
 }: {
   block: TextBlock
   showTranslation: boolean
@@ -289,11 +719,18 @@ function HTMLReaderBlock({
   zoomRatio: number
   focused: boolean
   pageImageSrc: string | null
+  refMap: Map<number, ParsedRef>
+  pageAnnotations: PDFAnnotation[]
+  onNoteClick: (annotation: PDFAnnotation) => void
 }) {
+  const rawOriginalText = getRawBlockText(block, false)
+  const rawTranslatedText = getRawBlockText(block, true)
   const originalText = getReadableBlockText(block, false)
   const translatedText = getReadableBlockText(block, true)
-  const typography = getBlockTypography(block, zoomRatio)
-  const baseWrapper = getBlockWrapperClass(block)
+  const renderableType = getRenderableBlockType(block, originalText)
+  const renderBlock = renderableType === block.type ? block : { ...block, type: renderableType }
+  const typography = getBlockTypography(renderBlock, zoomRatio)
+  const baseWrapper = getBlockWrapperClass(renderBlock)
 
   if (block.sourceLabel === 'Picture') {
     const cropStyle = getPictureCropStyle(block)
@@ -304,8 +741,22 @@ function HTMLReaderBlock({
         className={`${baseWrapper} ${focused ? 'ring-2 ring-[#d97706]/60 ring-offset-2 ring-offset-white' : ''}`}
       >
         <div
-          className="relative overflow-hidden rounded-2xl border border-[#d6d6d6] bg-[#fafafa]"
+          className="picture-zoom relative overflow-hidden rounded-2xl border border-[#d6d6d6] bg-[#fafafa] cursor-zoom-in"
           style={{ aspectRatio: cropStyle.aspectRatio }}
+          onClick={(e) => {
+            const container = e.currentTarget as HTMLElement
+            if (container.dataset.zoomed === '1') {
+              container.dataset.zoomed = '0'
+              container.style.transform = ''
+              container.classList.remove('cursor-zoom-out')
+              container.classList.add('cursor-zoom-in')
+            } else {
+              container.dataset.zoomed = '1'
+              container.style.transform = 'scale(2)'
+              container.classList.remove('cursor-zoom-in')
+              container.classList.add('cursor-zoom-out')
+            }
+          }}
         >
           {pageImageSrc ? (
             <img
@@ -330,39 +781,163 @@ function HTMLReaderBlock({
     return null
   }
 
-  const textToneClass = block.type === 'caption'
+  const textToneClass = renderableType === 'caption'
     ? 'text-[#60656f]'
-    : block.type === 'reference'
+    : renderableType === 'reference'
       ? 'text-[#5e6470]'
-      : block.type === 'header' || block.type === 'footer'
+      : renderableType === 'header' || renderableType === 'footer'
         ? 'text-[#7a7f88]'
         : 'text-[#181818]'
 
-  const contentClass = block.type === 'formula' || block.type === 'table'
-    ? 'whitespace-pre-wrap break-words font-medium'
-    : block.type === 'list'
-      ? 'whitespace-pre-wrap break-words'
-      : 'whitespace-normal break-words'
+  const contentClass = renderableType === 'table'
+    ? 'whitespace-pre-wrap break-words font-mono text-sm'
+    : renderableType === 'formula'
+      ? ''
+      : renderableType === 'reference'
+        ? ''
+      : renderableType === 'list'
+        ? 'whitespace-pre-wrap break-words'
+        : 'whitespace-normal break-words'
 
   const translatedPanel = translatedText ? (
-    translationDisplayMode === 'parallel' && block.type !== 'title' && block.type !== 'subtitle' ? (
+    translationDisplayMode === 'parallel' && renderableType !== 'title' && renderableType !== 'subtitle' ? (
       <div className="mt-4 grid gap-4 border-t border-[#ececec] pt-4 md:grid-cols-2">
         <div className="border-l border-[#d9d9d9] pl-4">
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#777]">Original</p>
-          <div className={contentClass}>{originalText}</div>
+          <div className={contentClass}>
+            {renderableType === 'table'
+              ? renderTableBlock(rawOriginalText)
+              : renderableType === 'reference'
+                ? renderReferenceBlock(rawOriginalText)
+                : originalText}
+          </div>
         </div>
-        <div className="border-l border-[#f2b37a] pl-4 text-[#b45309]">
+        <div className="border-l border-[#f2b37a] pl-4 text-[#b45309]" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
           <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#c26a17]">译文</p>
-          <div className={contentClass}>{translatedText}</div>
+          <div className={contentClass}>
+            {renderableType === 'table'
+              ? renderTableBlock(rawTranslatedText || translatedText)
+              : renderableType === 'reference'
+                ? renderReferenceBlock(rawTranslatedText || translatedText)
+                : translatedText}
+          </div>
         </div>
       </div>
     ) : (
-      <div className="mt-4 border-l-2 border-[#f2b37a] pl-4 text-[#b45309]">
-        <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#c26a17]">译文</p>
-        <div className={contentClass}>{translatedText}</div>
+      <div className="mt-4 border-l-2 border-[#f2b37a] pl-4 text-[#b45309]" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
+          <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.22em] text-[#c26a17]">译文</p>
+        <div className={contentClass}>
+          {renderableType === 'table'
+            ? renderTableBlock(rawTranslatedText || translatedText)
+            : renderableType === 'reference'
+              ? renderReferenceBlock(rawTranslatedText || translatedText)
+              : translatedText}
+        </div>
       </div>
     )
   ) : null
+
+  // Highlight marks for this block
+  const blockHighlights = pageAnnotations.filter(
+    a => a.type === 'highlight' && a.selectedText && block.text.includes(a.selectedText),
+  )
+  const blockNotes = pageAnnotations.filter(
+    a => a.type === 'note' && a.selectedText && block.text.includes(a.selectedText),
+  )
+
+  // Render text with inline highlight/note marks
+  function renderTextWithAnnotations(text: string, refMap: Map<number, ParsedRef>): React.ReactNode {
+    if (blockHighlights.length === 0 && blockNotes.length === 0) {
+      return renderTextWithCitations(text, refMap)
+    }
+
+    // Collect all annotation segments to mark
+    type AnnSegment = { start: number; end: number; annotation: PDFAnnotation; isNote: boolean }
+    const segments: AnnSegment[] = []
+
+    for (const ann of [...blockHighlights, ...blockNotes]) {
+      const search = ann.selectedText
+      if (!search) continue
+      let idx = text.indexOf(search)
+      // Find the occurrence closest to the start
+      while (idx !== -1) {
+        // Check if this segment overlaps with existing ones — skip if so
+        const overlaps = segments.some(s =>
+          (idx >= s.start && idx < s.end) || (idx + search.length > s.start && idx + search.length <= s.end),
+        )
+        if (!overlaps) {
+          segments.push({
+            start: idx,
+            end: idx + search.length,
+            annotation: ann,
+            isNote: ann.type === 'note',
+          })
+          break
+        }
+        idx = text.indexOf(search, idx + 1)
+      }
+    }
+
+    if (segments.length === 0) return renderTextWithCitations(text, refMap)
+
+    segments.sort((a, b) => a.start - b.start)
+
+    const parts: React.ReactNode[] = []
+    let cursor = 0
+
+    for (const seg of segments) {
+      if (seg.start > cursor) {
+        parts.push(
+          <span key={`t-${cursor}`}>
+            {renderTextWithCitations(text.slice(cursor, seg.start), refMap)}
+          </span>,
+        )
+      }
+
+      const matched = text.slice(seg.start, seg.end)
+      if (seg.isNote) {
+        parts.push(
+          <span
+            key={`note-${seg.annotation.id}`}
+            className="html-reader-note-mark rounded-sm cursor-pointer"
+            style={{
+              backgroundColor: HIGHLIGHT_COLORS[seg.annotation.color].bg,
+              boxShadow: `inset 0 0 0 1px ${HIGHLIGHT_COLORS[seg.annotation.color].border}`,
+            }}
+            onClick={() => onNoteClick(seg.annotation)}
+          >
+            {renderTextWithCitations(matched, refMap)}
+            <Icon icon="mdi:notebook-outline" className="ml-0.5 inline text-[0.7em] opacity-60" />
+          </span>,
+        )
+      } else {
+        parts.push(
+          <mark
+            key={`hl-${seg.annotation.id}`}
+            className="html-reader-highlight rounded-sm"
+            style={{
+              backgroundColor: HIGHLIGHT_COLORS[seg.annotation.color].bg,
+              boxShadow: `inset 0 0 0 1px ${HIGHLIGHT_COLORS[seg.annotation.color].border}`,
+            }}
+          >
+            {renderTextWithCitations(matched, refMap)}
+          </mark>,
+        )
+      }
+
+      cursor = seg.end
+    }
+
+    if (cursor < text.length) {
+      parts.push(
+        <span key={`t-${cursor}`}>
+          {renderTextWithCitations(text.slice(cursor), refMap)}
+        </span>,
+      )
+    }
+
+    return <>{parts}</>
+  }
 
   return (
     <div
@@ -370,13 +945,19 @@ function HTMLReaderBlock({
       className={`${baseWrapper} ${focused ? 'rounded-xl ring-2 ring-[#d97706]/55 ring-offset-2 ring-offset-white' : ''}`}
       style={typography}
     >
-      {translatedPanel && translationDisplayMode === 'parallel' && block.type !== 'title' && block.type !== 'subtitle' ? (
+      {translatedPanel && translationDisplayMode === 'parallel' && renderableType !== 'title' && renderableType !== 'subtitle' ? (
         translatedPanel
       ) : (
         <>
           {originalText && (
             <div className={`${contentClass} ${textToneClass}`}>
-              {originalText}
+              {renderableType === 'table'
+                ? renderTableBlock(rawOriginalText)
+                : renderableType === 'reference'
+                  ? renderReferenceBlock(rawOriginalText)
+                : renderableType === 'formula'
+                  ? renderFormulaBlock(originalText)
+                  : renderTextWithAnnotations(originalText, refMap)}
             </div>
           )}
           {showTranslation && translatedPanel}
@@ -393,6 +974,9 @@ function HTMLReaderPage({
   showTranslation,
   translationDisplayMode,
   focusTarget,
+  refMap,
+  pageAnnotations,
+  onNoteClick,
 }: {
   page: PDFPageProxy
   blocks: TextBlock[]
@@ -400,6 +984,9 @@ function HTMLReaderPage({
   showTranslation: boolean
   translationDisplayMode: 'overlay' | 'parallel'
   focusTarget?: GuideFocusTarget | null
+  refMap: Map<number, ParsedRef>
+  pageAnnotations: PDFAnnotation[]
+  onNoteClick: (annotation: PDFAnnotation) => void
 }) {
   const pageBlocks = useMemo(
     () => sortBlocks(blocks.filter(block => block.pageNum === page.pageNumber)),
@@ -448,10 +1035,15 @@ function HTMLReaderPage({
   return (
     <section
       data-page-number={page.pageNumber}
-      className="html-reader-page relative scroll-mt-5 border-t border-[#e9e9e9] pt-10 first:border-t-0 first:pt-2"
+      className="html-reader-page relative scroll-mt-5 pt-6 first:pt-0"
     >
-      <div className="mx-auto w-full max-w-[960px] px-5 text-[#181818] md:px-8">
-        <div className="space-y-1">
+      <div className="mb-2 flex items-center gap-1.5 text-[10px] text-[#bbb] font-mono select-none">
+        <span className="w-3 h-px bg-[#ddd]" />
+        {page.pageNumber}
+        <span className="flex-1 h-px bg-[#ddd]" />
+      </div>
+      <div className="mx-auto w-full max-w-[720px] px-4 text-[#1a1a1a] md:px-8">
+        <div className="space-y-0">
           {pageBlocks.map(block => (
             <HTMLReaderBlock
               key={block.id}
@@ -461,6 +1053,9 @@ function HTMLReaderPage({
               zoomRatio={zoomRatio}
               focused={focusTarget?.blockId === block.id && focusTarget.pageNum === block.pageNum}
               pageImageSrc={pageImageSrc}
+              refMap={refMap}
+              pageAnnotations={pageAnnotations}
+              onNoteClick={onNoteClick}
             />
           ))}
         </div>
@@ -483,6 +1078,9 @@ export default function HTMLReader({
   focusTarget,
   onAskSelection,
   onAnnotationAdd,
+  onAnnotationDelete,
+  onAnnotationUpdate,
+  annotations = [],
 }: HTMLReaderProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -497,6 +1095,15 @@ export default function HTMLReader({
   const [noteMenuOpen, setNoteMenuOpen] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [noteSelectedColor, setNoteSelectedColor] = useState<HighlightColor>('yellow')
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null)
+  const [quickAction, setQuickAction] = useState<{
+    type: 'dictionary' | 'translate' | 'explain'
+    text: string
+    result: string
+    loading: boolean
+  } | null>(null)
+
+  const refMap = useMemo(() => buildRefMap(blocks), [blocks])
 
   const releasePageSync = useCallback(() => {
     if (scrollReleaseTimerRef.current !== null) {
@@ -777,13 +1384,116 @@ export default function HTMLReader({
     resetSelectionState()
   }, [clearBrowserSelection, onAskSelection, resetSelectionState, selection])
 
+  const SYSTEM_PROMPTS: Record<string, string> = {
+    dictionary: '你是一个学术词典助手。请给出以下词汇或短语的释义，包括：中文释义、词性、学术语境中的含义。用中文回答，简洁明了。',
+    translate: '你是一个专业学术翻译助手。请将以下文本翻译为自然、准确的中文。只输出译文，不要解释。保留公式和专有名词。绝对不要输出英文原文。',
+    explain: '你是一个学术文献解读助手。请用通俗易懂的中文解释以下文本的含义，帮助读者理解其学术含义。解释要简洁明了。',
+  }
+
+  const handleQuickAction = useCallback(async (type: 'dictionary' | 'translate' | 'explain') => {
+    if (!selection?.text?.trim()) return
+
+    setQuickAction({ type, text: selection.text, result: '', loading: true })
+    clearBrowserSelection()
+    resetSelectionState()
+
+    const settings = getSettings()
+    const modelConfig = getSelectedSmallModel(settings)
+    if (!modelConfig?.apiKey || !modelConfig?.modelName) {
+      setQuickAction(prev => prev ? { ...prev, loading: false, result: '请先在设置中配置小参数模型的 API Key' } : null)
+      return
+    }
+
+    try {
+      const response = await fetch('/api/ai/assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: selection.text.trim() }],
+          modelConfig,
+          systemPrompt: SYSTEM_PROMPTS[type],
+        }),
+      })
+
+      if (!response.ok) {
+        setQuickAction(prev => prev ? { ...prev, loading: false, result: '请求失败' } : null)
+        return
+      }
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      let fullContent = ''
+      let buffer = ''
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              const parsed = JSON.parse(line)
+              if (parsed.type === 'text-delta') {
+                fullContent += parsed.delta
+                setQuickAction(prev => prev ? { ...prev, result: fullContent } : null)
+              }
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      }
+
+      setQuickAction(prev => prev ? { ...prev, loading: false, result: fullContent || '无结果' } : null)
+    } catch {
+      setQuickAction(prev => prev ? { ...prev, loading: false, result: '请求出错' } : null)
+    }
+  }, [clearBrowserSelection, resetSelectionState, selection])
+
+  const handleNoteClick = useCallback((annotation: PDFAnnotation) => {
+    setActiveNoteId(current => current === annotation.id ? null : annotation.id)
+  }, [])
+
+  const activeNoteAnnotation = useMemo(
+    () => annotations.find(a => a.id === activeNoteId && a.content),
+    [annotations, activeNoteId],
+  )
+
+  const handleDeleteAnnotation = useCallback(async (id: string) => {
+    await deleteAnnotation(id)
+    onAnnotationDelete?.(id)
+    setActiveNoteId(null)
+  }, [onAnnotationDelete])
+
+  const handleUpdateAnnotationContent = useCallback(async (id: string, content: string) => {
+    await updateAnnotation(id, { content, updatedAt: new Date().toISOString() })
+    const updated = annotations.find(a => a.id === id)
+    if (updated) {
+      onAnnotationUpdate?.({ ...updated, content, updatedAt: new Date().toISOString() })
+    }
+  }, [annotations, onAnnotationUpdate])
+
+  // Build per-page annotation map
+  const annotationsByPage = useMemo(() => {
+    const map = new Map<number, PDFAnnotation[]>()
+    for (const ann of annotations) {
+      const existing = map.get(ann.pageNum) || []
+      existing.push(ann)
+      map.set(ann.pageNum, existing)
+    }
+    return map
+  }, [annotations])
+
   return (
     <div
       ref={containerRef}
-      className="relative h-full overflow-auto bg-white"
+      className="relative h-full overflow-auto bg-[#fdfdfd]"
       onMouseUp={handleHtmlMouseUp}
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-col px-4 py-5 md:px-6 md:py-6">
+      <div className="mx-auto flex w-full max-w-4xl flex-col px-2 py-4 md:px-4 md:py-6">
         {pages.length === 0 && (
           <div className="px-6 py-14 text-center text-[#7a7a7a]">
             <Icon icon="mdi:text-box-search-outline" className="mx-auto mb-3 text-4xl text-[#9a9a9a]" />
@@ -800,6 +1510,9 @@ export default function HTMLReader({
             showTranslation={showTranslation}
             translationDisplayMode={translationDisplayMode}
             focusTarget={focusTarget}
+            refMap={refMap}
+            pageAnnotations={annotationsByPage.get(page.pageNumber) || []}
+            onNoteClick={handleNoteClick}
           />
         ))}
       </div>
@@ -815,9 +1528,9 @@ export default function HTMLReader({
           onHighlight={color => { void handleAddHighlight(color) }}
           onToggleNote={() => setNoteMenuOpen(value => !value)}
           onAskAI={handleAskSelectedText}
-          onDictionary={() => {}}
-          onTranslate={() => {}}
-          onExplain={() => {}}
+          onDictionary={() => handleQuickAction('dictionary')}
+          onTranslate={() => handleQuickAction('translate')}
+          onExplain={() => handleQuickAction('explain')}
           onNoteTextChange={setNoteText}
           onNoteColorChange={setNoteSelectedColor}
           onNoteCancel={() => {
@@ -828,10 +1541,108 @@ export default function HTMLReader({
         />
       )}
 
+      {/* Note annotation popover */}
+      {activeNoteAnnotation && (
+        <Popover
+          isOpen
+          placement="top"
+          showArrow
+          offset={12}
+          onOpenChange={open => {
+            if (!open) setActiveNoteId(null)
+          }}
+        >
+          <PopoverTrigger>
+            <button
+              type="button"
+              aria-label="annotation-note-anchor"
+              className="fixed opacity-0 pointer-events-none"
+              style={{ left: '50%', top: '40%', width: 1, height: 1 }}
+            />
+          </PopoverTrigger>
+          <PopoverContent className="max-w-72 bg-[#161a23] border border-[#2b3242] px-3 py-2">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: HIGHLIGHT_COLORS[activeNoteAnnotation.color].border }}
+                />
+                <span>第 {activeNoteAnnotation.pageNum} 页批注</span>
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  className="text-gray-500 hover:text-red-400 transition-colors"
+                  onClick={() => { void handleDeleteAnnotation(activeNoteAnnotation.id) }}
+                >
+                  <Icon icon="mdi:delete-outline" className="text-xs" />
+                </button>
+              </div>
+              <p className="text-xs leading-relaxed text-gray-200">
+                {activeNoteAnnotation.content}
+              </p>
+              <p className="text-[10px] text-gray-500 line-clamp-2 border-t border-[#2b3242] pt-1.5">
+                {activeNoteAnnotation.selectedText?.slice(0, 80)}{activeNoteAnnotation.selectedText && activeNoteAnnotation.selectedText.length > 80 ? '…' : ''}
+              </p>
+            </div>
+          </PopoverContent>
+        </Popover>
+      )}
+
       {pdfDoc && (
         <div className="fixed bottom-4 left-1/2 z-40 -translate-x-1/2 rounded-full border border-[#dddddd] bg-white/92 px-3 py-1 text-sm text-[#222] shadow-[0_12px_24px_rgba(15,23,42,0.12)] backdrop-blur">
           {visiblePage} / {pdfDoc.numPages}
         </div>
+      )}
+
+      {/* 快捷操作结果弹窗 */}
+      {quickAction && (
+        <Popover
+          isOpen
+          placement="top"
+          showArrow
+          offset={12}
+          onOpenChange={open => {
+            if (!open) setQuickAction(null)
+          }}
+        >
+          <PopoverTrigger>
+            <button
+              type="button"
+              aria-label="quick-action-anchor"
+              className="fixed opacity-0 pointer-events-none"
+              style={{ left: '50%', top: '40%', width: 1, height: 1 }}
+            />
+          </PopoverTrigger>
+          <PopoverContent className="max-w-80 bg-[#161a23] border border-[#2b3242] px-3 py-2">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-medium text-gray-400">
+                  {quickAction.type === 'dictionary' ? '词典' : quickAction.type === 'translate' ? '翻译' : '解释'}
+                </span>
+                <button
+                  type="button"
+                  className="text-gray-500 hover:text-gray-300 transition-colors"
+                  onClick={() => setQuickAction(null)}
+                >
+                  <Icon icon="mdi:close" className="text-xs" />
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-500 line-clamp-2">
+                {quickAction.text.slice(0, 80)}{quickAction.text.length > 80 ? '…' : ''}
+              </p>
+              {quickAction.loading ? (
+                <div className="flex items-center gap-2 py-1">
+                  <Icon icon="mdi:loading" className="text-sm text-blue-400 animate-spin" />
+                  <span className="text-xs text-gray-400">处理中…</span>
+                </div>
+              ) : (
+                <p className="text-xs leading-relaxed text-gray-200 whitespace-pre-wrap" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
+                  {quickAction.result}
+                </p>
+              )}
+            </div>
+          </PopoverContent>
+        </Popover>
       )}
 
       <style jsx global>{`
@@ -852,6 +1663,35 @@ export default function HTMLReader({
             box-shadow: 0 0 0 0 rgba(217, 119, 6, 0);
             transform: translateY(0);
           }
+        }
+
+        .hanging-indent {
+          text-indent: -1.5em;
+          padding-left: 1.5em;
+        }
+
+        .html-reader-page + .html-reader-page {
+          margin-top: 1.5rem;
+        }
+
+        .katex-display {
+          margin: 0.4em 0 !important;
+        }
+
+        .html-reader-page .katex {
+          font-size: 1em !important;
+        }
+
+        .picture-zoom {
+          transition: transform 0.25s ease;
+          transform-origin: center center;
+        }
+
+        .picture-zoom[data-zoomed="1"] {
+          position: relative;
+          z-index: 40;
+          border-radius: 8px;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
         }
       `}</style>
     </div>

@@ -1593,7 +1593,10 @@ export default function ImmersiveReaderPage() {
                 blocks={blocksWithTranslation}
                 showTranslation={showTranslation}
                 translationDisplayMode={translationDisplayMode}
+                annotations={annotations}
                 onAnnotationAdd={handleAnnotationAdd}
+                onAnnotationDelete={handleAnnotationDelete}
+                onAnnotationUpdate={handleAnnotationUpdate}
                 onAskSelection={(selection) => {
                   setSelectionQuestionContext({
                     id: `${Date.now()}`,

@@ -6,8 +6,11 @@ import { Icon } from '@iconify/react'
 import { Popover, PopoverContent, PopoverTrigger } from '@heroui/react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { GuideFocusTarget, HighlightColor, PDFAnnotation, TextBlock } from '@/lib/types'
-import { saveAnnotation } from '@/lib/pdfCache'
+import { HIGHLIGHT_COLORS } from '@/lib/types'
+import { extractCitationLinks, getBestCitationLink } from '@/lib/citationLinks'
+import { saveAnnotation, updateAnnotation, deleteAnnotation } from '@/lib/pdfCache'
 import { getSettings, getSelectedSmallModel } from '@/lib/storage'
+import { Citation, CitationTrigger, CitationContent } from '@/components/ui/citation'
 import SelectionToolbar from './SelectionToolbar'
 
 interface PDFDocumentProxy {
@@ -54,6 +57,9 @@ interface HTMLReaderProps {
   focusTarget?: GuideFocusTarget | null
   onAskSelection?: (selection: { text: string; pageNum: number; blockId?: string }) => void
   onAnnotationAdd?: (annotation: PDFAnnotation) => void
+  onAnnotationDelete?: (id: string) => void
+  onAnnotationUpdate?: (annotation: PDFAnnotation) => void
+  annotations?: PDFAnnotation[]
 }
 
 const PAGE_IMAGE_RENDER_SCALE = 1.8
@@ -178,16 +184,16 @@ function getReadableBlockText(block: TextBlock, preferTranslated = false) {
   return normalizeWrappedText(raw)
 }
 
-const SERIF_FONT = '"STIX Two Text", Charter, Georgia, "Noto Serif", "Source Han Serif SC", SimSun, serif'
+const SERIF_FONT = 'Georgia, "Noto Serif", "Source Han Serif SC", SimSun, serif'
 
 function getBlockTypography(block: TextBlock, zoomRatio: number) {
   const detectedFontSize = block.style.fontSize || 16
 
   if (block.type === 'title') {
     return {
-      fontSize: `${clamp(detectedFontSize * 1.18 * zoomRatio, 28, 42)}px`,
-      lineHeight: 1.12,
-      letterSpacing: '-0.04em',
+      fontSize: `${clamp(detectedFontSize * 1.1 * zoomRatio, 24, 36)}px`,
+      lineHeight: 1.25,
+      letterSpacing: '-0.02em',
       fontWeight: 700,
       fontFamily: SERIF_FONT,
     }
@@ -195,84 +201,84 @@ function getBlockTypography(block: TextBlock, zoomRatio: number) {
 
   if (block.type === 'subtitle') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.96 * zoomRatio, 20, 30)}px`,
-      lineHeight: 1.28,
-      letterSpacing: '-0.02em',
-      fontWeight: 640,
+      fontSize: `${clamp(detectedFontSize * 0.95 * zoomRatio, 18, 26)}px`,
+      lineHeight: 1.35,
+      letterSpacing: '-0.01em',
+      fontWeight: 600,
       fontFamily: SERIF_FONT,
     }
   }
 
   if (block.type === 'caption') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.92 * zoomRatio, 12, 15)}px`,
-      lineHeight: 1.55,
+      fontSize: `${clamp(detectedFontSize * 0.88 * zoomRatio, 12, 14)}px`,
+      lineHeight: 1.5,
       letterSpacing: '0',
-      fontWeight: 500,
+      fontWeight: 400,
       fontFamily: SERIF_FONT,
     }
   }
 
   if (block.type === 'reference') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.9 * zoomRatio, 13, 15)}px`,
-      lineHeight: 1.72,
+      fontSize: `${clamp(detectedFontSize * 0.85 * zoomRatio, 12, 14)}px`,
+      lineHeight: 1.65,
       letterSpacing: '0',
-      fontWeight: 500,
+      fontWeight: 400,
       fontFamily: SERIF_FONT,
     }
   }
 
   if (block.type === 'formula' || block.type === 'table') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.96 * zoomRatio, 14, 18)}px`,
-      lineHeight: 1.65,
+      fontSize: `${clamp(detectedFontSize * 0.92 * zoomRatio, 13, 17)}px`,
+      lineHeight: 1.6,
       letterSpacing: '0',
-      fontWeight: 520,
+      fontWeight: 400,
     }
   }
 
   if (block.type === 'header' || block.type === 'footer') {
     return {
-      fontSize: `${clamp(detectedFontSize * 0.82 * zoomRatio, 11, 13)}px`,
+      fontSize: `${clamp(detectedFontSize * 0.78 * zoomRatio, 10, 12)}px`,
       lineHeight: 1.4,
-      letterSpacing: '0.06em',
-      fontWeight: 600,
+      letterSpacing: '0.04em',
+      fontWeight: 400,
     }
   }
 
   return {
-    fontSize: `${clamp(detectedFontSize * 0.98 * zoomRatio, 15, 19)}px`,
-    lineHeight: 1.85,
-    letterSpacing: '0',
-    fontWeight: 500,
+    fontSize: `${clamp(detectedFontSize * 0.95 * zoomRatio, 14, 18)}px`,
+    lineHeight: 1.8,
+    letterSpacing: '0.01em',
+    fontWeight: 400,
     fontFamily: SERIF_FONT,
   }
 }
 
 function getBlockWrapperClass(block: TextBlock) {
   if (block.sourceLabel === 'Picture') {
-    return 'my-8'
+    return 'my-6'
   }
 
   switch (block.type) {
     case 'title':
-      return 'mb-6 pt-2'
+      return 'mb-4'
     case 'subtitle':
-      return 'mt-10 mb-4 pb-2 border-b border-[#d6d6d6]'
+      return 'mt-6 mb-3 pb-1.5 border-b border-[#e0e0e0]'
     case 'caption':
-      return 'mt-2 mb-6 text-center italic'
+      return 'my-2 text-center italic'
     case 'formula':
-      return 'my-6 overflow-x-auto bg-[#f8f8fc] border border-[#e4e4ec] rounded-lg px-4 py-3'
+      return 'my-4 overflow-x-auto rounded bg-[#f7f7fb] px-3 py-2'
     case 'table':
-      return 'my-5 overflow-x-auto bg-[#fafafa] border border-[#e0e0e0] rounded-lg px-3 py-2'
+      return 'my-4 overflow-x-auto rounded bg-[#fafafa] px-2 py-1.5'
     case 'reference':
-      return 'my-2 pl-4 border-l-2 border-[#c0c0c0]'
+      return 'my-1.5'
     case 'header':
     case 'footer':
-      return 'my-1'
+      return 'my-0.5'
     default:
-      return 'my-4'
+      return 'my-2.5'
   }
 }
 
@@ -416,6 +422,168 @@ function renderFormulaBlock(text: string): React.ReactNode {
   return <code className="text-sm bg-gray-50 px-1.5 py-0.5 rounded">{text}</code>
 }
 
+// ─── Citation rendering ────────────────────────────────────────────────
+
+type ParsedRef = {
+  index: number
+  title: string
+  authors: string
+  year: string
+  journal: string
+  raw: string
+  url: string | null
+  linkLabel: string | null
+}
+
+const YEAR_RE = /[\[(]?(?:19|20)\d{2}[\])]?/g
+const AUTHOR_RE = /^(?:\[\d+\]\s*)(([A-Z][a-zÀ-ſ]+(?:[\s-][A-Z][a-zÀ-ſ]+)*(?:\s+et\s+al\.?)?(?:\s*[,&]\s*[A-Z][a-zÀ-ſ]+(?:[\s-][A-Z][a-zÀ-ſ]+)*(?:\s+et\s+al\.?)?)*))/g
+const QUOTED_TITLE_RE = /[\""“]([^”\""]{8,}?)[\""”]/g
+
+function parseRefEntry(raw: string): ParsedRef {
+  const m = raw.match(/^\[(\d+)\]/)
+  const index = m ? Number(m[1]) : 0
+  const body = raw.replace(/^\[\d+\]\s*/, '')
+
+  // Year
+  const yearMatches = body.match(YEAR_RE)
+  const year = yearMatches?.[0]?.replace(/[\[\]()]/g, '') || ''
+
+  // Authors: text before first year or quoted title
+  let authors = ''
+  const yearIdx = year ? body.indexOf(yearMatches![0]) : -1
+  const quotedMatch = body.match(QUOTED_TITLE_RE)
+  const titleStartIdx = quotedMatch ? body.indexOf(quotedMatch[0]) : -1
+
+  if (yearIdx > 0) {
+    authors = body.slice(0, Math.min(yearIdx, titleStartIdx > 0 ? titleStartIdx : yearIdx)).replace(/[,;:]\s*$/, '').trim()
+  }
+
+  // Title from quotes
+  let title = ''
+  if (quotedMatch) {
+    title = quotedMatch[1]
+  }
+
+  // Journal: text after year, skip title
+  let journal = ''
+  if (year) {
+    const afterYear = body.slice(body.indexOf(yearMatches![0]) + yearMatches![0].length).trim()
+    // Remove quoted title from journal extraction
+    const withoutTitle = afterYear.replace(/[\""“][^”\""]+[\""”]/, '').trim()
+    const journalPart = withoutTitle.replace(/^[,.;:]\s*/, '').split(/[.,]\s*/)[0]
+    if (journalPart && journalPart.length > 2 && journalPart.length < 80) {
+      journal = journalPart
+    }
+  }
+
+  // If no quoted title, try sentence-based extraction
+  if (!title) {
+    const sentences = body.split(/(?<=[.!?])\s+/).filter(s => s.length > 10 && s.length < 240)
+    if (sentences.length > 0) {
+      // Heuristic: title is usually the first standalone sentence or after authors
+      for (const s of sentences) {
+        if (!/^\d{4}/.test(s) && !/^(https?:|doi:|pmid:)/i.test(s) && !/^(http|www)/i.test(s)) {
+          title = s.replace(/[""“”]/g, '')
+          break
+        }
+      }
+    }
+  }
+
+  if (!title) title = body.slice(0, 120)
+
+  // Links via citationLinks lib
+  const bestLink = getBestCitationLink(raw, { includeSearchLinks: false })
+  const url = bestLink?.url || null
+  const linkLabel = bestLink ? `${bestLink.label}` : null
+
+  return { index, title, authors, year, journal, raw, url, linkLabel }
+}
+
+function buildRefMap(blocks: TextBlock[]): Map<number, ParsedRef> {
+  const map = new Map<number, ParsedRef>()
+  for (const block of blocks) {
+    if (block.type !== 'reference') continue
+    const entries = splitReferenceEntries(block.text)
+    for (const entry of entries) {
+      const parsed = parseRefEntry(entry)
+      if (parsed.index > 0) map.set(parsed.index, parsed)
+    }
+  }
+  return map
+}
+
+const CITATION_INLINE_RE = /\[(\d+(?:\s*[,，\-–]\s*\d+)*)\]/g
+
+function parseCitationNumbers(match: string): number[] {
+  const inner = match.slice(1, -1)
+  const nums: number[] = []
+  for (const part of inner.split(/\s*[,，\-–]\s*/)) {
+    const n = Number(part)
+    if (Number.isInteger(n) && n > 0) nums.push(n)
+  }
+  return nums
+}
+
+function InlineCitationBadge({ num, refData }: { num: number; refData: ParsedRef | undefined }) {
+  if (!refData) {
+    return (
+      <span className="inline-flex h-[1.25em] min-w-[1.25em] items-center justify-center rounded-full bg-[#e8edf3] px-1 text-[0.7em] font-medium text-[#4a6a8a] tabular-nums cursor-default select-none align-baseline">
+        {num}
+      </span>
+    )
+  }
+
+  return (
+    <Citation
+      index={num}
+      title={refData.title}
+      sourceKind="asset"
+      year={refData.year || undefined}
+      journal={refData.journal || undefined}
+      authors={refData.authors ? refData.authors.split(/[,;&]\s*/).map(a => a.trim()).filter(Boolean) : undefined}
+      excerpt={refData.raw}
+    >
+      <CitationTrigger />
+      <CitationContent />
+    </Citation>
+  )
+}
+
+function renderTextWithCitations(
+  text: string,
+  refMap: Map<number, ParsedRef>,
+): React.ReactNode {
+  const parts: Array<{ type: 'text'; content: string } | { type: 'citation'; nums: number[] }> = []
+  let last = 0
+
+  for (const m of text.matchAll(CITATION_INLINE_RE)) {
+    if (m.index === undefined) continue
+    if (m.index > last) parts.push({ type: 'text', content: text.slice(last, m.index) })
+    parts.push({ type: 'citation', nums: parseCitationNumbers(m[0]) })
+    last = m.index + m[0].length
+  }
+  if (last < text.length) parts.push({ type: 'text', content: text.slice(last) })
+  if (parts.length === 0) return text
+  if (parts.length === 1 && parts[0].type === 'text') return renderTextWithLatex(text)
+
+  return (
+    <>
+      {parts.map((part, i) =>
+        part.type === 'citation' ? (
+          <span key={`cit-${i}`} className="inline-flex items-baseline gap-0.5">
+            {part.nums.map((num) => (
+              <InlineCitationBadge key={num} num={num} refData={refMap.get(num)} />
+            ))}
+          </span>
+        ) : (
+          <span key={`txt-${i}`}>{renderTextWithLatex(part.content)}</span>
+        ),
+      )}
+    </>
+  )
+}
+
 function splitReferenceEntries(text: string) {
   const normalized = normalizeBlockText(text)
     .replace(/([A-Za-z])-\s*\n\s*([A-Za-z])/g, '$1$2')
@@ -541,6 +709,9 @@ function HTMLReaderBlock({
   zoomRatio,
   focused,
   pageImageSrc,
+  refMap,
+  pageAnnotations,
+  onNoteClick,
 }: {
   block: TextBlock
   showTranslation: boolean
@@ -548,6 +719,9 @@ function HTMLReaderBlock({
   zoomRatio: number
   focused: boolean
   pageImageSrc: string | null
+  refMap: Map<number, ParsedRef>
+  pageAnnotations: PDFAnnotation[]
+  onNoteClick: (annotation: PDFAnnotation) => void
 }) {
   const rawOriginalText = getRawBlockText(block, false)
   const rawTranslatedText = getRawBlockText(block, true)
@@ -567,8 +741,22 @@ function HTMLReaderBlock({
         className={`${baseWrapper} ${focused ? 'ring-2 ring-[#d97706]/60 ring-offset-2 ring-offset-white' : ''}`}
       >
         <div
-          className="relative overflow-hidden rounded-2xl border border-[#d6d6d6] bg-[#fafafa]"
+          className="picture-zoom relative overflow-hidden rounded-2xl border border-[#d6d6d6] bg-[#fafafa] cursor-zoom-in"
           style={{ aspectRatio: cropStyle.aspectRatio }}
+          onClick={(e) => {
+            const container = e.currentTarget as HTMLElement
+            if (container.dataset.zoomed === '1') {
+              container.dataset.zoomed = '0'
+              container.style.transform = ''
+              container.classList.remove('cursor-zoom-out')
+              container.classList.add('cursor-zoom-in')
+            } else {
+              container.dataset.zoomed = '1'
+              container.style.transform = 'scale(2)'
+              container.classList.remove('cursor-zoom-in')
+              container.classList.add('cursor-zoom-out')
+            }
+          }}
         >
           {pageImageSrc ? (
             <img
@@ -649,6 +837,108 @@ function HTMLReaderBlock({
     )
   ) : null
 
+  // Highlight marks for this block
+  const blockHighlights = pageAnnotations.filter(
+    a => a.type === 'highlight' && a.selectedText && block.text.includes(a.selectedText),
+  )
+  const blockNotes = pageAnnotations.filter(
+    a => a.type === 'note' && a.selectedText && block.text.includes(a.selectedText),
+  )
+
+  // Render text with inline highlight/note marks
+  function renderTextWithAnnotations(text: string, refMap: Map<number, ParsedRef>): React.ReactNode {
+    if (blockHighlights.length === 0 && blockNotes.length === 0) {
+      return renderTextWithCitations(text, refMap)
+    }
+
+    // Collect all annotation segments to mark
+    type AnnSegment = { start: number; end: number; annotation: PDFAnnotation; isNote: boolean }
+    const segments: AnnSegment[] = []
+
+    for (const ann of [...blockHighlights, ...blockNotes]) {
+      const search = ann.selectedText
+      if (!search) continue
+      let idx = text.indexOf(search)
+      // Find the occurrence closest to the start
+      while (idx !== -1) {
+        // Check if this segment overlaps with existing ones — skip if so
+        const overlaps = segments.some(s =>
+          (idx >= s.start && idx < s.end) || (idx + search.length > s.start && idx + search.length <= s.end),
+        )
+        if (!overlaps) {
+          segments.push({
+            start: idx,
+            end: idx + search.length,
+            annotation: ann,
+            isNote: ann.type === 'note',
+          })
+          break
+        }
+        idx = text.indexOf(search, idx + 1)
+      }
+    }
+
+    if (segments.length === 0) return renderTextWithCitations(text, refMap)
+
+    segments.sort((a, b) => a.start - b.start)
+
+    const parts: React.ReactNode[] = []
+    let cursor = 0
+
+    for (const seg of segments) {
+      if (seg.start > cursor) {
+        parts.push(
+          <span key={`t-${cursor}`}>
+            {renderTextWithCitations(text.slice(cursor, seg.start), refMap)}
+          </span>,
+        )
+      }
+
+      const matched = text.slice(seg.start, seg.end)
+      if (seg.isNote) {
+        parts.push(
+          <span
+            key={`note-${seg.annotation.id}`}
+            className="html-reader-note-mark rounded-sm cursor-pointer"
+            style={{
+              backgroundColor: HIGHLIGHT_COLORS[seg.annotation.color].bg,
+              boxShadow: `inset 0 0 0 1px ${HIGHLIGHT_COLORS[seg.annotation.color].border}`,
+            }}
+            onClick={() => onNoteClick(seg.annotation)}
+          >
+            {renderTextWithCitations(matched, refMap)}
+            <Icon icon="mdi:notebook-outline" className="ml-0.5 inline text-[0.7em] opacity-60" />
+          </span>,
+        )
+      } else {
+        parts.push(
+          <mark
+            key={`hl-${seg.annotation.id}`}
+            className="html-reader-highlight rounded-sm"
+            style={{
+              backgroundColor: HIGHLIGHT_COLORS[seg.annotation.color].bg,
+              boxShadow: `inset 0 0 0 1px ${HIGHLIGHT_COLORS[seg.annotation.color].border}`,
+            }}
+          >
+            {renderTextWithCitations(matched, refMap)}
+          </mark>,
+        )
+      }
+
+      cursor = seg.end
+    }
+
+    if (cursor < text.length) {
+      parts.push(
+        <span key={`t-${cursor}`}>
+          {renderTextWithCitations(text.slice(cursor), refMap)}
+        </span>,
+      )
+    }
+
+    return <>{parts}</>
+  }
+
   return (
     <div
       data-block-id={block.id}
@@ -667,7 +957,7 @@ function HTMLReaderBlock({
                   ? renderReferenceBlock(rawOriginalText)
                 : renderableType === 'formula'
                   ? renderFormulaBlock(originalText)
-                  : renderTextWithLatex(originalText)}
+                  : renderTextWithAnnotations(originalText, refMap)}
             </div>
           )}
           {showTranslation && translatedPanel}
@@ -684,6 +974,9 @@ function HTMLReaderPage({
   showTranslation,
   translationDisplayMode,
   focusTarget,
+  refMap,
+  pageAnnotations,
+  onNoteClick,
 }: {
   page: PDFPageProxy
   blocks: TextBlock[]
@@ -691,6 +984,9 @@ function HTMLReaderPage({
   showTranslation: boolean
   translationDisplayMode: 'overlay' | 'parallel'
   focusTarget?: GuideFocusTarget | null
+  refMap: Map<number, ParsedRef>
+  pageAnnotations: PDFAnnotation[]
+  onNoteClick: (annotation: PDFAnnotation) => void
 }) {
   const pageBlocks = useMemo(
     () => sortBlocks(blocks.filter(block => block.pageNum === page.pageNumber)),
@@ -739,15 +1035,15 @@ function HTMLReaderPage({
   return (
     <section
       data-page-number={page.pageNumber}
-      className="html-reader-page relative scroll-mt-5 pt-8 first:pt-2"
+      className="html-reader-page relative scroll-mt-5 pt-6 first:pt-0"
     >
-      <div className="mb-3 flex items-center gap-2 text-[11px] text-[#999] font-mono select-none">
-        <span className="w-5 h-px bg-[#d0d0d0]" />
+      <div className="mb-2 flex items-center gap-1.5 text-[10px] text-[#bbb] font-mono select-none">
+        <span className="w-3 h-px bg-[#ddd]" />
         {page.pageNumber}
-        <span className="flex-1 h-px bg-[#d0d0d0]" />
+        <span className="flex-1 h-px bg-[#ddd]" />
       </div>
-      <div className="mx-auto w-full max-w-[840px] px-5 text-[#181818] md:px-10">
-        <div className="border-l-[3px] border-[#c8c8c8] pl-4 space-y-0.5">
+      <div className="mx-auto w-full max-w-[720px] px-4 text-[#1a1a1a] md:px-8">
+        <div className="space-y-0">
           {pageBlocks.map(block => (
             <HTMLReaderBlock
               key={block.id}
@@ -757,6 +1053,9 @@ function HTMLReaderPage({
               zoomRatio={zoomRatio}
               focused={focusTarget?.blockId === block.id && focusTarget.pageNum === block.pageNum}
               pageImageSrc={pageImageSrc}
+              refMap={refMap}
+              pageAnnotations={pageAnnotations}
+              onNoteClick={onNoteClick}
             />
           ))}
         </div>
@@ -779,6 +1078,9 @@ export default function HTMLReader({
   focusTarget,
   onAskSelection,
   onAnnotationAdd,
+  onAnnotationDelete,
+  onAnnotationUpdate,
+  annotations = [],
 }: HTMLReaderProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -793,12 +1095,15 @@ export default function HTMLReader({
   const [noteMenuOpen, setNoteMenuOpen] = useState(false)
   const [noteText, setNoteText] = useState('')
   const [noteSelectedColor, setNoteSelectedColor] = useState<HighlightColor>('yellow')
+  const [activeNoteId, setActiveNoteId] = useState<string | null>(null)
   const [quickAction, setQuickAction] = useState<{
     type: 'dictionary' | 'translate' | 'explain'
     text: string
     result: string
     loading: boolean
   } | null>(null)
+
+  const refMap = useMemo(() => buildRefMap(blocks), [blocks])
 
   const releasePageSync = useCallback(() => {
     if (scrollReleaseTimerRef.current !== null) {
@@ -1148,13 +1453,47 @@ export default function HTMLReader({
     }
   }, [clearBrowserSelection, resetSelectionState, selection])
 
+  const handleNoteClick = useCallback((annotation: PDFAnnotation) => {
+    setActiveNoteId(current => current === annotation.id ? null : annotation.id)
+  }, [])
+
+  const activeNoteAnnotation = useMemo(
+    () => annotations.find(a => a.id === activeNoteId && a.content),
+    [annotations, activeNoteId],
+  )
+
+  const handleDeleteAnnotation = useCallback(async (id: string) => {
+    await deleteAnnotation(id)
+    onAnnotationDelete?.(id)
+    setActiveNoteId(null)
+  }, [onAnnotationDelete])
+
+  const handleUpdateAnnotationContent = useCallback(async (id: string, content: string) => {
+    await updateAnnotation(id, { content, updatedAt: new Date().toISOString() })
+    const updated = annotations.find(a => a.id === id)
+    if (updated) {
+      onAnnotationUpdate?.({ ...updated, content, updatedAt: new Date().toISOString() })
+    }
+  }, [annotations, onAnnotationUpdate])
+
+  // Build per-page annotation map
+  const annotationsByPage = useMemo(() => {
+    const map = new Map<number, PDFAnnotation[]>()
+    for (const ann of annotations) {
+      const existing = map.get(ann.pageNum) || []
+      existing.push(ann)
+      map.set(ann.pageNum, existing)
+    }
+    return map
+  }, [annotations])
+
   return (
     <div
       ref={containerRef}
-      className="relative h-full overflow-auto bg-[#fefefe]"
+      className="relative h-full overflow-auto bg-[#fdfdfd]"
       onMouseUp={handleHtmlMouseUp}
     >
-      <div className="mx-auto flex w-full max-w-6xl flex-col px-4 py-5 md:px-6 md:py-6">
+      <div className="mx-auto flex w-full max-w-4xl flex-col px-2 py-4 md:px-4 md:py-6">
         {pages.length === 0 && (
           <div className="px-6 py-14 text-center text-[#7a7a7a]">
             <Icon icon="mdi:text-box-search-outline" className="mx-auto mb-3 text-4xl text-[#9a9a9a]" />
@@ -1171,6 +1510,9 @@ export default function HTMLReader({
             showTranslation={showTranslation}
             translationDisplayMode={translationDisplayMode}
             focusTarget={focusTarget}
+            refMap={refMap}
+            pageAnnotations={annotationsByPage.get(page.pageNumber) || []}
+            onNoteClick={handleNoteClick}
           />
         ))}
       </div>
@@ -1197,6 +1539,53 @@ export default function HTMLReader({
           }}
           onNoteSave={() => { void handleAddNote() }}
         />
+      )}
+
+      {/* Note annotation popover */}
+      {activeNoteAnnotation && (
+        <Popover
+          isOpen
+          placement="top"
+          showArrow
+          offset={12}
+          onOpenChange={open => {
+            if (!open) setActiveNoteId(null)
+          }}
+        >
+          <PopoverTrigger>
+            <button
+              type="button"
+              aria-label="annotation-note-anchor"
+              className="fixed opacity-0 pointer-events-none"
+              style={{ left: '50%', top: '40%', width: 1, height: 1 }}
+            />
+          </PopoverTrigger>
+          <PopoverContent className="max-w-72 bg-[#161a23] border border-[#2b3242] px-3 py-2">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-[10px] text-gray-400">
+                <span
+                  className="inline-block h-2.5 w-2.5 rounded-full"
+                  style={{ backgroundColor: HIGHLIGHT_COLORS[activeNoteAnnotation.color].border }}
+                />
+                <span>第 {activeNoteAnnotation.pageNum} 页批注</span>
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  className="text-gray-500 hover:text-red-400 transition-colors"
+                  onClick={() => { void handleDeleteAnnotation(activeNoteAnnotation.id) }}
+                >
+                  <Icon icon="mdi:delete-outline" className="text-xs" />
+                </button>
+              </div>
+              <p className="text-xs leading-relaxed text-gray-200">
+                {activeNoteAnnotation.content}
+              </p>
+              <p className="text-[10px] text-gray-500 line-clamp-2 border-t border-[#2b3242] pt-1.5">
+                {activeNoteAnnotation.selectedText?.slice(0, 80)}{activeNoteAnnotation.selectedText && activeNoteAnnotation.selectedText.length > 80 ? '…' : ''}
+              </p>
+            </div>
+          </PopoverContent>
+        </Popover>
       )}
 
       {pdfDoc && (
@@ -1282,11 +1671,27 @@ export default function HTMLReader({
         }
 
         .html-reader-page + .html-reader-page {
-          margin-top: 2rem;
+          margin-top: 1.5rem;
         }
 
         .katex-display {
-          margin: 0.5em 0 !important;
+          margin: 0.4em 0 !important;
+        }
+
+        .html-reader-page .katex {
+          font-size: 1em !important;
+        }
+
+        .picture-zoom {
+          transition: transform 0.25s ease;
+          transform-origin: center center;
+        }
+
+        .picture-zoom[data-zoomed="1"] {
+          position: relative;
+          z-index: 40;
+          border-radius: 8px;
+          box-shadow: 0 8px 32px rgba(0, 0, 0, 0.18);
         }
       `}</style>
     </div>

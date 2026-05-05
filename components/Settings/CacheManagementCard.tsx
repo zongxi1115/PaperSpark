@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react'
 import { Button, Card, CardBody, CardHeader, Divider, addToast } from '@heroui/react'
 import { Icon } from '@iconify/react'
+import { motion, useReducedMotion } from 'framer-motion'
 import {
   clearAllCache,
   clearCacheCategory,
@@ -18,7 +19,11 @@ const EMPTY_STATS: CacheStats = {
   categories: [],
 }
 
+const RING_RADIUS = 52
+const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS
+
 export function CacheManagementCard() {
+  const prefersReducedMotion = useReducedMotion()
   const [stats, setStats] = useState<CacheStats>(EMPTY_STATS)
   const [loading, setLoading] = useState(true)
   const [clearingAll, setClearingAll] = useState(false)
@@ -27,12 +32,12 @@ export function CacheManagementCard() {
 
   const refreshStats = useCallback(async () => {
     try {
-      const nextStats = await getCacheCategoryStats()
-      setStats(nextStats)
+      const next = await getCacheCategoryStats()
+      setStats(next)
       setSelectedId((current) => {
-        if (!nextStats.categories.length) return null
-        if (current && nextStats.categories.some(category => category.id === current)) return current
-        return nextStats.categories[0].id
+        if (!next.categories.length) return null
+        if (current && next.categories.some(item => item.id === current)) return current
+        return next.categories[0].id
       })
     } catch (error) {
       addToast({
@@ -50,26 +55,27 @@ export function CacheManagementCard() {
   }, [refreshStats])
 
   const selectedCategory = useMemo(
-    () => stats.categories.find(category => category.id === selectedId) ?? stats.categories[0] ?? null,
+    () => stats.categories.find(item => item.id === selectedId) ?? stats.categories[0] ?? null,
     [selectedId, stats.categories],
   )
 
-  const chartSegments = useMemo(() => {
+  const segments = useMemo(() => {
     if (stats.totalSize <= 0) return []
 
-    let offset = 0
+    let startRatio = 0
     return stats.categories
-      .filter(category => category.size > 0)
-      .map((category) => {
-        const ratio = category.size / stats.totalSize
-        const dash = ratio * 283
-        const segment = {
-          ...category,
-          dash,
-          offset,
+      .filter(item => item.size > 0)
+      .map((item) => {
+        const ratio = item.size / stats.totalSize
+        const strokeLength = ratio * RING_CIRCUMFERENCE
+        const dashOffset = -startRatio * RING_CIRCUMFERENCE
+        startRatio += ratio
+        return {
+          ...item,
+          ratio,
+          strokeLength,
+          dashOffset,
         }
-        offset -= dash
-        return segment
       })
   }, [stats.categories, stats.totalSize])
 
@@ -127,8 +133,8 @@ export function CacheManagementCard() {
             </Button>
             <Button
               size="sm"
-              color="danger"
               variant="flat"
+              color="danger"
               onPress={() => void handleClearAll()}
               isLoading={clearingAll}
               isDisabled={loading || stats.totalSize === 0 || Boolean(clearingId)}
@@ -138,55 +144,85 @@ export function CacheManagementCard() {
           </div>
         </div>
         <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-          查看本地缓存总占用与各类别明细，并按类别选择性清理。
+          左侧看总体分布，右侧按类别选择并清理。
         </p>
       </CardHeader>
       <Divider />
       <CardBody style={{ padding: 16 }}>
         <div style={layoutStyle}>
           <div style={leftPanelStyle}>
-            <div style={summaryCardStyle}>
-              <div style={{ position: 'relative', width: 220, height: 220, flexShrink: 0 }}>
-                <svg viewBox="0 0 120 120" style={{ width: '100%', height: '100%', transform: 'rotate(-90deg)' }}>
-                  <circle cx="60" cy="60" r="45" fill="none" stroke="var(--bg-tertiary)" strokeWidth="12" />
-                  {chartSegments.map(segment => (
+            <motion.div
+              initial={prefersReducedMotion ? false : { opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              style={visualPanelStyle}
+            >
+              <div style={ringWrapStyle}>
+                <svg viewBox="0 0 140 140" style={{ width: '100%', height: '100%', overflow: 'visible' }}>
+                  <g transform="rotate(-90 70 70)">
                     <circle
-                      key={segment.id}
-                      cx="60"
-                      cy="60"
-                      r="45"
+                      cx="70"
+                      cy="70"
+                      r={RING_RADIUS}
                       fill="none"
-                      stroke={segment.color}
-                      strokeWidth={selectedCategory?.id === segment.id ? 14 : 12}
-                      strokeLinecap="round"
-                      strokeDasharray={`${segment.dash} 283`}
-                      strokeDashoffset={segment.offset}
-                      style={{ transition: 'all 160ms ease' }}
+                      stroke="color-mix(in srgb, var(--border-color) 65%, transparent)"
+                      strokeWidth="12"
                     />
-                  ))}
+                    {segments.map((segment, index) => (
+                      <motion.circle
+                        key={segment.id}
+                        cx="70"
+                        cy="70"
+                        r={RING_RADIUS}
+                        fill="none"
+                        stroke={segment.color}
+                        strokeWidth={12}
+                        strokeLinecap="round"
+                        strokeDasharray={`${segment.strokeLength} ${RING_CIRCUMFERENCE}`}
+                        initial={prefersReducedMotion ? false : { strokeDasharray: `0 ${RING_CIRCUMFERENCE}` }}
+                        animate={{ strokeDasharray: `${segment.strokeLength} ${RING_CIRCUMFERENCE}`, strokeDashoffset: segment.dashOffset }}
+                        transition={{ duration: 0.65, delay: prefersReducedMotion ? 0 : index * 0.06, ease: 'easeOut' }}
+                      />
+                    ))}
+                  </g>
                 </svg>
-                <div style={chartCenterStyle}>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>总占用</span>
-                  <span style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)', lineHeight: 1.1 }}>
+                <div style={ringCenterStyle}>
+                  <span style={ringLabelStyle}>总缓存</span>
+                  <motion.span
+                    key={stats.totalSize}
+                    initial={prefersReducedMotion ? false : { opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.28 }}
+                    style={ringValueStyle}
+                  >
                     {formatBytes(stats.totalSize)}
-                  </span>
-                  <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                    {stats.totalCount} 项缓存
-                  </span>
+                  </motion.span>
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gap: 8, width: '100%' }}>
-                <div style={miniTileStyle}>
-                  <span style={miniLabelStyle}>最大类别</span>
-                  <span style={miniValueStyle}>{getLargestCategoryLabel(stats.categories)}</span>
-                </div>
-                <div style={miniTileStyle}>
-                  <span style={miniLabelStyle}>当前选择</span>
-                  <span style={miniValueStyle}>{selectedCategory?.label || '暂无缓存'}</span>
-                </div>
-              </div>
-            </div>
+              {selectedCategory ? (
+                <motion.div
+                  key={selectedCategory.id}
+                  initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.25 }}
+                  style={selectedMetaStyle}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ width: 10, height: 10, borderRadius: 999, background: selectedCategory.color }} />
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)' }}>{selectedCategory.label}</span>
+                  </div>
+                  <p style={{ margin: 0, fontSize: 12, lineHeight: 1.65, color: 'var(--text-muted)' }}>
+                    {selectedCategory.description}
+                  </p>
+                  <div style={selectedStatsRowStyle}>
+                    <span>{formatBytes(selectedCategory.size)}</span>
+                    <span>{selectedCategory.count} 项</span>
+                    <span>{formatPercent(selectedCategory.size, stats.totalSize)}</span>
+                  </div>
+                </motion.div>
+              ) : null}
+            </motion.div>
           </div>
 
           <div style={rightPanelStyle}>
@@ -195,90 +231,56 @@ export function CacheManagementCard() {
             ) : stats.categories.length === 0 ? (
               <div style={emptyStateStyle}>当前没有可管理的缓存数据。</div>
             ) : (
-              <>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  {stats.categories.map(category => {
-                    const isSelected = selectedCategory?.id === category.id
-                    return (
+              <div style={listStyle}>
+                {stats.categories.map((category, index) => {
+                  const isSelected = category.id === selectedCategory?.id
+                  return (
+                    <motion.div
+                      key={category.id}
+                      initial={prefersReducedMotion ? false : { opacity: 0, x: 12 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ duration: 0.28, delay: prefersReducedMotion ? 0 : index * 0.04 }}
+                      style={{
+                        ...listRowStyle,
+                        borderColor: isSelected ? category.color : 'var(--border-color)',
+                        background: isSelected ? 'color-mix(in srgb, var(--bg-secondary) 72%, white 28%)' : 'transparent',
+                      }}
+                    >
                       <button
-                        key={category.id}
                         type="button"
                         onClick={() => setSelectedId(category.id)}
-                        style={{
-                          ...rowButtonStyle,
-                          borderColor: isSelected ? category.color : 'var(--border-color)',
-                          background: isSelected ? `color-mix(in srgb, ${category.color} 12%, var(--bg-secondary))` : 'var(--bg-secondary)',
-                        }}
+                        style={listButtonStyle}
                       >
-                        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <span style={{ width: 10, height: 10, borderRadius: 999, background: category.color, flexShrink: 0 }} />
-                          <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{category.label}</span>
-                            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{category.count} 项</span>
+                        <span style={{ display: 'flex', alignItems: 'flex-start', gap: 10, minWidth: 0 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: 999, background: category.color, flexShrink: 0 }} />
+                          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                            <span style={listTitleStyle}>{category.label}</span>
+                            <span style={listValueStyle}>{formatBytes(category.size)}</span>
                           </span>
                         </span>
-                        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>
-                          {formatBytes(category.size)}
-                        </span>
+                        <span style={listCaptionStyle}>{category.count} 项</span>
                       </button>
-                    )
-                  })}
-                </div>
 
-                {selectedCategory ? (
-                  <div style={detailCardStyle}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <span style={{ width: 12, height: 12, borderRadius: 999, background: selectedCategory.color }} />
-                          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{selectedCategory.label}</span>
-                        </div>
-                        <p style={{ fontSize: 12, lineHeight: 1.6, color: 'var(--text-muted)', margin: 0 }}>
-                          {selectedCategory.description}
-                        </p>
-                      </div>
                       <Button
                         size="sm"
+                        variant="light"
                         color="danger"
-                        variant="flat"
-                        onPress={() => void handleClearCategory(selectedCategory)}
-                        isLoading={clearingId === selectedCategory.id}
-                        isDisabled={selectedCategory.size === 0 || clearingAll}
+                        onPress={() => void handleClearCategory(category)}
+                        isLoading={clearingId === category.id}
+                        isDisabled={category.size === 0 || clearingAll}
                       >
-                        清理该类别
+                        清理
                       </Button>
-                    </div>
-
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 8 }}>
-                      <div style={miniTileStyle}>
-                        <span style={miniLabelStyle}>占用大小</span>
-                        <span style={miniValueStyle}>{formatBytes(selectedCategory.size)}</span>
-                      </div>
-                      <div style={miniTileStyle}>
-                        <span style={miniLabelStyle}>缓存数量</span>
-                        <span style={miniValueStyle}>{selectedCategory.count} 项</span>
-                      </div>
-                      <div style={miniTileStyle}>
-                        <span style={miniLabelStyle}>占总缓存</span>
-                        <span style={miniValueStyle}>{formatPercent(selectedCategory.size, stats.totalSize)}</span>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-              </>
+                    </motion.div>
+                  )
+                })}
+              </div>
             )}
           </div>
         </div>
       </CardBody>
     </Card>
   )
-}
-
-function getLargestCategoryLabel(categories: CacheCategoryStat[]) {
-  if (categories.length === 0) return '暂无'
-  const largest = [...categories].sort((a, b) => b.size - a.size)[0]
-  if (!largest || largest.size <= 0) return '暂无'
-  return largest.label
 }
 
 function formatPercent(value: number, total: number) {
@@ -291,20 +293,18 @@ function formatBytes(bytes: number) {
   const units = ['B', 'KB', 'MB', 'GB']
   let value = bytes
   let index = 0
-
   while (value >= 1024 && index < units.length - 1) {
     value /= 1024
     index += 1
   }
-
   const decimals = value >= 100 || index === 0 ? 0 : value >= 10 ? 1 : 2
   return `${value.toFixed(decimals)} ${units[index]}`
 }
 
 const layoutStyle: CSSProperties = {
   display: 'grid',
-  gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-  gap: 16,
+  gridTemplateColumns: 'minmax(260px, 0.78fr) minmax(0, 1.72fr)',
+  gap: 22,
   alignItems: 'stretch',
 }
 
@@ -314,25 +314,27 @@ const leftPanelStyle: CSSProperties = {
 
 const rightPanelStyle: CSSProperties = {
   minWidth: 0,
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 12,
 }
 
-const summaryCardStyle: CSSProperties = {
+const visualPanelStyle: CSSProperties = {
   height: '100%',
-  borderRadius: 16,
+  padding: 18,
+  borderRadius: 18,
   border: '1px solid var(--border-color)',
   background: 'linear-gradient(180deg, color-mix(in srgb, var(--bg-secondary) 86%, white 14%), var(--bg-secondary))',
-  padding: 18,
   display: 'flex',
   flexDirection: 'column',
   gap: 16,
-  alignItems: 'center',
-  justifyContent: 'center',
 }
 
-const chartCenterStyle: CSSProperties = {
+const ringWrapStyle: CSSProperties = {
+  position: 'relative',
+  width: 240,
+  height: 240,
+  alignSelf: 'center',
+}
+
+const ringCenterStyle: CSSProperties = {
   position: 'absolute',
   inset: 0,
   display: 'flex',
@@ -343,49 +345,85 @@ const chartCenterStyle: CSSProperties = {
   textAlign: 'center',
 }
 
-const miniTileStyle: CSSProperties = {
-  padding: '10px 12px',
-  borderRadius: 12,
-  background: 'var(--bg-primary)',
-  border: '1px solid var(--border-color)',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: 4,
-}
-
-const miniLabelStyle: CSSProperties = {
-  fontSize: 11,
+const ringLabelStyle: CSSProperties = {
+  fontSize: 12,
   color: 'var(--text-muted)',
 }
 
-const miniValueStyle: CSSProperties = {
-  fontSize: 13,
-  fontWeight: 600,
+const ringValueStyle: CSSProperties = {
+  fontSize: 30,
+  fontWeight: 700,
+  lineHeight: 1.05,
+  color: 'var(--text-primary)',
+}
+
+const selectedMetaStyle: CSSProperties = {
+  padding: '12px 14px',
+  borderRadius: 14,
+  border: '1px solid var(--border-color)',
+  background: 'var(--bg-primary)',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 10,
+}
+
+const selectedStatsRowStyle: CSSProperties = {
+  display: 'flex',
+  gap: 10,
+  flexWrap: 'wrap',
+  fontSize: 12,
   color: 'var(--text-secondary)',
 }
 
-const rowButtonStyle: CSSProperties = {
-  width: '100%',
-  borderRadius: 14,
-  border: '1px solid var(--border-color)',
-  padding: '12px 14px',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 12,
-  cursor: 'pointer',
-  transition: 'all 160ms ease',
-  textAlign: 'left',
-}
-
-const detailCardStyle: CSSProperties = {
-  borderRadius: 16,
-  border: '1px solid var(--border-color)',
-  background: 'var(--bg-secondary)',
-  padding: 16,
+const listStyle: CSSProperties = {
   display: 'flex',
   flexDirection: 'column',
-  gap: 14,
+  borderTop: '1px solid var(--border-color)',
+}
+
+const listRowStyle: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'minmax(0, 1fr) auto',
+  gap: 12,
+  alignItems: 'center',
+  padding: '10px 0',
+  borderBottom: '1px solid var(--border-color)',
+  transition: 'background 160ms ease, border-color 160ms ease',
+}
+
+const listButtonStyle: CSSProperties = {
+  width: '100%',
+  padding: '0 2px',
+  background: 'transparent',
+  border: 0,
+  display: 'flex',
+  alignItems: 'flex-start',
+  justifyContent: 'space-between',
+  gap: 12,
+  textAlign: 'left',
+  cursor: 'pointer',
+  minWidth: 0,
+}
+
+const listTitleStyle: CSSProperties = {
+  fontSize: 14,
+  fontWeight: 600,
+  color: 'var(--text-primary)',
+  whiteSpace: 'nowrap',
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+}
+
+const listCaptionStyle: CSSProperties = {
+  fontSize: 11,
+  color: 'var(--text-muted)',
+  flexShrink: 0,
+}
+
+const listValueStyle: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 600,
+  color: 'var(--text-secondary)',
 }
 
 const emptyStateStyle: CSSProperties = {

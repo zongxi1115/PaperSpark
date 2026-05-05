@@ -6,6 +6,7 @@ import { WorkspaceBridgeAutoSync } from '@/components/Settings/WorkspaceBridgeAu
 import { createContext, useContext, useEffect, useState } from 'react'
 import { useTheme, ThemeMode } from '@/lib/theme'
 import { initializeStorage } from '@/lib/storage/StorageFactory'
+import { syncDesktopLauncherSettingsToLocalStorage } from '@/lib/desktopSettingsSync'
 
 // 主题 Context
 interface ThemeContextValue {
@@ -35,6 +36,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
     let active = true
 
     void initializeStorage()
+      .then(() => syncDesktopLauncherSettingsToLocalStorage())
       .catch((error) => {
         console.error('Workspace storage bootstrap failed:', error)
       })

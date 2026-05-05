@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -305,7 +306,7 @@
       gap: 16px;
     }
 
-    .section-title > span {
+    .section-title>span {
       min-width: 0;
     }
 
@@ -474,15 +475,15 @@
       box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
     }
 
-    .switch input:checked + .slider {
+    .switch input:checked+.slider {
       background: var(--color-primary);
     }
 
-    .switch input:checked + .slider::before {
+    .switch input:checked+.slider::before {
       transform: translateX(20px);
     }
 
-    .switch input:disabled + .slider {
+    .switch input:disabled+.slider {
       opacity: 0.45;
       cursor: not-allowed;
     }
@@ -982,6 +983,7 @@
     }
   </style>
 </head>
+
 <body>
   <div class="titlebar">
     <div class="titlebar-brand">
@@ -1007,7 +1009,10 @@
           </div>
           <div class="header-titles">
             <h1>配置 Python 微服务</h1>
-            <p>虽然PaperSpark 不完全依赖 Python 引擎，但是配置python后可获得全量功能的体验，你可以绑定本机环境，也可以直接跳过 Python 环境先启动主应用。</p>
+            <p>虽然PaperSpark 不完全依赖 Python 引擎，但是配置python后可获得全量功能的体验，你可以绑定本机环境，也可以直接跳过 Python 环境先启动主应用。
+              <b style="color: red;">注意：在引导完成后，建议前往设置页面配置更多完整内容。</b>
+
+            </p>
           </div>
         </div>
 
@@ -1035,8 +1040,10 @@
           <div class="section-title">
             <span>当前本机查找到的 Python</span>
             <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;">
-              <button class="btn-sm" id="refreshButton" type="button"><i data-lucide="refresh-cw" width="14"></i>重新扫描</button>
-              <button class="btn-sm" id="browseButton" type="button"><i data-lucide="folder-search" width="14"></i>手动指定</button>
+              <button class="btn-sm" id="refreshButton" type="button"><i data-lucide="refresh-cw"
+                  width="14"></i>重新扫描</button>
+              <button class="btn-sm" id="browseButton" type="button"><i data-lucide="folder-search"
+                  width="14"></i>手动指定</button>
             </div>
           </div>
 
@@ -1084,7 +1091,9 @@
                 </div>
                 <p>不绑定 Python 环境，直接进入 PaperSpark 主界面。后续仍然可以在设置里补充或切换解析能力。</p>
               </div>
-              <div class="strategy-radio"><div class="radio-inner"></div></div>
+              <div class="strategy-radio">
+                <div class="radio-inner"></div>
+              </div>
             </button>
 
             <button class="strategy-card active" data-mode="local" id="modeLocal" type="button">
@@ -1096,7 +1105,9 @@
                 </div>
                 <p>完全使用本机硬件进行文档识别。若保持“不指定 Python 环境”，这里会保持禁用状态，只保留主应用直启动能力。</p>
               </div>
-              <div class="strategy-radio"><div class="radio-inner"></div></div>
+              <div class="strategy-radio">
+                <div class="radio-inner"></div>
+              </div>
             </button>
 
             <button class="strategy-card" data-mode="cloud" id="modeCloud" type="button">
@@ -1108,7 +1119,9 @@
                 </div>
                 <p>本地不承担推理运算，将 Python 服务一键打包部署到 Modal 平台并提供接口。</p>
               </div>
-              <div class="strategy-radio"><div class="radio-inner"></div></div>
+              <div class="strategy-radio">
+                <div class="radio-inner"></div>
+              </div>
             </button>
 
             <button class="strategy-card" data-mode="mineru" id="modeMineru" type="button">
@@ -1120,7 +1133,9 @@
                 </div>
                 <p>完全独立于本地环境的商业化解析，只需提供 API Key 即可快速接入使用。</p>
               </div>
-              <div class="strategy-radio"><div class="radio-inner"></div></div>
+              <div class="strategy-radio">
+                <div class="radio-inner"></div>
+              </div>
             </button>
           </div>
         </div>
@@ -1146,13 +1161,15 @@
             <div class="panel-title"><i data-lucide="terminal" width="20" color="#6366f1"></i> Modal 部署向导</div>
             <div class="panel-desc">请在命令行中执行以下命令进行部署，并将生成的终端地址填入下方。</div>
             <div class="code-block"><span># 登录 Modal 账号</span>
-python -m modal setup
+              python -m modal setup
 
-<span># 一键部署服务代码</span>
-python -m modal deploy services/modal_app.py</div>
+              <span># 一键部署服务代码</span>
+              python -m modal deploy services/modal_app.py
+            </div>
             <div class="field-group">
               <label for="serviceUrlInput">Modal 服务端点 (Web URL)</label>
-              <input class="input-field" id="serviceUrlInput" type="url" placeholder="https://your-name--paperspark-webapp.modal.run" />
+              <input class="input-field" id="serviceUrlInput" type="url"
+                placeholder="https://your-name--paperspark-webapp.modal.run" />
             </div>
           </div>
 
@@ -1182,8 +1199,10 @@ python -m modal deploy services/modal_app.py</div>
         <div class="launch-note" id="statusLine">正在扫描本机已有的 Python 环境...</div>
         <div class="buttons-row">
           <button class="btn btn-secondary" id="prevBtn" type="button" style="display:none;">上一步</button>
-          <button class="btn btn-primary" id="nextBtn" type="button">下一步 <i data-lucide="arrow-right" width="16"></i></button>
-          <button class="btn btn-primary" id="launchBtn" type="button" style="display:none;">完成并启动 <i data-lucide="rocket" width="16"></i></button>
+          <button class="btn btn-primary" id="nextBtn" type="button">下一步 <i data-lucide="arrow-right"
+              width="16"></i></button>
+          <button class="btn btn-primary" id="launchBtn" type="button" style="display:none;">完成并启动 <i
+              data-lucide="rocket" width="16"></i></button>
         </div>
       </div>
     </div>
@@ -1357,29 +1376,29 @@ python -m modal deploy services/modal_app.py</div>
 
       const capabilityRows = candidate
         ? [
-            {
-              title: '在线 Python 代码运行',
-              desc: '需要 FastAPI + uvicorn + NumPy 三件套满足后才能使用。',
-              ok: codeRuntimeReady,
-            },
-            {
-              title: '高级文档解析与 OCR',
-              desc: selfHostedReady ? '支持复杂 PDF 版面、公式与图文混排解析。' : '当前环境还缺少本地自部署解析所需依赖。',
-              ok: selfHostedReady,
-            },
-          ]
+          {
+            title: '在线 Python 代码运行',
+            desc: '需要 FastAPI + uvicorn + NumPy 三件套满足后才能使用。',
+            ok: codeRuntimeReady,
+          },
+          {
+            title: '高级文档解析与 OCR',
+            desc: selfHostedReady ? '支持复杂 PDF 版面、公式与图文混排解析。' : '当前环境还缺少本地自部署解析所需依赖。',
+            ok: selfHostedReady,
+          },
+        ]
         : [
-            {
-              title: '主应用直接启动',
-              desc: '不绑定 Python 环境，先进入 PaperSpark 主界面。',
-              ok: true,
-            },
-            {
-              title: '后续补充解析能力',
-              desc: '你可以稍后再从设置中接入本地或云端 Python 服务。',
-              ok: true,
-            },
-          ]
+          {
+            title: '主应用直接启动',
+            desc: '不绑定 Python 环境，先进入 PaperSpark 主界面。',
+            ok: true,
+          },
+          {
+            title: '后续补充解析能力',
+            desc: '你可以稍后再从设置中接入本地或云端 Python 服务。',
+            ok: true,
+          },
+        ]
 
       capList.innerHTML = capabilityRows.map((item) => `
         <div class="cap-item">
@@ -1775,14 +1794,14 @@ python -m modal deploy services/modal_app.py</div>
         state.selectedMode === 'skip'
           ? '正在跳过 Python 运行环境并启动 PaperSpark，请稍候...'
           : state.selectedMode === 'local'
-          ? (candidate
-            ? (enableLocalParser
-              ? '正在启动本地 Python 解析引擎和 PaperSpark，请稍候...'
-              : '正在使用所选 Python 环境启动 PaperSpark，请稍候...')
-            : '正在跳过 Python 运行环境并启动 PaperSpark，请稍候...')
-          : state.selectedMode === 'cloud'
-            ? '正在接入 Modal 云端解析并启动 PaperSpark，请稍候...'
-            : '正在接入 MinerU 云端解析并启动 PaperSpark，请稍候...',
+            ? (candidate
+              ? (enableLocalParser
+                ? '正在启动本地 Python 解析引擎和 PaperSpark，请稍候...'
+                : '正在使用所选 Python 环境启动 PaperSpark，请稍候...')
+              : '正在跳过 Python 运行环境并启动 PaperSpark，请稍候...')
+            : state.selectedMode === 'cloud'
+              ? '正在接入 Modal 云端解析并启动 PaperSpark，请稍候...'
+              : '正在接入 MinerU 云端解析并启动 PaperSpark，请稍候...',
       )
 
       try {
@@ -1856,4 +1875,5 @@ python -m modal deploy services/modal_app.py</div>
     loadCandidates()
   </script>
 </body>
+
 </html>

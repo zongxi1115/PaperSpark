@@ -3,9 +3,11 @@
 import dynamic from 'next/dynamic'
 import { createReactBlockSpec } from '@blocknote/react'
 import type { ReactCustomBlockRenderProps } from '@blocknote/react'
-import { getCanvasBlockDefaults, type CanvasBlockProps, type CanvasOriginRect } from '@/lib/canvasX6'
+import { getCanvasBlockDefaults, type CanvasBlockProps, type CanvasOriginRect } from '@/lib/canvas'
 import { useThemeContext } from '@/components/Providers'
 import { useRef, useState } from 'react'
+import { PenTool, MousePointerSquareDashed, Maximize2 } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 const CanvasEditor = dynamic(
   () => import('./CanvasEditor').then((mod) => mod.CanvasEditor),
@@ -77,102 +79,89 @@ function CanvasPreview(props: CanvasBlockRenderProps) {
         type="button"
         contentEditable={false}
         onClick={openEditor}
-        style={{
-          width: 'min(100%, 760px)',
-          padding: 0,
-          border: `1px solid ${isDark ? 'rgba(148, 163, 184, 0.16)' : 'rgba(148, 163, 184, 0.24)'}`,
-          borderRadius: 20,
-          background: isDark ? 'rgba(15, 23, 42, 0.86)' : 'rgba(248, 250, 252, 0.96)',
-          boxShadow: isDark ? '0 12px 28px rgba(2, 6, 23, 0.24)' : '0 12px 28px rgba(15, 23, 42, 0.08)',
-          cursor: 'pointer',
-          overflow: 'hidden',
-          display: 'block',
-          position: 'relative',
-          textAlign: 'left',
-        }}
+        className={cn(
+          "group w-full max-w-[760px] block relative text-left overflow-hidden cursor-pointer",
+          "rounded-2xl border transition-all duration-200 outline-none my-2",
+          isDark
+            ? "border-slate-800 hover:border-indigo-500/50 bg-slate-900/60 hover:bg-slate-900/80 shadow-[0_8px_30px_rgb(0,0,0,0.12)]"
+            : "border-slate-200 hover:border-indigo-400 bg-slate-50/50 hover:bg-slate-50/80 shadow-[0_2px_12px_rgb(0,0,0,0.04)] hover:shadow-lg"
+        )}
       >
         {previewDataUrl ? (
-          <div style={{ position: 'relative', aspectRatio, minHeight: 220, background: isDark ? '#08111f' : '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div 
+            className={cn(
+              "relative flex items-center justify-center overflow-hidden",
+              isDark ? "bg-[#080d19]" : "bg-slate-50/80"
+            )} 
+            style={{ aspectRatio, minHeight: 220 }}
+          >
             <img
               src={previewDataUrl}
               alt="画板预览"
               draggable={false}
-              style={{
-                maxWidth: '100%',
-                maxHeight: '100%',
-                objectFit: 'contain',
-                display: 'block',
-              }}
+              className="w-full h-full object-contain drop-shadow-sm"
             />
             <div
-              style={{
-                position: 'absolute',
-                right: 14,
-                bottom: 14,
-                padding: '6px 10px',
-                borderRadius: 999,
-                background: isDark ? 'rgba(2, 6, 23, 0.72)' : 'rgba(15, 23, 42, 0.72)',
-                color: '#ffffff',
-                fontSize: 12,
-                fontWeight: 700,
-                backdropFilter: 'blur(8px)',
-              }}
+              className={cn(
+                "absolute right-4 bottom-4 px-3 py-1.5 rounded-full text-xs font-semibold flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-md shadow-sm",
+                isDark 
+                  ? "bg-slate-800/80 text-slate-200 border border-slate-700/50" 
+                  : "bg-white/90 text-slate-700 border border-slate-200/60"
+              )}
             >
+              <Maximize2 className="w-3.5 h-3.5" />
               点击编辑
             </div>
           </div>
         ) : (
           <div
-            style={{
-              aspectRatio,
-              minHeight: 220,
-              display: 'grid',
-              placeItems: 'center',
-              padding: 24,
-              background: isDark
-                ? 'radial-gradient(circle at top left, rgba(99, 102, 241, 0.18), rgba(15, 23, 42, 0.92) 56%)'
-                : 'radial-gradient(circle at top left, rgba(99, 102, 241, 0.12), rgba(248, 250, 252, 0.98) 60%)',
-            }}
+            className={cn(
+              "flex flex-col items-center justify-center p-12 transition-colors",
+              isDark
+                ? "bg-gradient-to-b from-slate-800/10 to-transparent text-slate-400 group-hover:text-slate-300"
+                : "bg-gradient-to-b from-indigo-50/20 to-transparent text-slate-500 group-hover:text-slate-600"
+            )}
+            style={{ aspectRatio, minHeight: 220 }}
           >
-            <div style={{ textAlign: 'center' }}>
-              <div
-                style={{
-                  width: 58,
-                  height: 58,
-                  borderRadius: 18,
-                  margin: '0 auto 14px',
-                  display: 'grid',
-                  placeItems: 'center',
-                  background: isDark ? 'rgba(99, 102, 241, 0.2)' : 'rgba(99, 102, 241, 0.12)',
-                  color: isDark ? '#c7d2fe' : '#4f46e5',
-                  fontSize: 24,
-                }}
-              >
-                ✦
-              </div>
-              <div style={{ fontSize: 17, fontWeight: 700, color: isDark ? '#e2e8f0' : '#0f172a' }}>
-                点击创建图表
-              </div>
-              <div style={{ marginTop: 6, fontSize: 13, color: isDark ? 'rgba(203, 213, 225, 0.76)' : 'rgba(71, 85, 105, 0.88)' }}>
-                用于流程图、架构图、实验流程与论文插图
-              </div>
+            <div className={cn(
+              "w-14 h-14 rounded-2xl flex items-center justify-center mb-4 transition-all duration-300 group-hover:scale-110 group-hover:-rotate-3 shadow-sm",
+              isDark ? "bg-indigo-500/20 text-indigo-400" : "bg-indigo-100 text-indigo-600"
+            )}>
+              <PenTool className="w-7 h-7" />
+            </div>
+            <div className={cn(
+              "text-[17px] font-bold mb-1.5",
+              isDark ? "text-slate-200" : "text-slate-800"
+            )}>
+              点击创建图表
+            </div>
+            <div className={cn(
+              "text-[13px] text-center max-w-sm",
+              isDark ? "text-slate-400/80" : "text-slate-500/90"
+            )}>
+              用于流程图、架构图、实验流程与论文插图
             </div>
           </div>
         )}
 
         <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px 16px',
-            borderTop: `1px solid ${isDark ? 'rgba(148, 163, 184, 0.12)' : 'rgba(148, 163, 184, 0.18)'}`,
-            color: isDark ? '#cbd5e1' : '#475569',
-            fontSize: 12,
-          }}
+          className={cn(
+            "flex items-center justify-between px-4 py-3 text-xs font-medium border-t transition-colors",
+            isDark 
+              ? "border-slate-800/60 bg-slate-950/40 text-slate-400 group-hover:bg-slate-900/60" 
+              : "border-slate-200/60 bg-white/80 text-slate-500 group-hover:bg-white"
+          )}
         >
-          <span>画板块</span>
-          <span>{previewDataUrl ? '点击放大全屏编辑' : '新建图表'}</span>
+          <div className="flex items-center gap-2">
+            <MousePointerSquareDashed className="w-4 h-4 opacity-70" />
+            <span>画布区块</span>
+          </div>
+          <span className={cn(
+            "flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity",
+            isDark ? "text-indigo-400" : "text-indigo-600"
+          )}>
+            {previewDataUrl ? '查看详情' : '新建图表'}
+          </span>
         </div>
       </button>
 

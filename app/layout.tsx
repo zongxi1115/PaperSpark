@@ -4,6 +4,7 @@ import { TopNav } from '@/components/Navigation/TopNav'
 import { THEME_STORAGE_FULL_KEY } from '@/lib/storageKeys'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
+import '@excalidraw/excalidraw/index.css'
 import './globals.css'
 
 export const metadata: Metadata = {

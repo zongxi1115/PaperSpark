@@ -1,3 +1,21 @@
+# [1.3.0](https://github.com/zongxi1115/PaperSpark/compare/v1.2.0...v1.3.0) (2026-05-05)
+
+
+### Bug Fixes
+
+* 数据备份行为异常 ([3cebb1f](https://github.com/zongxi1115/PaperSpark/commit/3cebb1f64b8c8022aa9268e0199f05535295a4cd))
+* 桌面启动器配置未同步到主界面 ([3beb1d0](https://github.com/zongxi1115/PaperSpark/commit/3beb1d0dc00016ad71ee4af514a438df12f1cfa5))
+* 译文latex未渲染 ([8048002](https://github.com/zongxi1115/PaperSpark/commit/80480024bff127c2aefeb2f4522ca0750a7baabe))
+* 阅读器出现的公式表格渲染错位问题 ([c1fd006](https://github.com/zongxi1115/PaperSpark/commit/c1fd006f7c628667125cb622523551ffbf7fa9ec))
+
+
+### Features
+
+* 优化引用查看体验,html预览支持高亮选择等 ([164d8d9](https://github.com/zongxi1115/PaperSpark/commit/164d8d925f42157c9243041b5a386e67afd585ba))
+* 对绘图提供完整的excalidraw支持 ([dc5b737](https://github.com/zongxi1115/PaperSpark/commit/dc5b737eae9ff53d1e972ade96d7074ae54dc40d))
+* 工具栏支持翻译,词典,解释;优化html预览论文展示结构 ([844d1fc](https://github.com/zongxi1115/PaperSpark/commit/844d1fcfe9fa1f8e2cd4388c40aa7c1ad41a96f1))
+* 支持管理清理缓存 ([d6f0a02](https://github.com/zongxi1115/PaperSpark/commit/d6f0a0268a055c589dfd8701f9fc98425bce8bc4))
+
 # [1.2.0](https://github.com/zongxi1115/PaperSpark/compare/v1.1.2...v1.2.0) (2026-05-02)
 
 

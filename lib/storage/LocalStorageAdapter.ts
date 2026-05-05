@@ -4,13 +4,14 @@
  */
 
 import type { EventfulStorageProvider, StorageEventListener } from './StorageProvider'
+import { STORAGE_PREFIX } from '../storageKeys'
 
 export class LocalStorageAdapter implements EventfulStorageProvider {
   private prefix: string
   private listeners: Set<StorageEventListener> = new Set()
   private boundStorageHandler: ((event: StorageEvent) => void) | null = null
 
-  constructor(prefix: string = 'paper_reader_') {
+  constructor(prefix: string = STORAGE_PREFIX) {
     this.prefix = prefix
     this.setupStorageListener()
   }

@@ -14,9 +14,10 @@ export { defaultStorageConfig } from './StorageProvider'
 
 // 导出适配器
 export { LocalStorageAdapter } from './LocalStorageAdapter'
+export { IndexedDBStorageAdapter } from './IndexedDBStorageAdapter'
 
 // 导出工厂
-export { StorageFactory, getStorage, createPrefixedStorage } from './StorageFactory'
+export { StorageFactory, getStorage, createPrefixedStorage, initializeStorage } from './StorageFactory'
 
 // 导出工具函数
 export {

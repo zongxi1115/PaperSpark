@@ -98,7 +98,7 @@ export async function autoGraphBuild(
 
     const analysis: AutoGraphAnalysis = analysisResult.analysis
 
-    // 2. 在前端本地增量融合到已有图谱（localStorage）
+    // 2. 在前端本地工作区存储中增量融合到已有图谱
     const buildResult = buildKnowledgeGraphFromAnalysis({
       knowledgeItemId: knowledgeItem.id,
       title: knowledgeItem.title,

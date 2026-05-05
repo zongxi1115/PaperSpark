@@ -30,6 +30,7 @@ import { ADVANCED_PARSE_PROVIDERS } from '@/lib/documentParseProviders'
 import { EDITOR_THEMES, injectGoogleFont } from '@/lib/editorThemes'
 import { Icon } from '@iconify/react'
 import { useThemeContext } from '@/components/Providers'
+import { CacheManagementCard } from '@/components/Settings/CacheManagementCard'
 import { WorkspaceSnapshotCard } from '@/components/Settings/WorkspaceSnapshotCard'
 import type { ThemeMode } from '@/lib/theme'
 
@@ -1483,6 +1484,8 @@ export function SettingsForm() {
             </p>
           </CardBody>
         </Card>
+
+        <CacheManagementCard />
 
         <WorkspaceSnapshotCard />
 

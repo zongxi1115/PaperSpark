@@ -4,6 +4,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@heroui/react'
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { TextBlock, PDFAnnotation, HIGHLIGHT_COLORS, HighlightColor, GuideFocusTarget } from '@/lib/types'
 import { saveAnnotation, updateAnnotation } from '@/lib/pdfCache'
+import { getSettings, getSelectedSmallModel } from '@/lib/storage'
+import { Icon } from '@iconify/react'
 import SelectionToolbar from './SelectionToolbar'
 
 // PDF.js 类型定义
@@ -231,7 +233,7 @@ function buildTranslationLayout(
   const paddingX = isHeading ? (compactBlock ? 8 : 10) : (compactBlock ? 5 : 8)
   const paddingY = isHeading ? (compactBlock ? 4 : 6) : (compactBlock ? 2.5 : 5)
   const contentWidth = Math.max(24, width - paddingX * 2)
-  const fontFamily = block.style.fontFamily || 'serif'
+  const fontFamily = '"Times New Roman", SimSun, serif'
   const translatedText = block.translated || ''
   const preferredFontSize = Math.max(
     isHeading ? 11 : 8,
@@ -377,6 +379,15 @@ function PDFPage({
   } | null>(null)
   const freeNoteDismissRef = useRef(false)
 
+  // 快捷操作（词典/翻译/解释）
+  const [quickAction, setQuickAction] = useState<{
+    type: 'dictionary' | 'translate' | 'explain'
+    text: string
+    result: string
+    loading: boolean
+    anchor: { x: number; y: number; width: number; height: number } | null
+  } | null>(null)
+
   const pageBlocks = useMemo(
     () => blocks?.filter(block => block.pageNum === page.pageNumber) || [],
     [blocks, page.pageNumber]
@@ -497,6 +508,76 @@ function PDFPage({
     window.getSelection()?.removeAllRanges?.()
     resetTextSelectionState()
   }, [onAskSelection, page.pageNumber, resetTextSelectionState, selection])
+
+  const SYSTEM_PROMPTS: Record<string, string> = {
+    dictionary: '你是一个学术词典助手。请给出以下词汇或短语的释义，包括：中文释义、词性、学术语境中的含义。用中文回答，简洁明了。',
+    translate: '你是一个专业学术翻译助手。请将以下文本翻译为自然、准确的中文。只输出译文，不要解释。保留公式和专有名词。绝对不要输出英文原文。',
+    explain: '你是一个学术文献解读助手。请用通俗易懂的中文解释以下文本的含义，帮助读者理解其学术含义。解释要简洁明了。',
+  }
+
+  const handleQuickAction = useCallback(async (type: 'dictionary' | 'translate' | 'explain') => {
+    if (!selection?.text?.trim()) return
+
+    const anchor = selection.rects[0]
+    setQuickAction({ type, text: selection.text, result: '', loading: true, anchor })
+    window.getSelection()?.removeAllRanges?.()
+    resetTextSelectionState()
+
+    const settings = getSettings()
+    const modelConfig = getSelectedSmallModel(settings)
+    if (!modelConfig?.apiKey || !modelConfig?.modelName) {
+      setQuickAction(prev => prev ? { ...prev, loading: false, result: '请先在设置中配置小参数模型的 API Key' } : null)
+      return
+    }
+
+    try {
+      const response = await fetch('/api/ai/assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          messages: [{ role: 'user', content: selection.text.trim() }],
+          modelConfig,
+          systemPrompt: SYSTEM_PROMPTS[type],
+        }),
+      })
+
+      if (!response.ok) {
+        setQuickAction(prev => prev ? { ...prev, loading: false, result: '请求失败' } : null)
+        return
+      }
+
+      const reader = response.body?.getReader()
+      const decoder = new TextDecoder()
+      let fullContent = ''
+      let buffer = ''
+
+      if (reader) {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+
+          const lines = buffer.split('\n')
+          buffer = lines.pop() || ''
+
+          for (const line of lines) {
+            if (!line.trim()) continue
+            try {
+              const parsed = JSON.parse(line)
+              if (parsed.type === 'text-delta') {
+                fullContent += parsed.delta
+                setQuickAction(prev => prev ? { ...prev, result: fullContent } : null)
+              }
+            } catch { /* ignore parse errors */ }
+          }
+        }
+      }
+
+      setQuickAction(prev => prev ? { ...prev, loading: false, result: fullContent || '无结果' } : null)
+    } catch {
+      setQuickAction(prev => prev ? { ...prev, loading: false, result: '请求出错' } : null)
+    }
+  }, [selection, resetTextSelectionState])
 
   // 获取设备像素比
   const pixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1
@@ -1038,6 +1119,62 @@ function PDFPage({
             </PopoverContent>
           </Popover>
         )}
+
+        {/* 快捷操作结果弹窗 */}
+        {quickAction && quickAction.anchor && (
+          <Popover
+            isOpen
+            placement="top"
+            showArrow
+            offset={12}
+            onOpenChange={open => {
+              if (!open) setQuickAction(null)
+            }}
+          >
+            <PopoverTrigger>
+              <button
+                type="button"
+                aria-label="quick-action-anchor"
+                className="absolute opacity-0 pointer-events-none"
+                style={{
+                  left: quickAction.anchor.x * scale,
+                  top: quickAction.anchor.y * scale,
+                  width: Math.max(quickAction.anchor.width * scale, 1),
+                  height: Math.max(quickAction.anchor.height * scale, 1),
+                }}
+              />
+            </PopoverTrigger>
+            <PopoverContent className="max-w-80 bg-[#161a23] border border-[#2b3242] px-3 py-2">
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[10px] font-medium text-gray-400">
+                    {quickAction.type === 'dictionary' ? '词典' : quickAction.type === 'translate' ? '翻译' : '解释'}
+                  </span>
+                  <button
+                    type="button"
+                    className="text-gray-500 hover:text-gray-300 transition-colors"
+                    onClick={() => setQuickAction(null)}
+                  >
+                    <Icon icon="mdi:close" className="text-xs" />
+                  </button>
+                </div>
+                <p className="text-[11px] text-gray-500 line-clamp-2">
+                  {quickAction.text.slice(0, 80)}{quickAction.text.length > 80 ? '…' : ''}
+                </p>
+                {quickAction.loading ? (
+                  <div className="flex items-center gap-2 py-1">
+                    <Icon icon="mdi:loading" className="text-sm text-blue-400 animate-spin" />
+                    <span className="text-xs text-gray-400">处理中…</span>
+                  </div>
+                ) : (
+                  <p className="text-xs leading-relaxed text-gray-200 whitespace-pre-wrap" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
+                    {quickAction.result}
+                  </p>
+                )}
+              </div>
+            </PopoverContent>
+          </Popover>
+        )}
       </div>
 
       {/* 选中文本 toolbar（高亮 / 笔记 / 问 AI） */}
@@ -1052,9 +1189,9 @@ function PDFPage({
           onHighlight={handleAddHighlight}
           onToggleNote={() => setNoteMenuOpen(v => !v)}
           onAskAI={handleAskSelection}
-          onDictionary={() => {}}
-          onTranslate={() => {}}
-          onExplain={() => {}}
+          onDictionary={() => handleQuickAction('dictionary')}
+          onTranslate={() => handleQuickAction('translate')}
+          onExplain={() => handleQuickAction('explain')}
           onNoteTextChange={setNoteText}
           onNoteColorChange={setNoteSelectedColor}
           onNoteCancel={() => { setNoteMenuOpen(false); setNoteText('') }}
@@ -1077,6 +1214,7 @@ function PDFPage({
               width: layout.width,
               height: layout.height,
               fontSize: `${layout.fontSize}px`,
+              fontFamily: '"Times New Roman", SimSun, serif',
               color: '#1a1a1a',
               backgroundColor: pageMode === 'translated' ? 'rgba(255, 255, 255, 0.95)' : 'rgba(255, 255, 255, 0.92)',
               padding: `${layout.paddingY}px ${layout.paddingX}px`,

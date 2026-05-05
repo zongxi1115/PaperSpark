@@ -237,6 +237,134 @@ export async function getCacheStats(): Promise<{
   }
 }
 
+export type CacheCategoryId =
+  | 'files'
+  | 'documents'
+  | 'translations'
+  | 'annotations'
+  | 'guides'
+  | 'vectors'
+
+export interface CacheCategoryStat {
+  id: CacheCategoryId
+  label: string
+  description: string
+  count: number
+  size: number
+  color: string
+}
+
+function estimateJsonSize(value: unknown): number {
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).length
+  } catch {
+    return 0
+  }
+}
+
+export async function getCacheCategoryStats(): Promise<{
+  totalSize: number
+  totalCount: number
+  categories: CacheCategoryStat[]
+}> {
+  const [files, documents, pages, translations, annotations, guides, vectors] = await Promise.all([
+    db.files.toArray(),
+    db.documents.toArray(),
+    db.pages.toArray(),
+    db.translations.toArray(),
+    db.annotations.toArray(),
+    db.guides.toArray(),
+    db.vectors.toArray(),
+  ])
+
+  const categories: CacheCategoryStat[] = [
+    {
+      id: 'files',
+      label: 'PDF 原文件',
+      description: '缓存的原始 PDF Blob 文件。',
+      count: files.length,
+      size: files.reduce((sum, item) => sum + item.size, 0),
+      color: '#3b82f6',
+    },
+    {
+      id: 'documents',
+      label: '结构解析',
+      description: '文档结构、分页块、提取文本等解析结果。',
+      count: documents.length + pages.length,
+      size: estimateJsonSize(documents) + estimateJsonSize(pages),
+      color: '#14b8a6',
+    },
+    {
+      id: 'translations',
+      label: '翻译缓存',
+      description: '段落翻译与对照阅读结果。',
+      count: translations.length,
+      size: estimateJsonSize(translations),
+      color: '#f59e0b',
+    },
+    {
+      id: 'annotations',
+      label: '阅读批注',
+      description: '高亮、评论和阅读标注。',
+      count: annotations.length,
+      size: estimateJsonSize(annotations),
+      color: '#ef4444',
+    },
+    {
+      id: 'guides',
+      label: 'AI 导读',
+      description: '论文导读、结构总结和关键点缓存。',
+      count: guides.length,
+      size: estimateJsonSize(guides),
+      color: '#8b5cf6',
+    },
+    {
+      id: 'vectors',
+      label: 'RAG 向量',
+      description: '检索索引向量与块级语义数据。',
+      count: vectors.length,
+      size: estimateJsonSize(vectors),
+      color: '#ec4899',
+    },
+  ]
+
+  return {
+    totalSize: categories.reduce((sum, category) => sum + category.size, 0),
+    totalCount: categories.reduce((sum, category) => sum + category.count, 0),
+    categories,
+  }
+}
+
+export async function clearCacheCategory(categoryId: CacheCategoryId): Promise<void> {
+  switch (categoryId) {
+    case 'files':
+      await db.files.clear()
+      break
+    case 'documents':
+      await db.transaction('rw', [db.documents, db.pages], async () => {
+        await db.documents.clear()
+        await db.pages.clear()
+      })
+      break
+    case 'translations':
+      await db.translations.clear()
+      break
+    case 'annotations':
+      await db.annotations.clear()
+      break
+    case 'guides':
+      await db.guides.clear()
+      break
+    case 'vectors':
+      await db.vectors.clear()
+      break
+    default:
+      return
+  }
+
+  notifyWorkspaceCacheChanged()
+}
+
 // ============ 批注操作 ============
 
 /**

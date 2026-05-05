@@ -1,3 +1,5 @@
+import { STORAGE_PREFIX } from '../storageKeys'
+
 /**
  * 存储提供者抽象接口
  * 定义了存储层的基本操作，支持不同的存储后端实现
@@ -130,8 +132,8 @@ export interface StorageConfig {
  * 默认存储配置
  */
 export const defaultStorageConfig: StorageConfig = {
-  type: 'localStorage',
-  prefix: 'paper_reader_',
+  type: 'indexedDB',
+  prefix: STORAGE_PREFIX,
   enableCompression: false,
   enableEncryption: false,
 }

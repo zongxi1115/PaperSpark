@@ -22,10 +22,12 @@ type BridgeStatus = Awaited<ReturnType<typeof getWorkspaceBridgeStatus>>
 export function WorkspaceSnapshotCard() {
   const [exporting, setExporting] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   const [status, setStatus] = useState<BridgeStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
 
   const refreshStatus = async (showErrorToast = false) => {
+    setRefreshing(true)
     try {
       const nextStatus = await getWorkspaceBridgeStatus()
       setStatus(nextStatus)
@@ -38,16 +40,13 @@ export function WorkspaceSnapshotCard() {
         })
       }
     } finally {
+      setRefreshing(false)
       setStatusLoading(false)
     }
   }
 
   useEffect(() => {
     void refreshStatus()
-    const intervalId = window.setInterval(() => {
-      void refreshStatus()
-    }, 15000)
-    return () => window.clearInterval(intervalId)
   }, [])
 
   const handleExport = async () => {
@@ -198,6 +197,15 @@ export function WorkspaceSnapshotCard() {
         </div>
 
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <Button
+            variant="flat"
+            color="default"
+            onPress={() => void refreshStatus(true)}
+            isLoading={refreshing}
+            startContent={!refreshing ? <Icon icon="solar:refresh-linear" width={16} /> : undefined}
+          >
+            刷新状态
+          </Button>
           <Button
             color="secondary"
             variant="flat"

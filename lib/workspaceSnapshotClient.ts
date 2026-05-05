@@ -3,6 +3,7 @@
 import { db } from './pdfCache'
 import { getKnowledgeGraph } from './knowledgeGraph'
 import { getStoredFile } from './localFiles'
+import { getStoredTheme } from './theme'
 import {
   getAllVersions,
   getAssistantNotes,
@@ -17,7 +18,6 @@ import {
   getZoteroConfig,
   getAgents,
 } from './storage'
-import { getString } from './storage/StorageUtils'
 import type { GuideCache, PDFAnnotation, PDFDocumentCache, PDFPageCache, TranslationCache } from './types'
 import {
   buildKnowledgeOverviewText,
@@ -138,7 +138,7 @@ export async function buildWorkspaceSnapshot(): Promise<WorkspaceSnapshot> {
   const data = {
     settings: sanitizeSettings(getSettings()),
     zotero: sanitizeZoteroConfig(getZoteroConfig()),
-    theme: getString('theme', 'system'),
+    theme: getStoredTheme(),
     lastDocId: getLastDocId(),
     documents: documentSnapshots,
     documentVersions: versionSnapshots,

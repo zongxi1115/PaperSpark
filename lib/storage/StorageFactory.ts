@@ -6,6 +6,8 @@
 import type { StorageProvider, EventfulStorageProvider, StorageConfig } from './StorageProvider'
 import { defaultStorageConfig } from './StorageProvider'
 import { LocalStorageAdapter } from './LocalStorageAdapter'
+import { IndexedDBStorageAdapter } from './IndexedDBStorageAdapter'
+import { STORAGE_PREFIX } from '../storageKeys'
 
 /**
  * 内存存储适配器（用于测试或 SSR 环境）
@@ -110,11 +112,14 @@ export class StorageFactory {
    * 创建存储提供者
    */
   createProvider(config: StorageConfig = defaultStorageConfig): StorageProvider {
-    const { type, prefix = 'paper_reader_', provider } = config
+    const { type, prefix = STORAGE_PREFIX, provider } = config
 
     switch (type) {
       case 'localStorage':
         return new LocalStorageAdapter(prefix)
+
+      case 'indexedDB':
+        return new IndexedDBStorageAdapter(prefix)
 
       case 'memory':
         return new MemoryStorageAdapter()
@@ -128,10 +133,6 @@ export class StorageFactory {
       case 'sessionStorage':
         // TODO: 实现 sessionStorage 适配器
         throw new Error('SessionStorage adapter not implemented yet')
-
-      case 'indexedDB':
-        // TODO: 实现 IndexedDB 适配器
-        throw new Error('IndexedDB adapter not implemented yet')
 
       default:
         throw new Error(`Unknown storage type: ${type}`)
@@ -204,5 +205,12 @@ export function getStorage(): StorageProvider {
  * 创建带前缀的存储提供者（便捷函数）
  */
 export function createPrefixedStorage(prefix: string): StorageProvider {
-  return StorageFactory.getInstance().getProvider(prefix, { type: 'localStorage', prefix })
+  return StorageFactory.getInstance().getProvider(prefix, { type: 'indexedDB', prefix })
+}
+
+export async function initializeStorage(): Promise<void> {
+  const provider = getStorage() as StorageProvider & { ready?: () => Promise<void> }
+  if (typeof provider.ready === 'function') {
+    await provider.ready()
+  }
 }

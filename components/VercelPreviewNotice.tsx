@@ -2,8 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Button, Modal, ModalBody, ModalContent, ModalFooter, ModalHeader } from '@heroui/react'
-
-const PREVIEW_NOTICE_ACK_DATE_KEY = 'paper_reader_vercel_preview_notice_ack_date'
+import { PREVIEW_NOTICE_ACK_DATE_FULL_KEY } from '@/lib/storageKeys'
 
 function getTodayDateKey(): string {
   const now = new Date()
@@ -16,14 +15,14 @@ function getTodayDateKey(): string {
 function shouldShowTodayNotice(): boolean {
   if (typeof window === 'undefined') return false
 
-  const ackDate = window.localStorage.getItem(PREVIEW_NOTICE_ACK_DATE_KEY)
+  const ackDate = window.localStorage.getItem(PREVIEW_NOTICE_ACK_DATE_FULL_KEY)
   return ackDate !== getTodayDateKey()
 }
 
 function markTodayNoticeAcknowledged(): void {
   if (typeof window === 'undefined') return
 
-  window.localStorage.setItem(PREVIEW_NOTICE_ACK_DATE_KEY, getTodayDateKey())
+  window.localStorage.setItem(PREVIEW_NOTICE_ACK_DATE_FULL_KEY, getTodayDateKey())
 }
 
 function detectVercelEnvironment(): boolean {

@@ -30,6 +30,7 @@ import { ADVANCED_PARSE_PROVIDERS } from '@/lib/documentParseProviders'
 import { EDITOR_THEMES, injectGoogleFont } from '@/lib/editorThemes'
 import { Icon } from '@iconify/react'
 import { useThemeContext } from '@/components/Providers'
+import { CacheManagementCard } from '@/components/Settings/CacheManagementCard'
 import { WorkspaceSnapshotCard } from '@/components/Settings/WorkspaceSnapshotCard'
 import type { ThemeMode } from '@/lib/theme'
 
@@ -811,20 +812,101 @@ export function SettingsForm() {
     { label: '自动补全小片段', description: '输入时自动补全当前段落的小片段内容，提升输入效率', settingKey: 'autoComplete' },
   ]
 
+  const [activeSection, setActiveSection] = useState<string>('ai-providers')
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visibleEntries = entries.filter((entry) => entry.isIntersecting)
+        if (visibleEntries.length > 0) {
+          visibleEntries.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)
+          setActiveSection(visibleEntries[0].target.id)
+        }
+      },
+      { rootMargin: '-60px 0px -80% 0px' } // Adjust observer margin for better triggering
+    )
+
+    const sections = [
+      'ai-providers', 'default-models', 'appearance', 'features', 'editor-theme',
+      'heading-sizes', 'zotero', 'advanced-parse', 'rag-config', 'canvas-prompt',
+      'cache-manage', 'snapshot-manage'
+    ]
+
+    sections.forEach((id) => {
+      const el = document.getElementById(id)
+      if (el) observer.observe(el)
+    })
+
+    return () => observer.disconnect()
+  }, [settings.providers.length])
+
+  const handleNavClick = (e: React.MouseEvent<HTMLAnchorElement>, id: string) => {
+    e.preventDefault()
+    const el = document.getElementById(id)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      window.history.pushState(null, '', `#${id}`)
+      setActiveSection(id)
+    }
+  }
+
+  const NavItem = ({ id, label, tooltip }: { id: string, label: string, tooltip: string }) => {
+    const isActive = activeSection === id
+    return (
+      <Tooltip content={tooltip} placement="left" delay={300}>
+        <a
+          href={`#${id}`}
+          onClick={(e) => handleNavClick(e, id)}
+          style={{
+            padding: '8px 12px',
+            borderRadius: '0 8px 8px 0',
+            color: isActive ? 'var(--accent-color, #006fee)' : 'var(--text-primary)',
+            background: isActive ? 'color-mix(in srgb, var(--accent-color, #006fee) 10%, transparent)' : 'transparent',
+            textDecoration: 'none',
+            transition: 'all 0.2s',
+            fontSize: 14,
+            fontWeight: isActive ? 600 : 400,
+            borderLeft: isActive ? '3px solid var(--accent-color, #006fee)' : '3px solid transparent',
+          }}
+        >
+          {label}
+        </a>
+      </Tooltip>
+    )
+  }
+
   return (
-    <div style={{ padding: '32px', maxWidth: 720, margin: '0 auto' }}>
-      <div style={{ marginBottom: 24 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>设置</h1>
-        <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
-          配置 AI 模型与功能偏好，数据仅保存在本地
-        </p>
+    <div style={{ display: 'flex', alignItems: 'flex-start', padding: '32px', maxWidth: 1040, margin: '0 auto', gap: 40 }}>
+      {/* 左侧导航 */}
+      <div style={{ position: 'sticky', top: 32, width: 220, flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <h2 style={{ fontSize: 16, fontWeight: 600, marginBottom: 8, paddingLeft: 12 }}>设置目录</h2>
+        <NavItem id="ai-providers" label="AI 接口配置" tooltip="管理多个 AI 接口及模型配置" />
+        {settings.providers.length > 0 && <NavItem id="default-models" label="默认模型选择" tooltip="为各项任务选择默认的模型" />}
+        <NavItem id="appearance" label="外观设置" tooltip="切换应用主题及模式设置" />
+        <NavItem id="features" label="功能设置" tooltip="配置各项辅助功能与输入选项" />
+        <NavItem id="editor-theme" label="编辑器主题" tooltip="选择富文本编辑器的排版主题" />
+        <NavItem id="heading-sizes" label="标题字体大小" tooltip="自定义各级标题文字缩放比例" />
+        <NavItem id="zotero" label="Zotero 设置" tooltip="配置应用内文献引用的格式模板" />
+        <NavItem id="advanced-parse" label="高级解析" tooltip="设置云端或本地的精准 PDF 解析服务" />
+        <NavItem id="rag-config" label="RAG 模型配置" tooltip="用来检索阅读文献使用的向量及重排模型" />
+        <NavItem id="canvas-prompt" label="Canvas 提示词" tooltip="沉浸式阅读生成 Canvas 内容的默认提示词" />
+        <NavItem id="cache-manage" label="缓存管理" tooltip="释放本应用产生的文档快照与解析缓存" />
+        <NavItem id="snapshot-manage" label="工作区快照" tooltip="本地数据导出及工作区环境还原和备份" />
       </div>
 
-      <Divider style={{ marginBottom: 24 }} />
+      <div style={{ flex: 1, minWidth: 0, maxWidth: 720 }}>
+        <div style={{ marginBottom: 24 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0 }}>设置</h1>
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginTop: 4 }}>
+            配置 AI 模型与功能偏好，数据仅保存在本地
+          </p>
+        </div>
 
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-        {/* AI 接口管理 */}
-        <Card shadow="sm">
+        <Divider style={{ marginBottom: 24 }} />
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+          {/* AI 接口管理 */}
+          <Card id="ai-providers" shadow="sm" style={{ scrollMarginTop: 32 }}>
           <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
               <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>AI 接口配置</p>
@@ -857,7 +939,7 @@ export function SettingsForm() {
 
         {/* 默认模型选择 */}
         {settings.providers.length > 0 && (
-          <Card shadow="sm">
+          <Card id="default-models" shadow="sm" style={{ scrollMarginTop: 32 }}>
             <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
               <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>默认模型选择</p>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -893,7 +975,7 @@ export function SettingsForm() {
         )}
 
         {/* 外观设置 */}
-        <Card shadow="sm">
+        <Card id="appearance" shadow="sm" style={{ scrollMarginTop: 32 }}>
           <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
             <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>外观设置</p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -907,7 +989,7 @@ export function SettingsForm() {
         </Card>
 
         {/* Feature toggles */}
-        <Card shadow="sm">
+        <Card id="features" shadow="sm" style={{ scrollMarginTop: 32 }}>
           <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
             <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>功能设置</p>
           </CardHeader>
@@ -933,7 +1015,7 @@ export function SettingsForm() {
         </Card>
 
         {/* 编辑器主题 */}
-        <Card shadow="sm">
+        <Card id="editor-theme" shadow="sm" style={{ scrollMarginTop: 32 }}>
           <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
             <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>编辑器主题</p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -1006,7 +1088,7 @@ export function SettingsForm() {
         </Card>
 
         {/* 标题字体大小 */}
-        <Card shadow="sm">
+        <Card id="heading-sizes" shadow="sm" style={{ scrollMarginTop: 32 }}>
           <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
             <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>标题字体大小</p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -1103,7 +1185,7 @@ export function SettingsForm() {
         </Card>
 
         {/* Zotero 设置 */}
-        <Card shadow="sm">
+        <Card id="zotero" shadow="sm" style={{ scrollMarginTop: 32 }}>
           <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
             <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>Zotero 设置</p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -1129,7 +1211,7 @@ export function SettingsForm() {
           </CardBody>
         </Card>
 
-        <Card shadow="sm">
+        <Card id="advanced-parse" shadow="sm" style={{ scrollMarginTop: 32 }}>
           <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
             <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>高级解析</p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -1277,7 +1359,7 @@ export function SettingsForm() {
         </Card>
 
         {/* RAG 模型配置 */}
-        <Card shadow="sm">
+        <Card id="rag-config" shadow="sm" style={{ scrollMarginTop: 32 }}>
           <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
               <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>RAG 模型配置</p>
@@ -1451,7 +1533,7 @@ export function SettingsForm() {
           </CardBody>
         </Card>
 
-        <Card shadow="sm">
+        <Card id="canvas-prompt" shadow="sm" style={{ scrollMarginTop: 32 }}>
           <CardHeader style={{ padding: '14px 16px 8px', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
             <p style={{ fontWeight: 600, fontSize: 15, margin: 0 }}>沉浸式 Canvas 提示词</p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 0' }}>
@@ -1484,7 +1566,13 @@ export function SettingsForm() {
           </CardBody>
         </Card>
 
-        <WorkspaceSnapshotCard />
+        <div id="cache-manage" style={{ scrollMarginTop: 32 }}>
+          <CacheManagementCard />
+        </div>
+
+        <div id="snapshot-manage" style={{ scrollMarginTop: 32 }}>
+          <WorkspaceSnapshotCard />
+        </div>
 
         {/* Action buttons */}
         <div style={{ display: 'flex', gap: 12, paddingTop: 4 }}>
@@ -1492,6 +1580,7 @@ export function SettingsForm() {
             恢复默认设置
           </Button>
         </div>
+      </div>
       </div>
 
       <ProviderModal

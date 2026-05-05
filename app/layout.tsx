@@ -1,8 +1,10 @@
 import type { Metadata } from 'next'
 import { Providers } from '@/components/Providers'
 import { TopNav } from '@/components/Navigation/TopNav'
+import { THEME_STORAGE_FULL_KEY } from '@/lib/storageKeys'
 import '@blocknote/mantine/style.css'
 import '@blocknote/xl-ai/style.css'
+import '@excalidraw/excalidraw/index.css'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -14,7 +16,7 @@ export const metadata: Metadata = {
 const themeScript = `
   (function() {
     try {
-      var theme = localStorage.getItem('paper_reader_theme') || 'system';
+      var theme = localStorage.getItem('${THEME_STORAGE_FULL_KEY}') || 'system';
       var resolved = theme === 'system' 
         ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
         : theme;

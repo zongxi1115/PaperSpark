@@ -364,7 +364,7 @@ export default function ImmersiveReaderPage() {
       !missingPictureBlocks
     setSuryaReady(hasCompletedSuryaCache)
 
-    // 同步缓存状态到 localStorage（修复缓存标记与实际数据不一致的问题）
+    // 同步缓存状态到本地工作区存储（修复缓存标记与实际数据不一致的问题）
     if (item.hasImmersiveCache !== hasCompletedSuryaCache) {
       updateKnowledgeItem(knowledgeId, { hasImmersiveCache: hasCompletedSuryaCache })
     }
@@ -1593,7 +1593,10 @@ export default function ImmersiveReaderPage() {
                 blocks={blocksWithTranslation}
                 showTranslation={showTranslation}
                 translationDisplayMode={translationDisplayMode}
+                annotations={annotations}
                 onAnnotationAdd={handleAnnotationAdd}
+                onAnnotationDelete={handleAnnotationDelete}
+                onAnnotationUpdate={handleAnnotationUpdate}
                 onAskSelection={(selection) => {
                   setSelectionQuestionContext({
                     id: `${Date.now()}`,

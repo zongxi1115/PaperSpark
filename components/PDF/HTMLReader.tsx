@@ -809,7 +809,7 @@ function HTMLReaderBlock({
               ? renderTableBlock(rawOriginalText)
               : renderableType === 'reference'
                 ? renderReferenceBlock(rawOriginalText)
-                : originalText}
+                : renderTextWithCitations(originalText, refMap)}
           </div>
         </div>
         <div className="border-l border-[#f2b37a] pl-4 text-[#b45309]" style={{ fontFamily: '"Times New Roman", SimSun, serif' }}>
@@ -819,7 +819,7 @@ function HTMLReaderBlock({
               ? renderTableBlock(rawTranslatedText || translatedText)
               : renderableType === 'reference'
                 ? renderReferenceBlock(rawTranslatedText || translatedText)
-                : translatedText}
+                : renderTextWithCitations(translatedText, refMap)}
           </div>
         </div>
       </div>
@@ -831,7 +831,7 @@ function HTMLReaderBlock({
             ? renderTableBlock(rawTranslatedText || translatedText)
             : renderableType === 'reference'
               ? renderReferenceBlock(rawTranslatedText || translatedText)
-              : translatedText}
+              : renderTextWithCitations(translatedText, refMap)}
         </div>
       </div>
     )

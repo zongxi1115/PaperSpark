@@ -16,20 +16,33 @@ let mainWindow = null
 let nextServerProcess = null
 let suryaProcess = null
 let isCleaningUpChildren = false
+const CHILD_LOG_LIMIT = 80
 
 function log(scope, message) {
   console.log(`[${scope}] ${message}`)
 }
 
-function pipeProcessOutput(scope, child) {
+function pushLogLine(buffer, line) {
+  if (!buffer || !line) return
+  buffer.push(line)
+  if (buffer.length > CHILD_LOG_LIMIT) {
+    buffer.splice(0, buffer.length - CHILD_LOG_LIMIT)
+  }
+}
+
+function pipeProcessOutput(scope, child, logBuffer = null) {
   child.stdout?.on('data', (chunk) => {
     const text = chunk.toString('utf8').trim()
-    if (text) log(scope, text)
+    if (!text) return
+    pushLogLine(logBuffer, `[stdout] ${text}`)
+    log(scope, text)
   })
 
   child.stderr?.on('data', (chunk) => {
     const text = chunk.toString('utf8').trim()
-    if (text) log(scope, text)
+    if (!text) return
+    pushLogLine(logBuffer, `[stderr] ${text}`)
+    log(scope, text)
   })
 }
 
@@ -46,6 +59,13 @@ function resolveUnpackedAppRoot() {
     return resolveAppRoot()
   }
   return process.resourcesPath
+}
+
+function resolveAsarUnpackedAppRoot() {
+  if (!app.isPackaged || process.env.PAPERSPARK_ELECTRON_DEV === '1') {
+    return resolveAppRoot()
+  }
+  return path.join(process.resourcesPath, 'app.asar.unpacked')
 }
 
 function resolveRuntimeRoot() {
@@ -406,32 +426,129 @@ async function findAvailablePort(preferredPort) {
   }
 }
 
-async function waitForUrl(url, { timeoutMs = 45000, intervalMs = 500 } = {}) {
-  const startedAt = Date.now()
-
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const response = await fetch(url, {
-        method: 'GET',
-        cache: 'no-store',
-      })
-      if (response.ok || response.status < 500) {
-        return
-      }
-    } catch {
-      // noop
-    }
-
-    await new Promise(resolve => setTimeout(resolve, intervalMs))
+function summarizeBufferedLogs(logBuffer) {
+  if (!logBuffer?.length) {
+    return '最近没有捕获到额外日志输出。'
   }
 
-  throw new Error(`Timed out while waiting for ${url}`)
+  return `最近日志：\n${logBuffer.slice(-12).join('\n')}`
+}
+
+function buildStartupErrorMessage({
+  label,
+  url,
+  reason,
+  logBuffer,
+  extraDetails = [],
+}) {
+  return [
+    `${label}启动失败：${reason}`,
+    `目标地址: ${url}`,
+    ...extraDetails.filter(Boolean),
+    summarizeBufferedLogs(logBuffer),
+  ].join('\n')
+}
+
+function resolveStandaloneServerScript() {
+  const candidatePaths = [
+    path.join(resolveAsarUnpackedAppRoot(), 'standalone', 'server.js'),
+    path.join(resolveAsarUnpackedAppRoot(), '.next', 'standalone', 'server.js'),
+    path.join(resolveUnpackedAppRoot(), 'standalone', 'server.js'),
+    path.join(resolveUnpackedAppRoot(), '.next', 'standalone', 'server.js'),
+    path.join(resolveAppRoot(), 'standalone', 'server.js'),
+    path.join(resolveAppRoot(), '.next', 'standalone', 'server.js'),
+  ]
+
+  const resolved = candidatePaths.find(candidate => fs.existsSync(candidate))
+  if (resolved) {
+    return resolved
+  }
+
+  throw new Error([
+    '找不到 Next standalone 入口。',
+    ...candidatePaths.map(candidate => `- ${candidate}`),
+    '如果你在开发环境直接运行 Electron，请优先使用 `pnpm desktop:dev`；如果你在打包前本地验证，请先执行 `pnpm build` 和 `pnpm desktop:build`。',
+  ].join('\n'))
+}
+
+async function waitForUrl(url, {
+  timeoutMs = 45000,
+  intervalMs = 500,
+  child = null,
+  childLabel = '服务',
+  logBuffer = null,
+  extraDetails = [],
+} = {}) {
+  const startedAt = Date.now()
+  let childExit = null
+  let childError = null
+
+  const handleExit = (code, signal) => {
+    childExit = { code, signal }
+  }
+
+  const handleError = (error) => {
+    childError = error
+  }
+
+  child?.once('exit', handleExit)
+  child?.once('error', handleError)
+
+  try {
+    while (Date.now() - startedAt < timeoutMs) {
+      if (childError) {
+        throw new Error(buildStartupErrorMessage({
+          label: childLabel,
+          url,
+          reason: childError.message || '子进程启动异常',
+          logBuffer,
+          extraDetails,
+        }))
+      }
+
+      if (childExit) {
+        throw new Error(buildStartupErrorMessage({
+          label: childLabel,
+          url,
+          reason: `子进程已退出（code=${childExit.code ?? 'null'}${childExit.signal ? `, signal=${childExit.signal}` : ''}）`,
+          logBuffer,
+          extraDetails,
+        }))
+      }
+
+      try {
+        const response = await fetch(url, {
+          method: 'GET',
+          cache: 'no-store',
+        })
+        if (response.ok || response.status < 500) {
+          return
+        }
+      } catch {
+        // noop
+      }
+
+      await new Promise(resolve => setTimeout(resolve, intervalMs))
+    }
+  } finally {
+    child?.removeListener('exit', handleExit)
+    child?.removeListener('error', handleError)
+  }
+
+  throw new Error(buildStartupErrorMessage({
+    label: childLabel,
+    url,
+    reason: `等待超时（${timeoutMs}ms）`,
+    logBuffer,
+    extraDetails,
+  }))
 }
 
 async function startSuryaService(port, runtimeRoot, pythonPath) {
   const serviceDataRoot = path.join(runtimeRoot, 'surya-data')
   const appRoot = resolveUnpackedAppRoot()
   const scriptPath = path.join(appRoot, 'scripts', 'start_surya_service.py')
+  const suryaLogs = []
 
   fs.mkdirSync(serviceDataRoot, { recursive: true })
 
@@ -453,7 +570,7 @@ async function startSuryaService(port, runtimeRoot, pythonPath) {
     windowsHide: true,
   })
 
-  pipeProcessOutput('surya', suryaProcess)
+  pipeProcessOutput('surya', suryaProcess, suryaLogs)
 
   suryaProcess.once('exit', (code) => {
     log('surya', `exited with code ${code ?? 'null'}`)
@@ -461,7 +578,17 @@ async function startSuryaService(port, runtimeRoot, pythonPath) {
   })
 
   try {
-    await waitForUrl(`http://127.0.0.1:${port}/health`, { timeoutMs: 120000, intervalMs: 1000 })
+    await waitForUrl(`http://127.0.0.1:${port}/health`, {
+      timeoutMs: 120000,
+      intervalMs: 1000,
+      child: suryaProcess,
+      childLabel: 'Surya OCR 服务',
+      logBuffer: suryaLogs,
+      extraDetails: [
+        `Python 路径: ${pythonPath}`,
+        `启动脚本: ${scriptPath}`,
+      ],
+    })
     return {
       ok: true,
       serviceUrl: `http://127.0.0.1:${port}`,
@@ -482,10 +609,8 @@ async function startInternalNextServer(port, runtimeRoot, options = {}) {
   const mineruApiKey = options.mineruApiKey || ''
   const mineruModelVersion = options.mineruModelVersion || 'vlm'
   const defaultAdvancedProvider = options.defaultAdvancedProvider || ''
-  const serverScript = path.join(resolveUnpackedAppRoot(), 'standalone', 'server.js')
-  if (!fs.existsSync(serverScript)) {
-    throw new Error(`找不到 Next standalone 入口: ${serverScript}`)
-  }
+  const serverScript = resolveStandaloneServerScript()
+  const nextLogs = []
 
   nextServerProcess = spawn(process.execPath, [serverScript], {
     cwd: path.dirname(serverScript),
@@ -527,14 +652,25 @@ async function startInternalNextServer(port, runtimeRoot, options = {}) {
     windowsHide: true,
   })
 
-  pipeProcessOutput('next', nextServerProcess)
+  pipeProcessOutput('next', nextServerProcess, nextLogs)
 
   nextServerProcess.once('exit', (code) => {
     log('next', `exited with code ${code ?? 'null'}`)
     nextServerProcess = null
   })
 
-  await waitForUrl(`http://127.0.0.1:${port}`, { timeoutMs: 60000, intervalMs: 500 })
+  await waitForUrl(`http://127.0.0.1:${port}`, {
+    timeoutMs: 60000,
+    intervalMs: 500,
+    child: nextServerProcess,
+    childLabel: 'Next.js 桌面主界面服务',
+    logBuffer: nextLogs,
+    extraDetails: [
+      `server.js: ${serverScript}`,
+      `工作目录: ${path.dirname(serverScript)}`,
+      `端口: ${port}`,
+    ],
+  })
   return `http://127.0.0.1:${port}`
 }
 
@@ -801,7 +937,7 @@ async function createMainWindow({ pythonPath = null, enableLocalParser = false, 
   updateLoadingWindow('正在拉起前端项目...')
   const appUrl = rendererUrl
     || await startInternalNextServer(
-      isDev ? DEFAULT_RENDERER_PORT : await findAvailablePort(DEFAULT_RENDERER_PORT),
+      await findAvailablePort(DEFAULT_RENDERER_PORT),
       runtimeRoot,
       {
         suryaServiceUrl,
@@ -923,15 +1059,19 @@ async function cleanupChildProcesses() {
   if (isCleaningUpChildren) return
   isCleaningUpChildren = true
 
-  const nextChild = nextServerProcess
-  const suryaChild = suryaProcess
-  nextServerProcess = null
-  suryaProcess = null
+  try {
+    const nextChild = nextServerProcess
+    const suryaChild = suryaProcess
+    nextServerProcess = null
+    suryaProcess = null
 
-  await Promise.allSettled([
-    killChildProcessTree(nextChild, 'next'),
-    killChildProcessTree(suryaChild, 'surya'),
-  ])
+    await Promise.allSettled([
+      killChildProcessTree(nextChild, 'next'),
+      killChildProcessTree(suryaChild, 'surya'),
+    ])
+  } finally {
+    isCleaningUpChildren = false
+  }
 }
 
 ipcMain.handle('desktop:get-launcher-state', async () => {
@@ -1042,6 +1182,7 @@ ipcMain.handle('desktop:confirm-python-path', async (_event, payload) => {
     launcherWindow = null
   } catch (error) {
     closeLoadingWindow()
+    await cleanupChildProcesses()
     pendingLauncher?.show()
     throw error
   }

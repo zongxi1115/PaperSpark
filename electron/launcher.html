@@ -1297,6 +1297,17 @@
       }
     }
 
+    function getReadableErrorMessage(error, fallback = '操作失败。') {
+      const raw = typeof error === 'string'
+        ? error
+        : error?.message || fallback
+
+      return raw
+        .replace(/^Error invoking remote method '[^']+':\s*/i, '')
+        .replace(/^Error:\s*/i, '')
+        .trim() || fallback
+    }
+
     function renderEnvSelectOptions() {
       const options = []
       options.push({
@@ -1643,7 +1654,7 @@
         state.candidates = []
         renderEnvSelectOptions()
         setSelectedCandidate(null)
-        setStatus(error?.message || '扫描 Python 环境失败。', 'error')
+        setStatus(getReadableErrorMessage(error, '扫描 Python 环境失败。'), 'error')
       } finally {
         refreshButton.disabled = false
       }
@@ -1679,7 +1690,7 @@
         )
       } catch (error) {
         console.error(error)
-        setStatus(error?.message || '选择 Python 环境失败。', 'error')
+        setStatus(getReadableErrorMessage(error, '选择 Python 环境失败。'), 'error')
       }
     }
 
@@ -1767,7 +1778,7 @@
           console.error(error)
           state.launching = false
           syncLaunchButton()
-          setStatus(error?.message || '云部署连接失败，请检查服务地址。', 'error')
+          setStatus(getReadableErrorMessage(error, '云部署连接失败，请检查服务地址。'), 'error')
         }
         return
       }
@@ -1818,7 +1829,7 @@
         console.error(error)
         state.launching = false
         syncLaunchButton()
-        setStatus(error?.message || '启动失败，请更换一个 Python 环境。', 'error')
+        setStatus(getReadableErrorMessage(error, '启动失败，请更换一个 Python 环境。'), 'error')
       }
     }
 

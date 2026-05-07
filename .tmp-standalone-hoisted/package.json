@@ -80,20 +80,22 @@
     "appId": "com.paperspark.desktop",
     "productName": "PaperSpark",
     "asar": true,
-    "asarUnpack": [
-      "standalone/**/*"
-    ],
     "directories": {
-      "app": ".electron-build/app",
       "output": "release/electron",
       "buildResources": "desktop-resources"
     },
     "files": [
       "electron/**/*",
-      "standalone/**/*",
       "package.json"
     ],
     "extraResources": [
+      {
+        "from": ".electron-build/standalone",
+        "to": "standalone",
+        "filter": [
+          "**/*"
+        ]
+      },
       {
         "from": "scripts/start_surya_service.py",
         "to": "scripts/start_surya_service.py"

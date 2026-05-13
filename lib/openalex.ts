@@ -12,6 +12,8 @@ import type {
 const OPENALEX_BASE_URL = 'https://api.openalex.org'
 const OPENALEX_API_KEY = process.env.OPENALEX_API_KEY || '2opfreTTciNLpHWthEiV5R'
 const OPENALEX_EMAIL = process.env.OPENALEX_EMAIL
+const OPENALEX_MAX_RETRIES = 2
+const OPENALEX_RETRY_BASE_DELAY_MS = 700
 
 const WORK_SELECT_FIELDS = [
   'id',
@@ -145,6 +147,44 @@ function buildSnippet(text: string, limit: number = 220) {
   return `${text.slice(0, limit).trimEnd()}…`
 }
 
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+function shouldRetryOpenAlexError(error: unknown) {
+  if (isAbortError(error)) return false
+  if (!(error instanceof Error)) return false
+
+  const status = typeof (error as Error & { status?: unknown }).status === 'number'
+    ? Number((error as Error & { status?: unknown }).status)
+    : undefined
+
+  if (status === 408 || status === 425 || status === 429) return true
+  if (typeof status === 'number' && status >= 500) return true
+  return /fetch failed|network|timed out|timeout|socket/i.test(error.message)
+}
+
+async function waitForRetry(ms: number, signal?: AbortSignal) {
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(new DOMException('The operation was aborted.', 'AbortError'))
+    }
+
+    if (signal?.aborted) {
+      onAbort()
+      return
+    }
+
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
 function toConceptNode(node?: { id?: string; display_name?: string; level?: number; description?: string | null } | null): ConceptNode | undefined {
   if (!node?.id || !node.display_name) return undefined
   return {
@@ -223,20 +263,34 @@ async function openAlexFetch<T>(
     url.searchParams.set('mailto', OPENALEX_EMAIL)
   }
 
-  const response = await fetch(url.toString(), {
-    signal,
-    headers: {
-      'User-Agent': 'paper-reader/1.0',
-    },
-    next: { revalidate: 0 },
-  })
+  for (let attempt = 0; attempt <= OPENALEX_MAX_RETRIES; attempt += 1) {
+    try {
+      const response = await fetch(url.toString(), {
+        signal,
+        headers: {
+          'User-Agent': 'paper-reader/1.0',
+        },
+        next: { revalidate: 0 },
+      })
 
-  if (!response.ok) {
-    const message = await response.text()
-    throw new Error(`OpenAlex 请求失败：${response.status} ${message}`)
+      if (!response.ok) {
+        const message = await response.text()
+        const error = new Error(`OpenAlex 请求失败：${response.status} ${message}`) as Error & { status?: number }
+        error.status = response.status
+        throw error
+      }
+
+      return await response.json() as T
+    } catch (error) {
+      if (!shouldRetryOpenAlexError(error) || attempt === OPENALEX_MAX_RETRIES) {
+        throw error
+      }
+
+      await waitForRetry(OPENALEX_RETRY_BASE_DELAY_MS * (attempt + 1), signal)
+    }
   }
 
-  return await response.json() as T
+  throw new Error('OpenAlex 请求失败')
 }
 
 function buildWorkFilter(filters: SearchFilters = {}, query?: string) {
@@ -308,7 +362,7 @@ export async function fetchWorksByIds(ids: string[], signal?: AbortSignal) {
     batches.push(normalizedIds.slice(index, index + 20))
   }
 
-  const responses = await Promise.all(
+  const settled = await Promise.allSettled(
     batches.map(batch =>
       openAlexFetch<OpenAlexListResponse<OpenAlexWork>>('/works', {
         filter: `openalex_id:${batch.join('|')}`,
@@ -317,6 +371,26 @@ export async function fetchWorksByIds(ids: string[], signal?: AbortSignal) {
       }, signal),
     ),
   )
+
+  const responses: Array<OpenAlexListResponse<OpenAlexWork>> = []
+  let firstError: unknown
+
+  for (const item of settled) {
+    if (item.status === 'fulfilled') {
+      responses.push(item.value)
+      continue
+    }
+
+    if (isAbortError(item.reason)) {
+      throw item.reason
+    }
+
+    firstError ??= item.reason
+  }
+
+  if (responses.length === 0 && firstError) {
+    throw firstError
+  }
 
   return deduplicatePapers(
     responses.flatMap(response => (response.results || []).map(normalizeOpenAlexWork)),

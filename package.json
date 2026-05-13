@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "description": "PaperSpark desktop workspace for AI-assisted paper reading and academic writing.",
-  "author": "PaperSpark",
+  "author": "zongxi",
   "main": "electron/main.mjs",
   "version": "1.3.0",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 0.0.0.0",
     "dev:turbo": "next dev --turbo",
     "build": "next build",
     "start": "next start",
@@ -79,23 +79,23 @@
   "build": {
     "appId": "com.paperspark.desktop",
     "productName": "PaperSpark",
-    "asar": true,
+    "asar": false,
+    "asarUnpack": [
+      "s/**/*"
+    ],
+    "afterPack": "scripts/prune-electron-win-assets.mjs",
+    "npmRebuild": false,
     "directories": {
+      "app": ".electron-build/app",
       "output": "release/electron",
       "buildResources": "desktop-resources"
     },
     "files": [
       "electron/**/*",
+      "s/**/*",
       "package.json"
     ],
     "extraResources": [
-      {
-        "from": ".electron-build/standalone",
-        "to": "standalone",
-        "filter": [
-          "**/*"
-        ]
-      },
       {
         "from": "scripts/start_surya_service.py",
         "to": "scripts/start_surya_service.py"

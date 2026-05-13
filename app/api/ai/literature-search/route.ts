@@ -346,6 +346,52 @@ async function callTool<TResult>(
   ) as TResult
 }
 
+function isAbortError(error: unknown) {
+  return error instanceof Error && error.name === 'AbortError'
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+  return String(error)
+}
+
+async function collectParallelCalls<TResult>(
+  tasks: Array<() => Promise<TResult>>,
+  options: {
+    label: string
+    onPartialFailure?: (message: string) => void
+  },
+) {
+  if (tasks.length === 0) return []
+
+  const settled = await Promise.allSettled(tasks.map(task => task()))
+  const results: TResult[] = []
+  const failures: string[] = []
+
+  for (const item of settled) {
+    if (item.status === 'fulfilled') {
+      results.push(item.value)
+      continue
+    }
+
+    if (isAbortError(item.reason)) {
+      throw item.reason
+    }
+
+    failures.push(getErrorMessage(item.reason))
+  }
+
+  if (failures.length > 0) {
+    const sample = failures[0].trim()
+    const sampleText = sample ? ` 首个错误：${sample}` : ''
+    options.onPartialFailure?.(
+      `${options.label}有 ${failures.length}/${settled.length} 个并行请求失败，已跳过失败分支并继续汇总其余结果。${sampleText}`,
+    )
+  }
+
+  return results
+}
+
 async function runDiscoveryPass(
   tools: ReturnType<typeof createOpenAlexToolset>,
   intent: {
@@ -365,8 +411,8 @@ async function runDiscoveryPass(
   const searchQueries = uniqueStrings(queryGroups.map(group => group.query)).slice(0, 5)
 
   onThinking?.(`准备用 ${searchQueries.length} 组关键词并行检索 OpenAlex，涵盖核心概念及其同义表达。`)
-  const keywordSearchResults = await Promise.all(
-    searchQueries.map(query =>
+  const keywordSearchResults = await collectParallelCalls(
+    searchQueries.map(query => () =>
       callTool<SearchWorksOutput>(tools.searchWorks, {
         query,
         filters: {
@@ -375,25 +421,33 @@ async function runDiscoveryPass(
         },
       }, abortSignal),
     ),
+    {
+      label: '关键词检索',
+      onPartialFailure: onThinking,
+    },
   )
   onProgress?.(`关键词检索已返回 ${keywordSearchResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
 
   onThinking?.(`使用 ${intent.coreConcepts.slice(0, 2).join('、')} 查询概念树，用于扩展检索范围到相关领域。`)
-  const conceptTreeResults = await Promise.all(
-    intent.coreConcepts.slice(0, 2).map(conceptName =>
+  const conceptTreeResults = await collectParallelCalls(
+    intent.coreConcepts.slice(0, 2).map(conceptName => () =>
       callTool<ConceptTreeOutput>(tools.getConceptTree, { conceptName }, abortSignal),
     ),
+    {
+      label: '概念扩展',
+      onPartialFailure: onThinking,
+    },
   )
   onProgress?.(`概念扩展完成，命中 ${conceptTreeResults.filter(result => result.matched?.id).length} 个概念节点。`)
 
   if (conceptTreeResults.some(result => result.matched?.id)) {
     onThinking?.(`基于匹配的概念ID进行语义检索，补充关键词检索可能遗漏的相关文献。`)
   }
-  const conceptSearchResults = await Promise.all(
+  const conceptSearchResults = await collectParallelCalls(
     conceptTreeResults
       .filter(result => result.matched?.id)
       .slice(0, 2)
-      .map((result, index) =>
+      .map((result, index) => () =>
         callTool<SearchWorksOutput>(tools.searchWorks, {
           query: searchQueries[index] || result.matched!.displayName || intent.clarifiedQuery,
           filters: {
@@ -403,6 +457,10 @@ async function runDiscoveryPass(
           },
         }, abortSignal),
       ),
+    {
+      label: '概念语义检索',
+      onPartialFailure: onThinking,
+    },
   )
   onProgress?.(`概念检索补充 ${conceptSearchResults.reduce((sum, result) => sum + result.works.length, 0)} 篇候选。`)
 
@@ -661,8 +719,8 @@ export async function POST(req: NextRequest) {
           pushThinking('analysis', `使用Agent提取的 ${analysis.newQueries.length} 个新查询词进行补充检索。`)
         }
         const reSearchResults = analysis.newQueries.length > 0
-          ? await Promise.all(
-              analysis.newQueries.map(searchQuery =>
+          ? await collectParallelCalls(
+              analysis.newQueries.map(searchQuery => () =>
                 callTool<SearchWorksOutput>(tools.searchWorks, {
                   query: searchQuery,
                   filters: {
@@ -671,6 +729,10 @@ export async function POST(req: NextRequest) {
                   },
                 }, req.signal),
               ),
+              {
+                label: '补充关键词检索',
+                onPartialFailure: message => pushThinking('analysis', message),
+              },
             )
           : []
         if (reSearchResults.length > 0) {
@@ -681,13 +743,17 @@ export async function POST(req: NextRequest) {
           pushThinking('analysis', `对 ${analysis.corePaperIds.slice(0, 2).length} 篇核心论文做引用和被引双向扩展。`)
         }
         const relatedResults = analysis.corePaperIds.length > 0
-          ? await Promise.all(
+          ? await collectParallelCalls(
               analysis.corePaperIds
                 .slice(0, 2)
                 .flatMap(workId => ([
-                  callTool<RelatedWorksOutput>(tools.getRelatedWorks, { workId, direction: 'references', limit: 6 }, req.signal),
-                  callTool<RelatedWorksOutput>(tools.getRelatedWorks, { workId, direction: 'citations', limit: 6 }, req.signal),
+                  () => callTool<RelatedWorksOutput>(tools.getRelatedWorks, { workId, direction: 'references', limit: 6 }, req.signal),
+                  () => callTool<RelatedWorksOutput>(tools.getRelatedWorks, { workId, direction: 'citations', limit: 6 }, req.signal),
                 ])),
+              {
+                label: '关联文献扩展',
+                onPartialFailure: message => pushThinking('analysis', message),
+              },
             )
           : []
         if (relatedResults.length > 0) {
@@ -699,14 +765,18 @@ export async function POST(req: NextRequest) {
           pushThinking('analysis', `追踪 ${authorIds.length} 位高产作者的近期工作，补充相关文献。`)
         }
         const authorResults = authorIds.length > 0
-          ? await Promise.all(
-              authorIds.map(authorId =>
+          ? await collectParallelCalls(
+              authorIds.map(authorId => () =>
                 callTool<AuthorWorksOutput>(tools.getAuthorWorks, {
                   authorId,
                   fromYear: activeFilters.fromYear,
                   limit: 5,
                 }, req.signal),
               ),
+              {
+                label: '作者追踪',
+                onPartialFailure: message => pushThinking('analysis', message),
+              },
             )
           : []
         if (authorResults.length > 0) {

@@ -4,10 +4,6 @@ import path from 'node:path'
 const projectRoot = process.cwd()
 const prepackagedRoot = path.join(projectRoot, 'release', 'electron', 'win-unpacked')
 const appRoot = path.join(prepackagedRoot, 'resources', 'app')
-const targets = [
-  path.join(appRoot, 'node_modules', '@blocknote', 'xl-ai', 'src'),
-  path.join(appRoot, '.next', 'standalone', 'node_modules'),
-]
 
 async function removeIfExists(target) {
   try {
@@ -46,18 +42,26 @@ async function collectMaxPathLength(root) {
   return { maxLength, maxPath }
 }
 
-for (const target of targets) {
-  await removeIfExists(target)
-}
+export default async function afterPack() {
+  const targets = [
+    path.join(appRoot, 'node_modules'),
+    path.join(appRoot, 's', 'node_modules', '.pnpm'),
+    path.join(appRoot, 's', 'node_modules', '@blocknote', 'xl-ai', 'src'),
+  ]
 
-const { maxLength, maxPath } = await collectMaxPathLength(appRoot)
-console.log(`Longest remaining path: ${maxLength}`)
-if (maxPath) {
-  console.log(maxPath)
-}
+  for (const target of targets) {
+    await removeIfExists(target)
+  }
 
-if (maxLength > 260) {
-  throw new Error(
-    `Remaining Windows package path length is still ${maxLength}; electron-builder's 7za step is likely to fail.`,
-  )
+  const { maxLength, maxPath } = await collectMaxPathLength(appRoot)
+  console.log(`Longest remaining path: ${maxLength}`)
+  if (maxPath) {
+    console.log(maxPath)
+  }
+
+  if (maxLength > 260) {
+    throw new Error(
+      `Remaining Windows package path length is still ${maxLength}; electron-builder's 7za step is likely to fail.`,
+    )
+  }
 }

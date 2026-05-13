@@ -1,28 +1,47 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { spawn } from 'node:child_process'
 
 const projectRoot = process.cwd()
 const rootPackageJsonPath = path.join(projectRoot, 'package.json')
 const standaloneDir = path.join(projectRoot, '.next', 'standalone')
 const standaloneServer = path.join(standaloneDir, 'server.js')
+const standalonePnpmDir = path.join(standaloneDir, 'node_modules', '.pnpm')
 const electronBuildRoot = path.join(projectRoot, '.electron-build')
 const stagedAppDir = path.join(electronBuildRoot, 'app')
 const stagedElectronDir = path.join(stagedAppDir, 'electron')
-const stagedStandaloneDir = path.join(stagedAppDir, 'standalone')
+const stagedStandaloneDir = path.join(stagedAppDir, 's')
 const stagedPackageJsonPath = path.join(stagedAppDir, 'package.json')
 const staticSource = path.join(projectRoot, '.next', 'static')
 const staticTarget = path.join(stagedStandaloneDir, '.next', 'static')
 const publicSource = path.join(projectRoot, 'public')
 const publicTarget = path.join(stagedStandaloneDir, 'public')
 const electronSource = path.join(projectRoot, 'electron')
-const standaloneNodeModulesDir = path.join(stagedStandaloneDir, 'node_modules')
+const pnpmStoreDir = path.join(projectRoot, 'node_modules', '.pnpm')
+const stagedStandaloneNodeModulesDir = path.join(stagedStandaloneDir, 'node_modules')
+const requiredStandalonePackages = [
+  // Next resolves these through a runtime require hook, so output file tracing can miss them.
+  'styled-jsx',
+  'client-only',
+]
 
 async function ensureExists(target, label) {
   try {
     await fs.access(target)
   } catch {
     throw new Error(`缺少 ${label}: ${target}`)
+  }
+}
+
+async function ensureNextStandaloneBuildExists() {
+  try {
+    await fs.access(standaloneServer)
+  } catch {
+    throw new Error([
+      `缺少 Next standalone server.js: ${standaloneServer}`,
+      '',
+      '请先运行 `pnpm build` 生成 Next standalone 输出，然后再运行 `pnpm desktop:build`。',
+      '如果你要一次性打安装包，请直接运行 `pnpm desktop:dist`；如果只想生成目录包，请运行 `pnpm desktop:pack`。',
+    ].join('\n'))
   }
 }
 
@@ -53,83 +72,130 @@ async function createStagedElectronApp() {
   await fs.writeFile(stagedPackageJsonPath, `${JSON.stringify(stagedPackageJson, null, 2)}\n`, 'utf8')
 }
 
-async function buildStandaloneRuntimePackageJson() {
-  const packageJsonRaw = await fs.readFile(rootPackageJsonPath, 'utf8')
-  const packageJson = JSON.parse(packageJsonRaw)
-  const dependencyNames = Object.keys(packageJson.dependencies || {})
-  const runtimeDependencies = {}
-
-  for (const dependencyName of dependencyNames) {
-    const installedPackagePath = path.join(projectRoot, 'node_modules', ...dependencyName.split('/'), 'package.json')
-    const installedPackageRaw = await fs.readFile(installedPackagePath, 'utf8')
-    const installedPackage = JSON.parse(installedPackageRaw)
-    runtimeDependencies[dependencyName] = installedPackage.version
-  }
-
-  const runtimePackageJson = {
-    name: `${packageJson.name || 'paperspark'}-standalone-runtime`,
-    private: true,
-    type: packageJson.type || 'module',
-    dependencies: runtimeDependencies,
-  }
-
-  await fs.writeFile(
-    path.join(stagedStandaloneDir, 'package.json'),
-    `${JSON.stringify(runtimePackageJson, null, 2)}\n`,
-    'utf8',
-  )
+function getPackagePathParts(packageName) {
+  return packageName.split('/')
 }
 
-function getPnpmCommand() {
-  return process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+async function pathExists(target) {
+  try {
+    await fs.access(target)
+    return true
+  } catch {
+    return false
+  }
 }
 
-async function installStandaloneRuntimeDependencies() {
-  await fs.rm(standaloneNodeModulesDir, { recursive: true, force: true })
-  await buildStandaloneRuntimePackageJson()
+async function findInstalledPackageDir(packageName) {
+  const directPackageDir = path.join(projectRoot, 'node_modules', ...getPackagePathParts(packageName))
+  if (await pathExists(path.join(directPackageDir, 'package.json'))) {
+    return directPackageDir
+  }
 
-  await new Promise((resolve, reject) => {
-    const child = spawn(
-      getPnpmCommand(),
-      [
-        '--dir',
-        stagedStandaloneDir,
-        'install',
-        '--prod',
-        '--ignore-scripts',
-        '--ignore-workspace',
-        '--no-lockfile',
-        '--config.node-linker=hoisted',
-      ],
-      {
-        cwd: projectRoot,
-        stdio: 'inherit',
-        shell: process.platform === 'win32',
-      },
-    )
+  const entries = await fs.readdir(pnpmStoreDir, { withFileTypes: true })
+  const matches = []
 
-    child.once('error', reject)
-    child.once('exit', (code) => {
-      if (code === 0) {
-        resolve()
-        return
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const candidate = path.join(pnpmStoreDir, entry.name, 'node_modules', ...getPackagePathParts(packageName))
+    if (await pathExists(path.join(candidate, 'package.json'))) {
+      matches.push(candidate)
+    }
+  }
+
+  if (matches.length > 0) {
+    matches.sort((left, right) => left.localeCompare(right))
+    return matches[0]
+  }
+
+  throw new Error(`无法在 node_modules 中找到 standalone 运行时依赖: ${packageName}`)
+}
+
+async function copyStandaloneRuntimePackage(packageName) {
+  const source = await findInstalledPackageDir(packageName)
+  const target = path.join(stagedStandaloneNodeModulesDir, ...getPackagePathParts(packageName))
+  await copyDir(source, target)
+}
+
+async function collectStandaloneRuntimePackageNames() {
+  let entries = []
+  try {
+    entries = await fs.readdir(standalonePnpmDir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+
+  const packageNames = new Set()
+
+  for (const entry of entries) {
+    if (!entry.isDirectory() || entry.name === 'node_modules') continue
+    const nestedNodeModulesDir = path.join(standalonePnpmDir, entry.name, 'node_modules')
+
+    let nestedEntries = []
+    try {
+      nestedEntries = await fs.readdir(nestedNodeModulesDir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+
+    for (const nestedEntry of nestedEntries) {
+      if (!nestedEntry.isDirectory() || nestedEntry.name === '.bin') continue
+      if (nestedEntry.name.startsWith('@')) {
+        const scopeDir = path.join(nestedNodeModulesDir, nestedEntry.name)
+        let scopedEntries = []
+        try {
+          scopedEntries = await fs.readdir(scopeDir, { withFileTypes: true })
+        } catch {
+          continue
+        }
+
+        for (const scopedEntry of scopedEntries) {
+          if (!scopedEntry.isDirectory()) continue
+          packageNames.add(`${nestedEntry.name}/${scopedEntry.name}`)
+        }
+        continue
       }
 
-      reject(new Error(`安装 standalone 运行时依赖失败，退出码 ${code ?? 'null'}`))
-    })
-  })
+      packageNames.add(nestedEntry.name)
+    }
+  }
+
+  return [...packageNames].sort((left, right) => left.localeCompare(right))
 }
 
-await ensureExists(standaloneServer, 'Next standalone server.js')
-await ensureExists(staticSource, 'Next static 资源目录')
-await ensureExists(publicSource, 'public 目录')
-await ensureExists(rootPackageJsonPath, '根 package.json')
-await ensureExists(electronSource, 'Electron 主进程目录')
+async function ensureStandaloneRuntimePackages() {
+  const packageNames = await collectStandaloneRuntimePackageNames()
+  const allPackageNames = [...new Set([...packageNames, ...requiredStandalonePackages])]
 
-await copyDir(standaloneDir, stagedStandaloneDir)
-await copyDir(staticSource, staticTarget)
-await copyDir(publicSource, publicTarget)
-await createStagedElectronApp()
-await installStandaloneRuntimeDependencies()
+  for (const packageName of allPackageNames) {
+    const targetPackageJsonPath = path.join(stagedStandaloneNodeModulesDir, ...getPackagePathParts(packageName), 'package.json')
+    if (await pathExists(targetPackageJsonPath)) continue
+    await copyStandaloneRuntimePackage(packageName)
+  }
+}
 
-console.log('Electron bundle resources prepared.')
+async function ensureRequiredStandalonePackages() {
+  await fs.mkdir(stagedStandaloneNodeModulesDir, { recursive: true })
+  await ensureStandaloneRuntimePackages()
+}
+
+async function main() {
+  await ensureNextStandaloneBuildExists()
+  await ensureExists(staticSource, 'Next static 资源目录')
+  await ensureExists(publicSource, 'public 目录')
+  await ensureExists(rootPackageJsonPath, '根 package.json')
+  await ensureExists(electronSource, 'Electron 主进程目录')
+
+  await fs.rm(stagedAppDir, { recursive: true, force: true })
+  await copyDir(standaloneDir, stagedStandaloneDir)
+  await copyDir(staticSource, staticTarget)
+  await copyDir(publicSource, publicTarget)
+  await createStagedElectronApp()
+  await ensureRequiredStandalonePackages()
+
+  console.log('Electron bundle resources prepared.')
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : String(error))
+  process.exitCode = 1
+})

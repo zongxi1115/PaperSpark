@@ -451,10 +451,12 @@ function buildStartupErrorMessage({
 
 function resolveStandaloneServerScript() {
   const candidatePaths = [
+    path.join(resolveAsarUnpackedAppRoot(), 's', 'server.js'),
     path.join(resolveAsarUnpackedAppRoot(), 'standalone', 'server.js'),
+    path.join(resolveUnpackedAppRoot(), 's', 'server.js'),
     path.join(resolveAsarUnpackedAppRoot(), '.next', 'standalone', 'server.js'),
-    path.join(resolveUnpackedAppRoot(), 'standalone', 'server.js'),
     path.join(resolveUnpackedAppRoot(), '.next', 'standalone', 'server.js'),
+    path.join(resolveAppRoot(), 's', 'server.js'),
     path.join(resolveAppRoot(), 'standalone', 'server.js'),
     path.join(resolveAppRoot(), '.next', 'standalone', 'server.js'),
   ]

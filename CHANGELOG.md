@@ -1,3 +1,12 @@
+## [1.3.1](https://github.com/zongxi1115/PaperSpark/compare/v1.3.0...v1.3.1) (2026-05-13)
+
+
+### Bug Fixes
+
+* electron打包构建 ([4e92c07](https://github.com/zongxi1115/PaperSpark/commit/4e92c079f7ac9b44f9c5f94a46190d352de170b7))
+* 打包错误 ([edf38b9](https://github.com/zongxi1115/PaperSpark/commit/edf38b95725b52a30d28646fef76e484f7d04aa3))
+* 论文检索失败自动重试 ([bf39e04](https://github.com/zongxi1115/PaperSpark/commit/bf39e044a7b01f199d4286d90e9a9b04bd6d2391))
+
 # [1.3.0](https://github.com/zongxi1115/PaperSpark/compare/v1.2.0...v1.3.0) (2026-05-05)
 
 
